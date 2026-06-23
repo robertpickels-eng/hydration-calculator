@@ -10,6 +10,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Hydration & Osmolality Calculator</title>
 <style>
   :root{
@@ -356,19 +359,6 @@ function headWithAdd(label, onclick){
 /* ---------- TAB: CALCULATOR ---------- */
 function viewCalculator(){
   const sr = sweatRateLhr();
-  const c  = effComp();
-  const oz = S.bottleOz;
-  const carbG = (c.glucose+c.sucrose+c.malto+c.fructose) + extrasCarbG();
-  const kcal  = carbG*4;
-  const ml    = oz*ML_PER_OZ;
-  const carbPct = carbG/ml*100;
-  const mosm  = oz ? (osmolesOf(c, S.maltoDE) + extrasOsmoles()) * OZ_PER_L * 1000 / oz : 0;
-  const ton   = tonicity(mosm);
-  const naBottle = sodiumPerHour()/S.bottlesPerHour; // mg per bottle (drink Na model)
-  const naFromSalts = naFromSaltsMg(); // mg from base salts + extra electrolytes
-  const carbPerHr = carbG*S.bottlesPerHour;
-  const mk = Math.max(0,Math.min(100,(mosm/700)*100));
-
   return `<div class="grid cols2">
     <div>
       <div class="panel">
@@ -467,7 +457,18 @@ function viewCalculator(){
     </div>
   </div>
 
-  <div class="panel" style="margin-top:16px">
+  <div id="osmoPanel">${osmolalityPanel()}</div>
+  <div id="projPanel" style="margin-top:16px">${viewProjection()}</div>`;
+}
+// Full-width osmolality card — its own function so it can refresh live (without rebuilding inputs)
+function osmolalityPanel(){
+  const c=effComp(), oz=S.bottleOz;
+  const carbG=(c.glucose+c.sucrose+c.malto+c.fructose)+extrasCarbG();
+  const kcal=carbG*4, carbPct=carbG/(oz*ML_PER_OZ)*100;
+  const mosm=oz ? (osmolesOf(c,S.maltoDE)+extrasOsmoles())*OZ_PER_L*1000/oz : 0;
+  const ton=tonicity(mosm), naFromSalts=naFromSaltsMg(), carbPerHr=carbG*S.bottlesPerHour;
+  const mk=Math.max(0,Math.min(100,(mosm/700)*100));
+  return `<div class="panel" style="margin-top:16px">
     <h2>Bottle Osmolality</h2>
     <div class="grid cols2" style="align-items:center;gap:20px">
       <div>
@@ -487,8 +488,7 @@ function viewCalculator(){
         <div class="res"><span>Sodium from salts in bottle</span><span class="v">${fmt(naFromSalts,0)} mg</span></div>
       </div>
     </div>
-  </div>
-  <div style="margin-top:16px">${viewProjection()}</div>`;
+  </div>`;
 }
 
 /* ---------- TAB: PROJECTION (port of Bare-Minimum hours table) ---------- */
@@ -734,16 +734,25 @@ function render(){
     }
   }
 }
+// live-refresh ONLY the output panels (osmolality + projection) — leaves inputs untouched,
+// so the table updates as you type without dropping focus / transposing digits
+function refreshOutputs(){
+  if(active!=='calc') return;
+  const o=$('#osmoPanel'); if(o) o.innerHTML=osmolalityPanel();
+  const p=$('#projPanel'); if(p) p.innerHTML=viewProjection();
+}
 function bind(){
   document.querySelectorAll('[data-tab]').forEach(el=>el.onclick=()=>{active=el.dataset.tab;render();});
   // generic numeric/text inputs bound to S or SOLVE — commit on blur (onchange) so the
   // page doesn't re-render mid-keystroke (which would drop focus / transpose digits)
-  document.querySelectorAll('input[data-k]').forEach(el=>el.onchange=()=>{
+  document.querySelectorAll('input[data-k]').forEach(el=>{
     const obj = el.dataset.obj==='comp'?S.comp:S;
-    let v=el.value; obj[el.dataset.k] = (v===''?(el.dataset.k==='manualSweat'?null:''):+v);
-    if(el.dataset.k==='bottleOz'||el.dataset.k==='maltoDE') S.loadedProduct=null; // manual change → no longer the stock mix
-    // SOLVE inputs share data-k but target SOLVE via numField(obj)
-    render();
+    const commit=()=>{
+      let v=el.value; obj[el.dataset.k] = (v===''?(el.dataset.k==='manualSweat'?null:''):+v);
+      if(el.dataset.k==='bottleOz'||el.dataset.k==='maltoDE') S.loadedProduct=null; // manual change → no longer stock mix
+    };
+    el.onchange=()=>{ commit(); render(); };
+    if(active==='calc') el.oninput=()=>{ commit(); refreshOutputs(); }; // live table/osmolality (SOLVE handled below)
   });
   // SOLVE fields (numField passed SOLVE as obj but data-obj stayed 'S'); fix via explicit map
   document.querySelectorAll('#app input[data-k]').forEach(el=>{
@@ -751,17 +760,24 @@ function bind(){
       el.onchange=()=>{SOLVE[el.dataset.k]=el.value===''?'':+el.value;render();};
     }
   });
-  document.querySelectorAll('input[data-comp]').forEach(el=>el.onchange=()=>{S.comp[el.dataset.comp]=+el.value||0;S.loadedProduct=null;render();});
+  document.querySelectorAll('input[data-comp]').forEach(el=>{
+    const commit=()=>{ S.comp[el.dataset.comp]=+el.value||0; S.loadedProduct=null; };
+    el.onchange=()=>{ commit(); render(); };
+    el.oninput=()=>{ commit(); refreshOutputs(); };
+  });
   // Body Mass (kg) is the twin of Body weight (lbs) — editing it writes back to lbs
-  const bm=$('input[data-kgmass]'); if(bm) bm.onchange=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*2.2).toFixed(1); render(); };
+  const bm=$('input[data-kgmass]'); if(bm){ const commit=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*2.2).toFixed(1); };
+    bm.onchange=()=>{ commit(); render(); }; bm.oninput=()=>{ commit(); refreshOutputs(); }; }
   // Bottle size in liters is the twin of oz — editing it writes back to oz
-  const bv=$('input[data-lvol]'); if(bv) bv.onchange=()=>{ const v=+bv.value; if(v>0){ S.bottleOz=+(v*OZ_PER_L).toFixed(2); S.loadedProduct=null; } render(); };
+  const bv=$('input[data-lvol]'); if(bv){ const commit=()=>{ const v=+bv.value; if(v>0){ S.bottleOz=+(v*OZ_PER_L).toFixed(2); S.loadedProduct=null; } };
+    bv.onchange=()=>{ commit(); render(); }; bv.oninput=()=>{ commit(); refreshOutputs(); }; }
   // custom add-on ingredient edits (key dropdown + grams)
   document.querySelectorAll('[data-xc],[data-xl]').forEach(el=>{
     const arr=el.hasAttribute('data-xc')?S.extraCarbs:S.extraLytes;
     const id=el.dataset.xc||el.dataset.xl, f=el.dataset.xf;
-    const handler=()=>{ const x=arr.find(i=>i.id===id); if(!x) return; x[f]= f==='key'?el.value:(+el.value||0); render(); };
-    el.onchange=handler;
+    const commit=()=>{ const x=arr.find(i=>i.id===id); if(!x) return; x[f]= f==='key'?el.value:(+el.value||0); };
+    el.onchange=()=>{ commit(); render(); };
+    if(el.tagName!=='SELECT') el.oninput=()=>{ commit(); refreshOutputs(); };
   });
   // sweat-rate method + quick-estimate dropdowns
   const sm=$('#sweatMethod'); if(sm) sm.onchange=()=>{
