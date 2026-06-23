@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hydration & Osmolality Calculator</title>
+<style>
+  :root{
+    --bg:#0e1726; --panel:#16213a; --panel2:#1d2b4a; --line:#2a3a5e;
+    --txt:#e8eef7; --muted:#9bb0d0; --accent:#4ea1ff; --accent2:#33d6a6;
+    --warn:#ffb454; --bad:#ff6b6b; --good:#33d6a6;
+    --shadow:0 4px 18px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  h1{font-size:20px;margin:0}
+  h2{font-size:15px;margin:0 0 10px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
+  header{display:flex;align-items:center;gap:14px;padding:14px 20px;background:var(--panel);
+    border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+  header .sub{color:var(--muted);font-size:12px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--line);
+    position:sticky;top:53px;z-index:19}
+  .tab{padding:10px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;font-weight:600;font-size:13px}
+  .tab.active{color:var(--txt);border-bottom-color:var(--accent)}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  .grid{display:grid;gap:16px}
+  .cols2{grid-template-columns:1fr 1fr}
+  .cols3{grid-template-columns:repeat(3,1fr)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:var(--shadow)}
+  .field{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:7px 0}
+  .field label{color:var(--muted);font-size:13px;flex:1}
+  .field .u{color:var(--muted);font-size:11px;width:46px;text-align:left}
+  input[type=number],input[type=text],select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:7px;padding:7px 9px;width:92px;font-size:14px;text-align:right}
+  input[type=text],select{text-align:left;width:160px}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .res{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line)}
+  .res:last-child{border-bottom:none}
+  .res .v{font-weight:700;font-variant-numeric:tabular-nums}
+  .big{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700}
+  .muted{color:var(--muted)}
+  .note{font-size:12px;color:var(--muted);margin-top:8px}
+  table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+  th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+  tr:hover td{background:var(--panel2)}
+  .scroll{overflow:auto;max-height:560px;border-radius:10px}
+  button{background:var(--accent);color:#06121f;border:none;border-radius:7px;padding:7px 12px;font-weight:700;cursor:pointer;font-size:13px}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  button.sm{padding:3px 8px;font-size:11px}
+  .gauge{height:10px;border-radius:6px;background:linear-gradient(90deg,#2e6bd6 0%,#33d6a6 32%,#ffb454 55%,#ff6b6b 100%);position:relative;margin:8px 0 4px}
+  .gauge .mk{position:absolute;top:-4px;width:3px;height:18px;background:#fff;border-radius:2px;box-shadow:0 0 4px #000}
+  .hint{cursor:help;border-bottom:1px dotted var(--muted)}
+  .row-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .sub-h{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent2);margin:14px 0 4px}
+  .est{color:var(--warn);font-size:11px}
+  @media(max-width:880px){.cols2,.cols3{grid-template-columns:1fr}.tabs{top:51px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>💧 Hydration & Osmolality Calculator</h1>
+  <span class="sub">Full port of the sweat-rate / bottle-osmolality workbook · single-file app</span>
+</header>
+<div class="tabs" id="tabs"></div>
+<div class="wrap" id="app"></div>
+
+<script>
+/* ============================================================
+   CONSTANTS & CHEMISTRY
+   ============================================================ */
+const MW = { glucose:180.16, fructose:180.16, sucrose:342.30, nacl:58.44, citrate:294.10 }; // citrate = trisodium citrate DIHYDRATE
+const OZ_PER_L = 33.814;      // 1 L = 33.814 US fl oz
+const ML_PER_OZ = 29.5735;
+const NA_MW = 22.99;
+const PLASMA_OSM = 290;       // reference plasma osmolality, mOsm/L
+
+// maltodextrin: glucose polymer. number-average MW ≈ 18016 / DE (DE100 dextrose => 180)
+const maltoMW = de => 18016 / Math.max(1, de);
+
+// osmolarity of a composition (grams) in a bottle of `oz`, with maltodextrin DE `de` -> mOsm/L
+function osmolality(c, oz, de){
+  if(!oz) return 0;
+  const osmol =
+      (c.glucose||0)/MW.glucose
+    + (c.fructose||0)/MW.fructose
+    + (c.sucrose||0)/MW.sucrose
+    + (c.malto||0)/maltoMW(de)
+    + 2*(c.nacl||0)/MW.nacl          // NaCl -> Na+ + Cl-  (2 particles)
+    + 4*(c.citrate||0)/MW.citrate;   // Na3-citrate -> 3 Na+ + citrate3- (4 particles)
+  return osmol * OZ_PER_L * 1000 / oz; // mOsm/L
+}
+// osmolality contribution from a sodium amount treated as a simple monovalent salt (2 particles)
+function osmolFromSodium(mg){ return 2*(mg/NA_MW/1000); } // mol of particles
+
+function tonicity(mosm){
+  if(mosm < 280) return {label:'Hypotonic', cls:'good', desc:'faster gastric emptying / absorption'};
+  if(mosm <= 330) return {label:'Isotonic', cls:'good', desc:'matches plasma (~290)'};
+  if(mosm <= 500) return {label:'Mildly hypertonic', cls:'warn', desc:'slower emptying; can draw water into gut'};
+  return {label:'Hypertonic', cls:'bad', desc:'high; may slow absorption / cause GI distress'};
+}
+
+/* Conditional-format colors — copied from the workbook's rules */
+const CF = {
+  green:{bg:'#C6EFCE',fg:'#006100'},   // in range
+  amber:{bg:'#FFEB9C',fg:'#9C6500'},   // low
+  red:  {bg:'#FFC7CE',fg:'#9C0006'},   // high / out of band
+};
+const cfStyle = c => c ? `style="background:${c.bg};color:${c.fg};font-weight:700;border-radius:4px"` : '';
+// Body Na+ (mM): green 135–146, amber <135, red >146   (sheet column P)
+function naCF(mM){ return cfStyle(mM<135?CF.amber : mM>146?CF.red : CF.green); }
+// Body weight: green within [start*(1-loss%), start], red below floor   (sheet column K)
+function wtCF(wt){
+  const top=S.bodyLbs, floor=S.bodyLbs*(1-S.acceptLoss/100);
+  return cfStyle(wt<floor ? CF.red : (wt<=top ? CF.green : null));
+}
+
+/* ============================================================
+   STATE  (defaults mirror the workbook's "Bare Minimum" tab)
+   ============================================================ */
+const S = {
+  // athlete / session
+  bodyLbs:145, pre:145, post:142, time:1.2,    // -> sweat rate
+  manualSweat:null,                            // L/hr override (null = computed)
+  bottleOz:33.8, bottlesPerHour:1,
+  acceptLoss:2,                                // % acceptable weight loss
+  sweatNa:1380,                                // mg/L
+  drinkNaPerOz:37,                             // mg/oz  (used by projection)
+  bodyNaConc:140,                              // mmol/L
+  maltoDE:18,
+  // bottle composition (grams per bottle)
+  comp:{ glucose:0, sucrose:130, malto:0, fructose:0, nacl:0, citrate:0 },
+  autoCitrate:true   // derive citrate grams from drink sodium target (like J3)
+};
+
+/* derived athlete numbers */
+function sweatRateLhr(){
+  if(S.manualSweat!=null && S.manualSweat!=='') return +S.manualSweat;
+  // ((pre-post)/time)/2.2 *0.95  (lbs->kg, *0.95 CHO-burn correction)  -> L/hr
+  return ((S.pre - S.post)/S.time)/2.2*0.95;
+}
+function bodyKg(){ return S.bodyLbs/2.2; }
+function totalECF(){ return bodyKg()*0.25; }            // L
+function bodyNaContentG(){ return (bodyNaContentMmol()*23)/1000; }
+function bodyNaContentMmol(){ return S.bodyNaConc*totalECF(); }
+function sodiumPerHour(){ return S.drinkNaPerOz*S.bottlesPerHour*S.bottleOz; } // mg
+function citrateAutoG(){ return (sodiumPerHour()/0.29)/1000; }                // workbook J3
+
+function effComp(){
+  const c = Object.assign({}, S.comp);
+  if(S.autoCitrate) c.citrate = citrateAutoG();
+  return c;
+}
+
+/* ============================================================
+   PRODUCT DATABASE  (serving values from workbook; carb-source
+   splits are EDITABLE ESTIMATES — web label lookup was unavailable)
+   carb split grams roughly sum to total carb; de = assumed malto DE
+   ============================================================ */
+let PRODUCTS = [
+  // name, oz, sodium_mg, kcal, {glucose,sucrose,malto,fructose}, de, conf
+  ['Skratch',            16, 360, 80,  {glucose:7,  sucrose:14, malto:0,  fructose:0 }, 100,'est'],
+  ['OG Gatorade',        12, 160, 80,  {glucose:11, sucrose:9,  malto:0,  fructose:0 }, 100,'est'],
+  ['Gatorade End. Pow.', 12, 290, 80,  {glucose:0,  sucrose:8,  malto:8,  fructose:4 }, 15, 'est'],
+  ['EFS',                12, 300, 96,  {glucose:8,  sucrose:4,  malto:12, fructose:0 }, 15, 'est'],
+  ['EFS Pro',            12, 500, 120, {glucose:5,  sucrose:0,  malto:20, fructose:5 }, 12, 'est'],
+  ['Tailwind',           24, 300, 100, {glucose:17, sucrose:8,  malto:0,  fructose:0 }, 100,'est'],
+  ['BonkBreaker',         8, 150, 35,  {glucose:4,  sucrose:5,  malto:0,  fructose:0 }, 100,'est'],
+  ['Infinit Go Far',     20, 379, 280, {glucose:10, sucrose:0,  malto:55, fructose:5 }, 15, 'est'],
+  ['Clif Electro',        8, 125, 40,  {glucose:4,  sucrose:6,  malto:0,  fructose:0 }, 100,'est'],
+  ['Maurten',            17, 500, 320, {glucose:14, sucrose:0,  malto:30, fructose:36}, 15, 'est'],
+  ['Nuun',               20, 360, 0,   {glucose:0,  sucrose:0,  malto:0,  fructose:0 }, 100,'est'],
+  ['salt stick',         20, 215, 0,   {glucose:0,  sucrose:0,  malto:0,  fructose:0 }, 100,'lbl'],
+  ['Flow Norm (PF&H)',   16, 390, 240, {glucose:0,  sucrose:0,  malto:40, fructose:20}, 15, 'est'],
+  ['Flow High Na+ (PF&H)',16,780, 240, {glucose:0,  sucrose:0,  malto:40, fructose:20}, 15, 'est'],
+  ['Stryker (Styrkr)',   16,  80, 375, {glucose:0,  sucrose:0,  malto:60, fructose:30}, 15, 'est'],
+  ['Superfuel (~NV C90)',20, 400, 400, {glucose:47, sucrose:0,  malto:20, fructose:33}, 15, 'est'],
+].map(p=>({name:p[0],oz:p[1],sodium:p[2],kcal:p[3],split:p[4],de:p[5],conf:p[6]}));
+
+function productCarb(p){ const s=p.split; return s.glucose+s.sucrose+s.malto+s.fructose; }
+function productOsm(p){
+  const c = {glucose:p.split.glucose, sucrose:p.split.sucrose, malto:p.split.malto, fructose:p.split.fructose, nacl:0, citrate:0};
+  const carbOsmol =
+      c.glucose/MW.glucose + c.fructose/MW.fructose + c.sucrose/MW.sucrose + c.malto/maltoMW(p.de);
+  const total = carbOsmol + osmolFromSodium(p.sodium);
+  return total * OZ_PER_L * 1000 / p.oz;
+}
+
+/* ============================================================
+   RENDER HELPERS
+   ============================================================ */
+const $ = (s,el=document)=>el.querySelector(s);
+const fmt=(n,d=1)=>Number.isFinite(n)?(+n).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+function numField(label,key,unit,step=1,obj=S){
+  return `<div class="field"><label>${label}</label>
+    <input type="number" step="${step}" value="${obj[key]??''}" data-k="${key}" data-obj="${obj===S?'S':'comp'}">
+    <span class="u">${unit||''}</span></div>`;
+}
+function compField(label,key,unit){
+  return `<div class="field"><label>${label}</label>
+    <input type="number" step="0.5" value="${S.comp[key]}" data-comp="${key}">
+    <span class="u">${unit}</span></div>`;
+}
+
+/* ---------- TAB: CALCULATOR ---------- */
+function viewCalculator(){
+  const sr = sweatRateLhr();
+  const c  = effComp();
+  const oz = S.bottleOz;
+  const carbG = (c.glucose+c.sucrose+c.malto+c.fructose);
+  const kcal  = carbG*4;
+  const ml    = oz*ML_PER_OZ;
+  const carbPct = carbG/ml*100;
+  const mosm  = osmolality(c, oz, S.maltoDE);
+  const ton   = tonicity(mosm);
+  const naBottle = sodiumPerHour()/S.bottlesPerHour; // mg per bottle (drink Na model)
+  const naFromSalts = ( (c.nacl*NA_MW/MW.nacl) + (c.citrate*3*NA_MW/MW.citrate) )*1000; // mg from actual salts
+  const carbPerHr = carbG*S.bottlesPerHour;
+  const mk = Math.max(0,Math.min(100,(mosm/700)*100));
+
+  return `<div class="grid cols2">
+    <div>
+      <div class="panel">
+        <h2>Athlete & Session</h2>
+        ${numField('Body weight','bodyLbs','lbs')}
+        <div class="sub-h">Sweat rate — from pre/post weight</div>
+        ${numField('Pre-ride weight','pre','lbs')}
+        ${numField('Post-ride weight','post','lbs')}
+        ${numField('Duration','time','hr',0.1)}
+        ${numField('…or set sweat rate directly','manualSweat','L/hr',0.01)}
+        <div class="res"><span class="muted">Computed sweat rate</span><span class="v">${fmt(sr,2)} L/hr</span></div>
+        <div class="sub-h">Targets</div>
+        ${numField('Acceptable weight loss','acceptLoss','%',0.5)}
+        ${numField('Sweat sodium','sweatNa','mg/L',10)}
+        ${numField('Body Na⁺ concentration','bodyNaConc','mmol/L',1)}
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <h2>Bottle</h2>
+        ${numField('Bottle size','bottleOz','oz',0.1)}
+        ${numField('Bottles per hour','bottlesPerHour','',0.25)}
+        ${numField('Drink sodium (for projection)','drinkNaPerOz','mg/oz',1)}
+        <div class="sub-h">Carbohydrate sources — grams per bottle</div>
+        ${compField('Glucose / Dextrose','glucose','g')}
+        ${compField('Sucrose','sucrose','g')}
+        ${compField('Maltodextrin','malto','g')}
+        ${compField('Fructose','fructose','g')}
+        ${numField('Maltodextrin DE','maltoDE','',1)}
+        <div class="note">DE drives maltodextrin's osmotic weight (eff. MW ≈ 18016/DE ≈ ${fmt(maltoMW(S.maltoDE),0)} g/mol). Higher DE → more particles → higher osmolality.</div>
+        <div class="sub-h">Electrolyte salts — grams per bottle</div>
+        ${compField('Sodium chloride (NaCl)','nacl','g')}
+        <div class="field"><label>Sodium citrate ${S.autoCitrate?'<span class="muted">(auto)</span>':''}</label>
+          <input type="number" step="0.1" value="${fmt(c.citrate,2)}" data-comp="citrate" ${S.autoCitrate?'disabled':''}>
+          <span class="u">g</span></div>
+        <div class="field"><label class="muted">Auto-derive citrate from sodium target</label>
+          <input type="checkbox" id="autoCit" ${S.autoCitrate?'checked':''} style="width:auto"></div>
+        <div class="row-actions">
+          <select id="loadProd"><option value="">— load a product —</option>
+            ${PRODUCTS.map((p,i)=>`<option value="${i}">${p.name}</option>`).join('')}</select>
+          <button class="ghost sm" onclick="window._clearComp()">Clear carbs/salts</button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Bottle Osmolality</h2>
+        <div style="display:flex;align-items:baseline;gap:12px">
+          <span class="big">${fmt(mosm,0)}</span><span class="muted">mOsm/L</span>
+          <span class="pill" style="background:var(--${ton.cls});color:#06121f;margin-left:auto">${ton.label}</span>
+        </div>
+        <div class="gauge"><div class="mk" style="left:calc(${mk}% - 1px)"></div></div>
+        <div class="muted" style="font-size:12px">Hypo&nbsp;·&nbsp;Iso(~290)&nbsp;·&nbsp;Hyper&nbsp;→ ${ton.desc}</div>
+        <div style="margin-top:12px">
+          <div class="res"><span>Carbohydrate total</span><span class="v">${fmt(carbG,1)} g</span></div>
+          <div class="res"><span>Carbohydrate concentration</span><span class="v">${fmt(carbPct,1)} %</span></div>
+          <div class="res"><span>Calories (carb)</span><span class="v">${fmt(kcal,0)} kcal</span></div>
+          <div class="res"><span>Carb per hour</span><span class="v">${fmt(carbPerHr,0)} g/hr</span></div>
+          <div class="res"><span>Sodium from salts in bottle</span><span class="v">${fmt(naFromSalts,0)} mg</span></div>
+        </div>
+        <div class="note">Osmolality = Σ(grams ÷ molar mass × particles) ÷ volume. Sucrose/glucose/fructose = 1 particle, NaCl = 2, trisodium-citrate = 4, maltodextrin ≈ 1 per (18016/DE) g.</div>
+      </div>
+
+      <div class="panel" style="margin-top:16px">
+        <h2>Hydration & Sodium (per session)</h2>
+        <div class="res"><span>Body mass</span><span class="v">${fmt(bodyKg(),1)} kg</span></div>
+        <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
+        <div class="res"><span>Fluid need / hour</span><span class="v">${fmt(S.bottleOz*S.bottlesPerHour,1)} oz</span></div>
+        <div class="res"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
+        <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
+        <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg</span></div>
+        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}">${fmt(sodiumPerHour()-S.sweatNa*sr,0)} mg</span></div>
+      </div>
+    </div>
+  </div>
+  <div style="margin-top:16px">${viewProjection()}</div>`;
+}
+
+/* ---------- TAB: PROJECTION (port of Bare-Minimum hours table) ---------- */
+function projectionRows(hours=24){
+  const C6=sweatRateLhr(), H8=totalECF(), C3=S.bodyLbs, C7=S.acceptLoss/100,
+        H2=S.bottlesPerHour, C5=S.bottleOz, H5=S.drinkNaPerOz, H6=S.sweatNa, H11=bodyNaContentG();
+  const rows=[]; let Jprev=H8, Mprev=0;
+  for(let h=1;h<=hours;h++){
+    const lost=h*C6;
+    const ecf=H8-lost;
+    const repLbs=Math.max(0,(h*C6)*2.2-(C3*C7));
+    const repL=repLbs/2.2, repOz=repL*33.8;
+    const bph=(repOz/C5)/h, btot=bph*h;
+    const J=Jprev - C6 + (H2*C5*0.0296); Jprev=J;
+    const wt=C3-(H8-J)*2.2;
+    const M=Mprev + (H6*C6)/1000 - (H2*C5*H5)/1000; Mprev=M;
+    const Ng=H11-M, Ommol=Ng/23*1000, mM=Ommol/J;
+    rows.push({h,lost,ecf,repOz,bph,btot,wt,Ng,Ommol,mM});
+  }
+  return rows;
+}
+function viewProjection(){
+  const r=projectionRows(24);
+  return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
+  <div class="note">Carries the workbook's "Minimum Hydration Needs" + "Hydrating w/ specified drink" math. <b>Body weight</b> is green while within your acceptable-loss band, red below it. <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146 — same as your sheet.</div>
+  <div class="scroll" style="margin-top:10px"><table>
+    <thead><tr><th>Hr</th><th>Water lost (L)</th><th>ECF (L)</th><th>To replace (oz)</th>
+      <th>Bottles/hr</th><th>Total bottles</th><th>Body wt (lbs)</th>
+      <th>Body Na⁺ (g)</th><th>Na⁺ (mmol)</th><th>Na⁺ (mM)</th></tr></thead>
+    <tbody>${r.map(x=>`<tr>
+      <td>${x.h}</td><td>${fmt(x.lost,1)}</td><td>${fmt(x.ecf,1)}</td><td>${fmt(x.repOz,1)}</td>
+      <td>${fmt(x.bph,2)}</td><td>${fmt(x.btot,1)}</td><td ${wtCF(x.wt)}>${fmt(x.wt,1)}</td>
+      <td>${fmt(x.Ng,1)}</td><td>${fmt(x.Ommol,0)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+
+/* ---------- TAB: DRINK DATABASE ---------- */
+function viewDatabase(){
+  return `<div class="panel"><h2>Drink Database & Osmolality</h2>
+  <div class="note">Per-serving sodium/calories from the workbook. Carb-source splits are <span class="est">editable estimates</span> (live label lookup was unavailable). Edit any cell; osmolality recomputes. <b>Load</b> sends a product into the Calculator.</div>
+  <div class="scroll" style="margin-top:10px"><table>
+    <thead><tr><th>Product</th><th>oz</th><th>Na (mg)</th><th>kcal</th>
+      <th>Glu</th><th>Suc</th><th>Malto</th><th>Fru</th><th>DE</th>
+      <th>Carb g</th><th>Carb %</th><th>mOsm/L</th><th></th></tr></thead>
+    <tbody>${PRODUCTS.map((p,i)=>{
+      const carb=productCarb(p), pct=carb/(p.oz*ML_PER_OZ)*100, osm=productOsm(p), t=tonicity(osm);
+      const ce=(k)=>`<td><input type="number" step="0.5" value="${p.split[k]}" data-prod="${i}" data-split="${k}" style="width:54px"></td>`;
+      return `<tr>
+        <td>${p.name} ${p.conf==='est'?'<span class="est" title="estimated split">~</span>':''}</td>
+        <td>${p.oz}</td><td>${p.sodium}</td><td>${p.kcal}</td>
+        ${ce('glucose')}${ce('sucrose')}${ce('malto')}${ce('fructose')}
+        <td><input type="number" step="1" value="${p.de}" data-prod="${i}" data-de="1" style="width:48px"></td>
+        <td>${fmt(carb,0)}</td><td>${fmt(pct,1)}</td>
+        <td style="color:var(--${t.cls});font-weight:700">${fmt(osm,0)}</td>
+        <td><button class="sm" onclick="window._loadProd(${i})">Load</button></td>
+      </tr>`;}).join('')}
+    </tbody></table></div></div>`;
+}
+
+/* ---------- TAB: DRINK SOLVER (port of "Solve drink contents") ---------- */
+const SOLVE = { bodyLbs:130, lossLbs:1, time:0.4, bottlesPerHour:1, bottleOz:30,
+  acceptLoss:4, suppNaPerBottle:0, drinkNaPerOz:0, sweatNa:244 };
+function viewSolver(){
+  const C3=SOLVE.bodyLbs, C4=C3/2.2, C7=C4*0.25;
+  const sweat=(SOLVE.lossLbs/2.2/SOLVE.time);           // L/hr from weight loss
+  const K8=140*C7, K9=K8*23/1000;                       // body Na mmol / g
+  const K6=SOLVE.sweatNa/23;                            // sweat mM
+  const rows=[];
+  for(let h=1;h<=20;h++){
+    const B=h*sweat, C=h*SOLVE.bottlesPerHour, F=C*SOLVE.bottleOz, E=F/33.814, D=E*2.2;
+    const G=(B-E)*2.2, H=1-(C3-G)/C3, I=C7-B+E;
+    const J=((SOLVE.sweatNa*B)-((F*SOLVE.drinkNaPerOz)+SOLVE.suppNaPerBottle))/1000;
+    const K=K9-J, L=K/23*1000, M=L/I;
+    rows.push({h,B,C,Foz:F,lossLbs:G,lossPct:H*100,ecf:I,naLostG:J,bodyNaG:K,mM:M});
+  }
+  return `<div class="grid cols2">
+    <div class="panel"><h2>Drink Solver — inputs</h2>
+      ${numField('Body weight','bodyLbs','lbs',1,SOLVE)}
+      ${numField('Weight loss','lossLbs','lbs',0.1,SOLVE)}
+      ${numField('Time','time','hr',0.1,SOLVE)}
+      ${numField('Bottles per hour','bottlesPerHour','',0.25,SOLVE)}
+      ${numField('Bottle size','bottleOz','oz',1,SOLVE)}
+      ${numField('Acceptable weight loss','acceptLoss','%',0.5,SOLVE)}
+      ${numField('Supplemental Na⁺ / bottle','suppNaPerBottle','mg',10,SOLVE)}
+      ${numField('Drink sodium','drinkNaPerOz','mg/oz',1,SOLVE)}
+      ${numField('Sweat Na⁺ concentration','sweatNa','mg/L',10,SOLVE)}
+      <div class="res"><span>Sweat rate (from loss)</span><span class="v">${fmt(sweat,2)} L/hr</span></div>
+      <div class="res"><span>Sweat Na⁺</span><span class="v">${fmt(K6,1)} mM</span></div>
+      <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(K8,0)} mmol · ${fmt(K9,1)} g</span></div>
+    </div>
+    <div class="panel"><h2>Projection</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Hr</th><th>Lost (L)</th><th>Repl oz</th><th>Loss %</th><th>New ECF</th><th>Body Na⁺ (g)</th><th>Na⁺ (mM)</th></tr></thead>
+        <tbody>${rows.map(x=>`<tr><td>${x.h}</td><td>${fmt(x.B,1)}</td><td>${fmt(x.Foz,0)}</td>
+          <td style="color:${x.lossPct>SOLVE.acceptLoss?'var(--bad)':'var(--good)'}">${fmt(x.lossPct,2)}%</td>
+          <td>${fmt(x.ecf,1)}</td><td>${fmt(x.bodyNaG,1)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td></tr>`).join('')}
+        </tbody></table></div>
+    </div></div>`;
+}
+
+/* ---------- TAB: SWEAT LOG ---------- */
+let SWEATLOG = [
+  {date:'2017-06-08',hrs:3,cond:'Sunny',temp:70,pre:162.2,post:161.4,oz:75,na:''},
+  {date:'2017-06-10',hrs:4.25,cond:'sunny',temp:100,pre:163.6,post:157,oz:120,na:''},
+  {date:'2017-07-02',hrs:3,cond:'Sunny',temp:90,pre:163,post:158,oz:90,na:''},
+  {date:'2021-04-03',hrs:4.75,cond:'sunny',temp:80,pre:172,post:162,oz:100,na:''},
+  {date:'2021-04-10',hrs:6.7,cond:'Sunny',temp:50,pre:170,post:164,oz:81,na:''},
+  {date:'2025-05-04',hrs:2,cond:'Sunny',temp:76,pre:168,post:164.3,oz:22.5,na:46},
+];
+function swCalc(r){
+  const lossOz=(r.pre-r.post)*16 + (+r.oz||0);
+  const ozHr=lossOz/r.hrs, lHr=ozHr/33.8, pctLost=(1-r.post/r.pre)*100;
+  const naL=r.na? r.na*33.8 : '';
+  return {lossOz,ozHr,lHr,pctLost,naL};
+}
+function viewSweatLog(){
+  return `<div class="panel"><h2>Sweat-Rate Log</h2>
+  <div class="note">Each row computes oz/hr, L/hr and % body-mass lost from pre/post weight + fluid consumed. <b>Use</b> pushes that sweat rate into the Calculator. <span class="muted">Loss(oz) = (pre−post)×16 + consumed.</span></div>
+  <div class="scroll" style="margin-top:10px"><table>
+    <thead><tr><th>Date</th><th>Hrs</th><th>Avg °F</th><th>Pre</th><th>Post</th><th>Drank oz</th>
+      <th>Loss oz</th><th>oz/hr</th><th>L/hr</th><th>% lost</th><th>Na mg/oz</th><th></th></tr></thead>
+    <tbody>${SWEATLOG.map((r,i)=>{const c=swCalc(r);
+      const f=(k,w=58)=>`<input type="number" step="0.1" value="${r[k]}" data-sw="${i}" data-swk="${k}" style="width:${w}px">`;
+      return `<tr><td><input type="text" value="${r.date}" data-sw="${i}" data-swk="date" style="width:96px"></td>
+        <td>${f('hrs',46)}</td><td>${f('temp',46)}</td><td>${f('pre')}</td><td>${f('post')}</td><td>${f('oz')}</td>
+        <td>${fmt(c.lossOz,1)}</td><td>${fmt(c.ozHr,1)}</td><td>${fmt(c.lHr,2)}</td>
+        <td>${fmt(c.pctLost,1)}%</td><td>${f('na',46)}</td>
+        <td><button class="sm" onclick="window._useSweat(${i})">Use</button></td></tr>`;}).join('')}
+    </tbody></table></div>
+    <div class="row-actions"><button class="ghost sm" onclick="window._addSweat()">+ Add row</button></div>
+  </div>`;
+}
+
+/* ---------- TAB: FUEL PLAN ---------- */
+let PLAN = [
+  {hr:-2,fuel:'1x20oz Go Far',drink:'',extra:'',salt:'',kcal:0},
+  {hr:-1,fuel:'1x20oz Go Far',drink:'',extra:'',salt:'',kcal:0},
+  {hr:1,fuel:'1x20oz Go Far',drink:'',extra:'',salt:'',kcal:280},
+  {hr:2,fuel:'4x6oz Go Far in 24oz',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'4 salt caps prior',kcal:395},
+  {hr:3,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
+  {hr:4,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
+  {hr:5,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
+  {hr:6,fuel:'4x6oz Go Far in 24oz',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'4 salt caps prior',kcal:395},
+  {hr:7,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
+  {hr:8,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
+  {hr:9,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
+];
+function viewPlan(){
+  const total=PLAN.reduce((s,r)=>s+(+r.kcal||0),0);
+  const ride=PLAN.filter(r=>r.hr>0);
+  const avg=ride.length?total/ride.length:0;
+  return `<div class="panel"><h2>Fuel Plan</h2>
+  <div class="note">Hour-by-hour fueling grid with kcal/hour. Totals update as you edit.</div>
+  <div class="scroll" style="margin-top:10px"><table>
+    <thead><tr><th>Hr</th><th>Main fuel</th><th>Additional drink</th><th>Additional fuel</th><th>Salt</th><th>kcal/hr</th></tr></thead>
+    <tbody>${PLAN.map((r,i)=>{
+      const tf=(k,w=150)=>`<input type="text" value="${r[k]}" data-pl="${i}" data-plk="${k}" style="width:${w}px">`;
+      return `<tr><td>${r.hr}</td><td>${tf('fuel')}</td><td>${tf('drink')}</td><td>${tf('extra')}</td><td>${tf('salt')}</td>
+        <td><input type="number" value="${r.kcal}" data-pl="${i}" data-plk="kcal" style="width:64px"></td></tr>`;}).join('')}
+    </tbody>
+    <tfoot><tr><th>Total</th><td colspan="4" class="muted">${ride.length} ride hours</td><th>${fmt(total,0)} kcal</th></tr>
+    <tr><th>Avg/ride-hr</th><td colspan="4"></td><th>${fmt(avg,0)} kcal/hr</th></tr></tfoot>
+  </table></div></div>`;
+}
+
+/* ============================================================
+   TABS / ROUTER
+   ============================================================ */
+const TABS = [
+  ['calc','Calculator',viewCalculator],
+  ['db','Drink Database',viewDatabase],
+  ['solve','Drink Solver',viewSolver],
+  ['sweat','Sweat Log',viewSweatLog],
+  ['plan','Fuel Plan',viewPlan],
+];
+let active='calc';
+function render(){
+  $('#tabs').innerHTML = TABS.map(t=>`<div class="tab ${t[0]===active?'active':''}" data-tab="${t[0]}">${t[1]}</div>`).join('');
+  $('#app').innerHTML = TABS.find(t=>t[0]===active)[2]();
+  bind();
+}
+function bind(){
+  document.querySelectorAll('[data-tab]').forEach(el=>el.onclick=()=>{active=el.dataset.tab;render();});
+  // generic numeric/text inputs bound to S or SOLVE
+  document.querySelectorAll('input[data-k]').forEach(el=>el.oninput=()=>{
+    const obj = el.dataset.obj==='comp'?S.comp:S;
+    let v=el.value; obj[el.dataset.k] = (v===''?(el.dataset.k==='manualSweat'?null:''):+v);
+    // SOLVE inputs share data-k but target SOLVE via numField(obj)
+    render();
+  });
+  // SOLVE fields (numField passed SOLVE as obj but data-obj stayed 'S'); fix via explicit map
+  document.querySelectorAll('#app input[data-k]').forEach(el=>{
+    if(SOLVE.hasOwnProperty(el.dataset.k) && active==='solve'){
+      el.oninput=()=>{SOLVE[el.dataset.k]=el.value===''?'':+el.value;render();};
+    }
+  });
+  document.querySelectorAll('input[data-comp]').forEach(el=>el.oninput=()=>{S.comp[el.dataset.comp]=+el.value||0;render();});
+  const ac=$('#autoCit'); if(ac) ac.onchange=()=>{S.autoCitrate=ac.checked;render();};
+  const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(+lp.value); };
+  // product table edits
+  document.querySelectorAll('input[data-prod]').forEach(el=>el.oninput=()=>{
+    const p=PRODUCTS[+el.dataset.prod];
+    if(el.dataset.de) p.de=+el.value||1; else p.split[el.dataset.split]=+el.value||0;
+    render();
+  });
+  // sweat log edits
+  document.querySelectorAll('input[data-sw]').forEach(el=>el.oninput=()=>{
+    const r=SWEATLOG[+el.dataset.sw], k=el.dataset.swk;
+    r[k]=(k==='date'||k==='cond')?el.value:(el.value===''?'':+el.value); render();
+  });
+  // plan edits
+  document.querySelectorAll('input[data-pl]').forEach(el=>el.oninput=()=>{
+    const r=PLAN[+el.dataset.pl], k=el.dataset.plk; r[k]=k==='kcal'?(+el.value||0):el.value; render();
+  });
+}
+/* actions */
+window._loadProd=(i)=>{
+  const p=PRODUCTS[i];
+  S.comp.glucose=p.split.glucose; S.comp.sucrose=p.split.sucrose;
+  S.comp.malto=p.split.malto; S.comp.fructose=p.split.fructose;
+  S.maltoDE=p.de; S.bottleOz=p.oz; S.autoCitrate=false; S.comp.citrate=0; S.comp.nacl=0;
+  // put product sodium in as NaCl-equivalent so osmolality reflects it
+  S.comp.nacl = +( (p.sodium/1000/0.3934) ).toFixed(2); // Na fraction of NaCl = 0.3934
+  active='calc'; render();
+};
+window._clearComp=()=>{S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};render();};
+window._useSweat=(i)=>{const c=swCalc(SWEATLOG[i]);S.manualSweat=+c.lHr.toFixed(3);active='calc';render();};
+window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'',oz:0,na:''});render();};
+
+render();
+</script>
+</body>
+</html>
