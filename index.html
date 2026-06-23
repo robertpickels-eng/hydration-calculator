@@ -172,6 +172,8 @@ function wtCF(wt){
   const top=S.bodyLbs, floor=S.bodyLbs*(1-S.acceptLoss/100);
   return cfStyle(wt<floor ? CF.red : (wt<=top ? CF.green : null));
 }
+// Weight-loss %: red once it exceeds your acceptable loss, else green
+function lossCF(pct){ return cfStyle(pct > S.acceptLoss ? CF.red : CF.green); }
 
 /* ============================================================
    STATE  (defaults mirror the workbook's "Bare Minimum" tab)
@@ -492,21 +494,26 @@ function osmolalityPanel(){
 }
 
 /* ---------- TAB: PROJECTION (port of Bare-Minimum hours table) ---------- */
-function projectionRows(hours=24){
-  const C6=sweatRateLhr(), H8=totalECF(), C3=S.bodyLbs, C7=S.acceptLoss/100,
-        H2=S.bottlesPerHour, C5=S.bottleOz, H5=calcDrinkNaPerOz(), H6=S.sweatNa, H11=bodyNaContentG();
-  const rows=[]; let Jprev=H8, Mprev=0;
+// Plan-based projection (mirrors the "Solve drink contents" tab): everything is driven by
+// the user's inputs — Bottles = hours × Bottles/hr — and acceptable loss / Na just flag limits.
+function projectionRows(hours=8){
+  const C6=sweatRateLhr(), C5=S.bottleOz, H2=S.bottlesPerHour, C3=S.bodyLbs,
+        H8=totalECF(), H5=calcDrinkNaPerOz(), H6=S.sweatNa, H11=bodyNaContentG();
+  const rows=[];
   for(let h=1;h<=hours;h++){
-    const lost=h*C6;
-    const ecf=H8-lost;
-    const repLbs=Math.max(0,(h*C6)*2.2-(C3*C7));
-    const repL=repLbs/2.2, repOz=repL*33.8;
-    const bph=(repOz/C5)/h, btot=bph*h;
-    const J=Jprev - C6 + (H2*C5*0.0296); Jprev=J;
-    const wt=C3-(H8-J)*2.2;
-    const M=Mprev + (H6*C6)/1000 - (H2*C5*H5)/1000; Mprev=M;
-    const Ng=H11-M, Ommol=Ng/23*1000, mM=Ommol/J;
-    rows.push({h,lost,ecf,repOz,bph,btot,wt,Ng,Ommol,mM});
+    const lostL    = h*C6;                       // sweat lost (L)
+    const bottles  = h*H2;                        // bottles consumed = hours × bottles/hr
+    const replOz   = bottles*C5;                  // fluid consumed (oz)
+    const replL    = replOz/OZ_PER_L;             // fluid consumed (L)
+    const lossLbs  = (lostL-replL)*2.2;           // net body-mass change (lbs; + = lost)
+    const lossPct  = C3 ? lossLbs/C3*100 : 0;     // % of body weight
+    const wt       = C3-lossLbs;                  // current body weight (lbs)
+    const ecf      = H8-lostL+replL;              // new ECF (L)
+    const lostNaG  = ((H6*lostL)-(replOz*H5))/1000; // net sodium lost (g) = sweat Na − drink Na
+    const Ng       = H11-lostNaG;                 // body Na (g)
+    const Ommol    = Ng/23*1000;                  // body Na (mmol)
+    const mM       = ecf ? Ommol/ecf : 0;         // body Na (mM)
+    rows.push({h, lostL, bottles, replOz, lossLbs, lossPct, wt, ecf, Ng, Ommol, mM});
   }
   return rows;
 }
@@ -514,15 +521,16 @@ function viewProjection(){
   const hrs=S.projHours||8;
   const r=projectionRows(hrs);
   return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
-  <div class="note">Carries the workbook's "Minimum Hydration Needs" + "Hydrating w/ specified drink" math. <b>Body weight</b> is green while within your acceptable-loss band, red below it. <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146 — same as your sheet.</div>
+  <div class="note">Projects <b>your plan</b>: Bottles = hours × your Bottles/hr, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146.</div>
   <div class="scroll" style="margin-top:10px"><table class="tc">
-    <thead><tr><th>Hr</th><th>Water lost (L)</th><th>ECF (L)</th><th>To replace (oz)</th>
-      <th>Bottles/hr</th><th>Total bottles</th><th>Body wt (lbs)</th>
-      <th>Body Na⁺ (g)</th><th>Na⁺ (mmol)</th><th>Na⁺ (mM)</th></tr></thead>
+    <thead><tr><th>Hr</th><th>Water lost (L)</th><th>Bottles</th><th>Replaced (oz)</th>
+      <th>Wt loss (lbs)</th><th>Wt loss (%)</th><th>Body wt (lbs)</th>
+      <th>New ECF (L)</th><th>Body Na⁺ (g)</th><th>Na⁺ (mM)</th></tr></thead>
     <tbody>${r.map(x=>`<tr>
-      <td>${x.h}</td><td>${fmt(x.lost,1)}</td><td>${fmt(x.ecf,1)}</td><td>${fmt(x.repOz,1)}</td>
-      <td>${fmt(x.bph,2)}</td><td>${fmt(x.btot,1)}</td><td ${wtCF(x.wt)}>${fmt(x.wt,1)}</td>
-      <td>${fmt(x.Ng,1)}</td><td>${fmt(x.Ommol,0)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td></tr>`).join('')}
+      <td>${x.h}</td><td>${fmt(x.lostL,1)}</td><td>${fmt(x.bottles,1)}</td><td>${fmt(x.replOz,0)}</td>
+      <td>${fmt(x.lossLbs,1)}</td><td ${lossCF(x.lossPct)}>${fmt(x.lossPct,1)}%</td>
+      <td ${wtCF(x.wt)}>${fmt(x.wt,1)}</td><td>${fmt(x.ecf,1)}</td>
+      <td>${fmt(x.Ng,1)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td></tr>`).join('')}
     </tbody></table></div>
   <div class="row-actions" style="margin-top:8px;align-items:center">
     <span class="muted" style="font-size:12px">Showing ${hrs} hours</span>
