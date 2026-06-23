@@ -205,6 +205,23 @@ function compField(label,key,unit){
     <span class="u">${unit}</span></div>`;
 }
 
+/* Typical sweat [Na+] by acclimatization — reference table from the workbook (mmol/L, mg/L, level) */
+const SWEAT_NA_REF = [
+  [20, 460, 'Low'], [40, 920, 'L Norm'], [60, 1380, 'H Norm'],
+  [80, 1840, 'Salty'], [100, 2300, 'Highest'], [140, 3220, 'Body'],
+];
+function sweatNaRefTable(){
+  return `<div class="sub-h">Typical sweat [Na⁺] — acclimatization</div>
+  <table style="font-size:12px">
+    <thead><tr><th>mmol/L</th><th>mg/L</th><th>Level</th></tr></thead>
+    <tbody>${SWEAT_NA_REF.map(([mM,mg,desc])=>`<tr onclick="window._setSweatNa(${mg})"
+      style="cursor:pointer;${S.sweatNa==mg?'outline:2px solid var(--accent);outline-offset:-2px':''}">
+      <td>${mM}</td><td>${mg}</td><td style="text-align:left">${desc}</td></tr>`).join('')}
+    </tbody>
+  </table>
+  <div class="note">Sweat [Na⁺] rises (gets less salty) with heat acclimatization. Click a row to set the value above.</div>`;
+}
+
 /* ---------- TAB: CALCULATOR ---------- */
 function viewCalculator(){
   const sr = sweatRateLhr();
@@ -236,6 +253,7 @@ function viewCalculator(){
         ${numField('Acceptable weight loss','acceptLoss','%',0.5)}
         ${numField('Sweat sodium','sweatNa','mg/L',10)}
         ${numField('Body Na⁺ concentration','bodyNaConc','mmol/L',1)}
+        ${sweatNaRefTable()}
       </div>
       <div class="panel" style="margin-top:16px">
         <h2>Bottle</h2>
@@ -522,6 +540,7 @@ window._loadProd=(i)=>{
   active='calc'; render();
 };
 window._clearComp=()=>{S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};render();};
+window._setSweatNa=(mg)=>{S.sweatNa=mg;render();};
 window._useSweat=(i)=>{const c=swCalc(SWEATLOG[i]);S.manualSweat=+c.lHr.toFixed(3);active='calc';render();};
 window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'',oz:0,na:''});render();};
 
