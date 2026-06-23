@@ -141,6 +141,7 @@ const S = {
   bottleOz:33.8, bottlesPerHour:1,
   acceptLoss:2,                                // % acceptable weight loss
   sweatNa:1380,                                // mg/L
+  sweatNaMode:'preset',                        // 'preset' (acclimatization dropdown) | 'manual'
   bodyNaConc:140,                              // mmol/L (locked physiological constant)
   maltoDE:18,
   projHours:8,                                 // hour-by-hour table length (expandable)
@@ -278,21 +279,6 @@ const SWEAT_NA_REF = [
   [20, 460, 'Low'], [40, 920, 'L Norm'], [60, 1380, 'H Norm'],
   [80, 1840, 'Salty'], [100, 2300, 'Highest'], [140, 3220, 'Body'],
 ];
-function sweatNaRefTable(){
-  const cur = SWEAT_NA_REF.find(([,mg])=>S.sweatNa==mg);
-  return `<details class="refbox"${S._refOpen?' open':''}>
-    <summary class="sub-h">Typical sweat [Na⁺] — acclimatization${cur?` · now: ${cur[2]}`:''}</summary>
-    <table style="font-size:12px">
-      <thead><tr><th>mmol/L</th><th>mg/L</th><th>Level</th></tr></thead>
-      <tbody>${SWEAT_NA_REF.map(([mM,mg,desc])=>`<tr onclick="window._setSweatNa(${mg})"
-        style="cursor:pointer;${S.sweatNa==mg?'outline:2px solid var(--accent);outline-offset:-2px':''}">
-        <td>${mM}</td><td>${mg}</td><td style="text-align:left">${desc}</td></tr>`).join('')}
-      </tbody>
-    </table>
-    <div class="note">Sweat [Na⁺] rises (gets less salty) with heat acclimatization. Click a row to set the value above.</div>
-  </details>`;
-}
-
 /* ---------- TAB: CALCULATOR ---------- */
 function viewCalculator(){
   const sr = sweatRateLhr();
@@ -334,12 +320,18 @@ function viewCalculator(){
         <div class="sub-h">Targets</div>
         <div class="fgrid">
           ${numField('Accept. loss','acceptLoss','%',0.5)}
-          ${numField('Sweat sodium','sweatNa','mg/L',10)}
+          <div class="field"><label>Body Na⁺ 🔒</label>
+            <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
+            <span class="u">mM</span></div>
         </div>
-        ${sweatNaRefTable()}
-        <div class="field"><label>Body Na⁺ 🔒</label>
-          <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
-          <span class="u">mM</span></div>
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Sweat sodium</label>
+          <select id="sweatNaSel" style="flex:1;min-width:0">
+            ${SWEAT_NA_REF.map(([mM,mg,desc])=>`<option value="${mg}"${S.sweatNaMode!=='manual'&&S.sweatNa==mg?' selected':''}>${desc} — ${mg} mg/L · ${mM} mM</option>`).join('')}
+            <option value="manual"${S.sweatNaMode==='manual'?' selected':''}>Manual entry…</option>
+          </select></div>
+        ${S.sweatNaMode==='manual'?`<div class="field"><label class="muted">↳ manual value</label>
+          <input type="number" step="10" value="${S.sweatNa}" data-k="sweatNa" data-obj="S"><span class="u">mg/L</span></div>`:''}
+        <div class="note">Sweat [Na⁺] rises (gets less salty) with heat acclimatization.</div>
       </div>
     </div>
 
@@ -640,7 +632,11 @@ function bind(){
   // Body Mass (kg) is the twin of Body weight (lbs) — editing it writes back to lbs
   const bm=$('input[data-kgmass]'); if(bm) bm.onchange=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*2.2).toFixed(1); render(); };
   const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(lp.value); };
-  const rb=document.querySelector('details.refbox'); if(rb) rb.addEventListener('toggle',()=>{ S._refOpen=rb.open; });
+  const ss=$('#sweatNaSel'); if(ss) ss.onchange=()=>{
+    if(ss.value==='manual'){ S.sweatNaMode='manual'; }
+    else { S.sweatNaMode='preset'; S.sweatNa=+ss.value; }
+    render();
+  };
   // product table edits (role-aware)
   document.querySelectorAll('input[data-id]').forEach(el=>el.onchange=()=>{
     const f=el.dataset.f, sub=el.dataset.sub;
