@@ -1,4 +1,11 @@
 <!DOCTYPE html>
+<!--
+  Hydration & Osmolality Calculator
+  © 2026 Robert Pickels. All rights reserved.
+  Custom-built software. Free for personal use only. May not be copied, redistributed,
+  modified for redistribution, or used commercially without the owner's prior written
+  permission. See LICENSE.txt. Not medical advice — provided for informational use only.
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -24,6 +31,9 @@
   .tab{padding:10px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;font-weight:600;font-size:13px}
   .tab.active{color:var(--txt);border-bottom-color:var(--accent)}
   .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  footer.legal{max-width:1180px;margin:8px auto 28px;padding:14px 18px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:11.5px;line-height:1.45;display:flex;flex-direction:column;gap:5px}
+  footer.legal strong{color:var(--txt)}
   .grid{display:grid;gap:16px}
   .cols2{grid-template-columns:1fr 1fr}
   .cols3{grid-template-columns:repeat(3,1fr)}
@@ -80,6 +90,11 @@
 </header>
 <div class="tabs" id="tabs"></div>
 <div class="wrap" id="app"></div>
+<footer class="legal">
+  <div>© 2026 Robert Pickels. Custom-built Hydration &amp; Osmolality Calculator. All rights reserved.</div>
+  <div>Free for personal use. This calculator and its code may not be copied, redistributed, modified for redistribution, or used commercially without the owner's prior written permission.</div>
+  <div><strong>Not medical advice.</strong> Provided for informational and educational use only. Hydration, sodium, and fueling needs vary by individual, and several inputs (notably product carbohydrate-source splits) are estimates. Consult a qualified medical or sports-nutrition professional before acting on these numbers. Use at your own risk.</div>
+</footer>
 
 <script>
 /* ============================================================

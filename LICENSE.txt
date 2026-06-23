@@ -1,0 +1,37 @@
+Hydration & Osmolality Calculator
+Copyright © 2026 Robert Pickels. All rights reserved.
+
+PROPRIETARY LICENSE — PERSONAL USE ONLY
+
+This software (the "Calculator"), including its source code, design, and content,
+is the original work of and owned by Robert Pickels (the "Owner").
+
+1. PERSONAL USE. The Owner grants you a personal, non-exclusive, non-transferable,
+   revocable license to access and use the Calculator free of charge for your own
+   personal, non-commercial purposes.
+
+2. RESTRICTIONS. You may NOT, without the Owner's prior written permission:
+   (a) copy, reproduce, republish, mirror, or redistribute the Calculator or its
+       source code, in whole or in part;
+   (b) modify, adapt, translate, or create derivative works for redistribution;
+   (c) sell, license, sublicense, rent, or otherwise use the Calculator for any
+       commercial purpose; or
+   (d) remove or alter any copyright, ownership, or proprietary notices.
+
+3. OWNERSHIP. All rights, title, and interest in the Calculator remain with the
+   Owner. No rights are granted except as expressly stated above.
+
+4. NOT MEDICAL ADVICE. The Calculator is provided for informational and educational
+   purposes only and is not medical, clinical, or professional advice. Hydration,
+   sodium, and fueling needs vary by individual, and some inputs (notably product
+   carbohydrate-source breakdowns) are estimates. Consult a qualified medical or
+   sports-nutrition professional before acting on any output. You use the Calculator
+   at your own risk.
+
+5. NO WARRANTY. THE CALCULATOR IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE OWNER
+   BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR IN CONNECTION
+   WITH THE CALCULATOR OR ITS USE.
+
+For permissions or inquiries, contact the Owner.
