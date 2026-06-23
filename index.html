@@ -314,8 +314,12 @@ function viewCalculator(){
         <h2>Athlete & Session</h2>
         <div class="fgrid">
           ${numField('Body weight','bodyLbs','lbs')}
-          ${numField('Accept. loss','acceptLoss','%',0.5)}
+          <div class="field"><label>Body Mass</label>
+            <input type="number" step="0.1" value="${fmt(bodyKg(),1)}" data-kgmass title="Linked to body weight (kg = lbs ÷ 2.2)">
+            <span class="u">kg</span></div>
         </div>
+        <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
+        <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
         <div class="sub-h">Sweat rate — from pre/post weight</div>
         <div class="fgrid">
           ${numField('Pre weight','pre','lbs')}
@@ -324,14 +328,17 @@ function viewCalculator(){
           ${numField('or set L/hr','manualSweat','L/hr',0.01)}
         </div>
         <div class="res"><span class="muted">Computed sweat rate</span><span class="v">${fmt(sr,2)} L/hr</span></div>
+        <div class="res"><span>Fluid need / hour</span><span class="v">${fmt(S.bottleOz*S.bottlesPerHour,1)} oz</span></div>
+        <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg</span></div>
         <div class="sub-h">Targets</div>
         <div class="fgrid">
+          ${numField('Accept. loss','acceptLoss','%',0.5)}
           ${numField('Sweat sodium','sweatNa','mg/L',10)}
-          <div class="field"><label>Body Na⁺ 🔒</label>
-            <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
-            <span class="u">mM</span></div>
         </div>
         ${sweatNaRefTable()}
+        <div class="field"><label>Body Na⁺ 🔒</label>
+          <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
+          <span class="u">mM</span></div>
       </div>
 
       <div class="panel" style="margin-top:16px">
@@ -381,20 +388,11 @@ function viewCalculator(){
             <input type="number" value="${fmt(calcDrinkNaPerOz(),1)}" disabled title="Calculated from NaCl + sodium citrate ÷ bottle size">
             <span class="u">mg/oz</span></div>
         </div>
+        <div class="res"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
+        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}">${fmt(sodiumPerHour()-S.sweatNa*sr,0)} mg</span></div>
         <div class="row-actions" style="margin-top:6px">
           <button class="ghost sm" onclick="window._clearComp()">Clear carbs/salts</button>
         </div>
-      </div>
-
-      <div class="panel" style="margin-top:16px">
-        <h2>Hydration & Sodium (per session)</h2>
-        <div class="res"><span>Body mass</span><span class="v">${fmt(bodyKg(),1)} kg</span></div>
-        <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
-        <div class="res"><span>Fluid need / hour</span><span class="v">${fmt(S.bottleOz*S.bottlesPerHour,1)} oz</span></div>
-        <div class="res"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
-        <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
-        <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg</span></div>
-        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}">${fmt(sodiumPerHour()-S.sweatNa*sr,0)} mg</span></div>
       </div>
     </div>
   </div>
@@ -627,6 +625,8 @@ function bind(){
     }
   });
   document.querySelectorAll('input[data-comp]').forEach(el=>el.oninput=()=>{S.comp[el.dataset.comp]=+el.value||0;render();});
+  // Body Mass (kg) is the twin of Body weight (lbs) — editing it writes back to lbs
+  const bm=$('input[data-kgmass]'); if(bm) bm.onchange=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*2.2).toFixed(1); render(); };
   const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(lp.value); };
   const rb=document.querySelector('details.refbox'); if(rb) rb.addEventListener('toggle',()=>{ S._refOpen=rb.open; });
   // product table edits (role-aware)
