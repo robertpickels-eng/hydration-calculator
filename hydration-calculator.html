@@ -255,7 +255,10 @@ function viewCalculator(){
           <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
           <span class="u">mmol/L</span></div>
       </div>
-      <div class="panel" style="margin-top:16px">
+    </div>
+
+    <div>
+      <div class="panel">
         <h2>Bottle</h2>
         ${numField('Bottle size','bottleOz','oz',0.1)}
         ${numField('Bottles per hour','bottlesPerHour','',0.25)}
@@ -280,10 +283,8 @@ function viewCalculator(){
           <button class="ghost sm" onclick="window._clearComp()">Clear carbs/salts</button>
         </div>
       </div>
-    </div>
 
-    <div>
-      <div class="panel">
+      <div class="panel" style="margin-top:16px">
         <h2>Bottle Osmolality</h2>
         <div style="display:flex;align-items:baseline;gap:12px">
           <span class="big">${fmt(mosm,0)}</span><span class="muted">mOsm/L</span>
