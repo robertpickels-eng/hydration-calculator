@@ -120,15 +120,29 @@ function osmolesOf(c, de){
     + 4*(c.citrate||0)/MW.citrate;   // Na3-citrate -> 3 Na+ + citrate3- (4 particles)
 }
 function osmolality(c, oz, de){ return oz ? osmolesOf(c,de) * OZ_PER_L * 1000 / oz : 0; } // mOsm/L
-// custom extra ingredients (added on top of base comp)
+// add-on ingredient libraries — limited to the carbs/electrolytes the model knows
+// carb: mw (null => maltodextrin, MW from DE), p = osmotic particles
+const CARB_LIB = [
+  {key:'glucose',  name:'Glucose / Dextrose', mw:180.16, p:1},
+  {key:'fructose', name:'Fructose',           mw:180.16, p:1},
+  {key:'sucrose',  name:'Sucrose',            mw:342.30, p:1},
+  {key:'malto',    name:'Maltodextrin',       mw:null,   p:1},
+];
+// electrolyte: p = particles, naFrac = sodium fraction of mass
+const ELYTE_LIB = [
+  {key:'nacl',    name:'Sodium chloride (NaCl)', mw:MW.nacl,    p:2, naFrac:NA_MW/MW.nacl},
+  {key:'citrate', name:'Sodium citrate',         mw:MW.citrate, p:4, naFrac:3*NA_MW/MW.citrate},
+];
+const carbLibMW = it => it.mw===null ? maltoMW(S.maltoDE) : it.mw;
+// custom extra ingredients (added on top of base comp) — each {id, key, grams}
 function extrasOsmoles(){
   let m=0;
-  (S.extraCarbs||[]).forEach(x=>{ if(+x.mw>0) m += (+x.grams||0)/(+x.mw)*(+x.particles||1); });
-  (S.extraLytes||[]).forEach(x=>{ if(+x.mw>0) m += (+x.grams||0)/(+x.mw)*(+x.particles||1); });
+  (S.extraCarbs||[]).forEach(x=>{ const it=CARB_LIB.find(c=>c.key===x.key); if(it) m += (+x.grams||0)/carbLibMW(it)*it.p; });
+  (S.extraLytes||[]).forEach(x=>{ const it=ELYTE_LIB.find(c=>c.key===x.key); if(it) m += (+x.grams||0)/it.mw*it.p; });
   return m;
 }
 function extrasCarbG(){ return (S.extraCarbs||[]).reduce((s,x)=>s+(+x.grams||0),0); }
-function extrasNaMg(){ return (S.extraLytes||[]).reduce((s,x)=>s+(+x.grams||0)*(+x.naFrac||0)*1000,0); }
+function extrasNaMg(){ return (S.extraLytes||[]).reduce((s,x)=>{ const it=ELYTE_LIB.find(c=>c.key===x.key); return s+(it?(+x.grams||0)*it.naFrac*1000:0); },0); }
 // osmolality contribution from a sodium amount treated as a simple monovalent salt (2 particles)
 function osmolFromSodium(mg){ return 2*(mg/NA_MW/1000); } // mol of particles
 
@@ -160,7 +174,8 @@ function wtCF(wt){
 const S = {
   // athlete / session
   bodyLbs:145, pre:145, post:142, time:1.2,    // -> sweat rate
-  manualSweat:null,                            // L/hr override (null = computed)
+  manualSweat:null,                            // L/hr (used by estimate/manual methods)
+  sweatMethod:'prepost',                       // 'prepost' | 'estimate' | 'manual'
   bottleOz:33.8, bottlesPerHour:1,
   acceptLoss:2,                                // % acceptable weight loss
   sweatNa:1380,                                // mg/L
@@ -176,10 +191,15 @@ const S = {
 };
 
 /* derived athlete numbers */
+// "guestimator" sweat levels -> L/hr
+const SWEAT_GUESS = [
+  [0.4,'Barely sweating'], [0.7,'A little sweaty'], [1.0,'Sweaty'],
+  [1.5,'Disgustingly sweaty'], [2.0,'Drowning in it'],
+];
 function sweatRateLhr(){
-  if(S.manualSweat!=null && S.manualSweat!=='') return +S.manualSweat;
-  // ((pre-post)/time)/2.2 *0.95  (lbs->kg, *0.95 CHO-burn correction)  -> L/hr
-  return ((S.pre - S.post)/S.time)/2.2*0.95;
+  if((S.sweatMethod||'prepost')==='prepost')
+    return ((S.pre - S.post)/S.time)/2.2*0.95;  // (lbs->kg, *0.95 CHO-burn correction) L/hr
+  return (S.manualSweat!=null && S.manualSweat!=='') ? +S.manualSweat : 0; // estimate / manual
 }
 function bodyKg(){ return S.bodyLbs/2.2; }
 function totalECF(){ return bodyKg()*0.25; }            // L
@@ -305,32 +325,24 @@ const SWEAT_NA_REF = [
   [20, 460, 'Low'], [40, 920, 'L Norm'], [60, 1380, 'H Norm'],
   [80, 1840, 'Salty'], [100, 2300, 'Highest'], [140, 3220, 'Body'],
 ];
-// custom add-on ingredient rows (rendered only when present)
+// add-on ingredient row: a dropdown limited to the known library + grams
 function extraRow(x, kind){
-  const a = kind==='c' ? 'data-xc' : 'data-xl';
-  const naCol = kind==='l'
-    ? `<input type="number" step="0.01" value="${x.naFrac}" ${a}="${x.id}" data-xf="naFrac" style="width:46px" title="sodium fraction of mass (0–1)" placeholder="Na f">`
-    : '';
-  return `<div class="field" style="gap:5px">
-    <input type="text" value="${(x.name||'').replace(/"/g,'&quot;')}" ${a}="${x.id}" data-xf="name" placeholder="${kind==='c'?'e.g. Trehalose':'e.g. KCl'}" style="flex:1;min-width:40px;text-align:left">
-    <input type="number" step="0.5" value="${x.grams}" ${a}="${x.id}" data-xf="grams" style="width:52px" title="grams" placeholder="g">
-    <input type="number" step="1" value="${x.mw}" ${a}="${x.id}" data-xf="mw" style="width:56px" title="molar mass g/mol" placeholder="MW">
-    <input type="number" step="1" value="${x.particles}" ${a}="${x.id}" data-xf="particles" style="width:42px" title="osmotic particles per molecule" placeholder="prt">
-    ${naCol}
+  const lib = kind==='c' ? CARB_LIB : ELYTE_LIB;
+  const a   = kind==='c' ? 'data-xc' : 'data-xl';
+  return `<div class="field" style="gap:5px;margin-left:10px">
+    <span class="muted" style="font-size:11px">+</span>
+    <select ${a}="${x.id}" data-xf="key" style="flex:1;min-width:0">
+      ${lib.map(it=>`<option value="${it.key}"${x.key===it.key?' selected':''}>${it.name}</option>`).join('')}
+    </select>
+    <input type="number" step="0.5" value="${x.grams}" ${a}="${x.id}" data-xf="grams" style="width:60px" title="grams added">
+    <span class="u" style="width:auto">g</span>
     <button class="sm ghost" onclick="window._rmExtra('${kind}','${x.id}')" title="remove">×</button>
   </div>`;
 }
-function extraCarbsSection(){
-  if(!S.extraCarbs.length) return '';
-  return `<div class="sub-h">Additional carbohydrate</div>
-    <div class="note" style="margin:0 0 3px">name · grams · molar&nbsp;mass · particles (per molecule)</div>
-    ${S.extraCarbs.map(x=>extraRow(x,'c')).join('')}`;
-}
-function extraLytesSection(){
-  if(!S.extraLytes.length) return '';
-  return `<div class="sub-h">Additional electrolytes</div>
-    <div class="note" style="margin:0 0 3px">name · grams · molar&nbsp;mass · particles · Na&nbsp;fraction of mass (0–1)</div>
-    ${S.extraLytes.map(x=>extraRow(x,'l')).join('')}`;
+// section heading with an inline "+ add" button
+function headWithAdd(label, onclick){
+  return `<div class="sub-h" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+    <span>${label}</span><button class="sm ghost" style="padding:1px 7px" onclick="${onclick}">＋ add</button></div>`;
 }
 
 /* ---------- TAB: CALCULATOR ---------- */
@@ -361,14 +373,25 @@ function viewCalculator(){
         </div>
         <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
-        <div class="sub-h">Sweat rate — from pre/post weight</div>
-        <div class="fgrid">
+        <div class="sub-h">Sweat rate</div>
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Method</label>
+          <select id="sweatMethod" style="flex:1;min-width:0">
+            <option value="prepost"${S.sweatMethod==='prepost'?' selected':''}>From pre/post weight</option>
+            <option value="estimate"${S.sweatMethod==='estimate'?' selected':''}>Quick estimate (how sweaty?)</option>
+            <option value="manual"${S.sweatMethod==='manual'?' selected':''}>Enter L/hr directly</option>
+          </select></div>
+        ${S.sweatMethod==='prepost'?`<div class="fgrid">
           ${numField('Pre weight','pre','lbs')}
           ${numField('Post weight','post','lbs')}
           ${numField('Duration','time','hr',0.1)}
-          ${numField('or set L/hr','manualSweat','L/hr',0.01)}
-        </div>
-        <div class="res"><span class="muted">Computed sweat rate</span><span class="v">${fmt(sr,2)} L/hr</span></div>
+        </div>`:''}
+        ${S.sweatMethod==='estimate'?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">How sweaty?</label>
+          <select id="sweatGuess" style="flex:1;min-width:0">
+            ${SWEAT_GUESS.map(([v,label])=>`<option value="${v}"${(+S.manualSweat===v)?' selected':''}>${label} — ${v.toFixed(1)} L/hr</option>`).join('')}
+          </select></div>`:''}
+        ${S.sweatMethod==='manual'?numField('Sweat rate','manualSweat','L/hr',0.01):''}
+        <div class="res"><span class="muted">Sweat rate used</span><span class="v">${fmt(sr,2)} L/hr</span></div>
+        <div class="note">Want a precise number? Use the detailed <a href="https://www.sweatratecalculator.com" target="_blank" rel="noopener" style="color:var(--accent)">sweatratecalculator.com</a>, then enter the result above.</div>
         <div class="res"><span>Fluid need / hour</span><span class="v">${fmt(S.bottleOz*S.bottlesPerHour,1)} oz</span></div>
         <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg</span></div>
         <div class="sub-h">Targets</div>
@@ -399,12 +422,17 @@ function viewCalculator(){
             <span class="u">L</span></div>
         </div>
         ${numField('Bottles / hr','bottlesPerHour','',0.25)}
-        <div class="row-actions" style="margin-top:6px">
-          <select id="loadProd"><option value="">— load a product —</option>
+      </div>
+
+      <div class="panel" style="margin-top:16px">
+        <h2>Product</h2>
+        <div class="row-actions">
+          <select id="loadProd" style="flex:1;min-width:0"><option value="">— load a product —</option>
             ${loadableProducts().map(p=>`<option value="${p._id}">${p.name}</option>`).join('')}</select>
+          <button class="sm" onclick="window._createCustom()" title="Clear everything to a blank custom formula">Create Custom</button>
         </div>
         ${S.loadedProduct?`<div class="note" style="color:var(--accent2)">Loaded <b>${S.loadedProduct}</b> — values reflect the manufacturer's standard mix ratio, scaled to your bottle volume (${fmt(S.bottleOz,1)} oz / ${fmt(S.bottleOz/OZ_PER_L,2)} L). Edit any field to customize.</div>`:''}
-        <div class="sub-h">Carbohydrate sources — g/bottle</div>
+        ${headWithAdd('Carbohydrate sources — g/bottle','window._addExtraCarb()')}
         <div class="fgrid">
           ${compField('Glucose','glucose','g')}
           ${compField('Sucrose','sucrose','g')}
@@ -412,8 +440,9 @@ function viewCalculator(){
           ${compField('Fructose','fructose','g')}
           ${numField('Malto DE','maltoDE','',1)}
         </div>
+        ${S.extraCarbs.map(x=>extraRow(x,'c')).join('')}
         <div class="note">Malto eff. MW ≈ ${fmt(maltoMW(S.maltoDE),0)} g/mol (18016/DE) — higher DE → more particles → higher osmolality.</div>
-        <div class="sub-h">Electrolyte salts — g/bottle</div>
+        ${headWithAdd('Electrolyte salts — g/bottle','window._addExtraLyte()')}
         <div class="fgrid">
           ${compField('NaCl','nacl','g')}
           ${compField('Na citrate','citrate','g')}
@@ -421,13 +450,7 @@ function viewCalculator(){
             <input type="number" value="${fmt(calcDrinkNaPerOz(),1)}" disabled title="Calculated from NaCl + sodium citrate (+ any added electrolytes) ÷ bottle size">
             <span class="u">mg/oz</span></div>
         </div>
-        ${extraCarbsSection()}
-        ${extraLytesSection()}
-        <div class="row-actions" style="margin-top:8px">
-          <button class="sm ghost" onclick="window._addExtraCarb()">＋ Carbohydrate</button>
-          <button class="sm ghost" onclick="window._addExtraLyte()">＋ Electrolyte</button>
-          <button class="sm" onclick="window._createCustom()" title="Clear everything to a blank custom formula">Create Custom</button>
-        </div>
+        ${S.extraLytes.map(x=>extraRow(x,'l')).join('')}
         <div class="res" style="margin-top:6px"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
         <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}">${fmt(sodiumPerHour()-S.sweatNa*sr,0)} mg</span></div>
       </div>
@@ -696,13 +719,22 @@ function bind(){
   const bm=$('input[data-kgmass]'); if(bm) bm.onchange=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*2.2).toFixed(1); render(); };
   // Bottle size in liters is the twin of oz — editing it writes back to oz
   const bv=$('input[data-lvol]'); if(bv) bv.onchange=()=>{ const v=+bv.value; if(v>0){ S.bottleOz=+(v*OZ_PER_L).toFixed(2); S.loadedProduct=null; } render(); };
-  // custom add-on ingredient edits (name commits on blur; numbers update live)
+  // custom add-on ingredient edits (key dropdown + grams)
   document.querySelectorAll('[data-xc],[data-xl]').forEach(el=>{
     const arr=el.hasAttribute('data-xc')?S.extraCarbs:S.extraLytes;
     const id=el.dataset.xc||el.dataset.xl, f=el.dataset.xf;
-    const handler=()=>{ const x=arr.find(i=>i.id===id); if(!x) return; x[f]= f==='name'?el.value:(+el.value||0); render(); };
-    if(f==='name') el.onchange=handler; else el.oninput=handler;
+    const handler=()=>{ const x=arr.find(i=>i.id===id); if(!x) return; x[f]= f==='key'?el.value:(+el.value||0); render(); };
+    if(el.tagName==='SELECT') el.onchange=handler; else el.oninput=handler;
   });
+  // sweat-rate method + quick-estimate dropdowns
+  const sm=$('#sweatMethod'); if(sm) sm.onchange=()=>{
+    const prevRate=sweatRateLhr();   // rate under the previous method
+    S.sweatMethod=sm.value;
+    if(sm.value==='estimate' && !SWEAT_GUESS.some(g=>+S.manualSweat===g[0])) S.manualSweat=1.0;
+    if(sm.value==='manual' && (S.manualSweat==null||S.manualSweat==='')) S.manualSweat=+(prevRate||1.0).toFixed(2);
+    render();
+  };
+  const sg=$('#sweatGuess'); if(sg) sg.onchange=()=>{ S.manualSweat=+sg.value; render(); };
   const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(lp.value); };
   const ss=$('#sweatNaSel'); if(ss) ss.onchange=()=>{
     if(ss.value==='manual'){ S.sweatNaMode='manual'; }
@@ -760,8 +792,8 @@ window._reject =(id)=>{ DB.userItems=DB.userItems.filter(u=>u.id!==id); saveDB()
 window._resetRow=(id)=>{ if(id.startsWith('c:')){ delete DB.overrides[id.slice(2)]; saveDB(); render(); } };
 window._clearComp=()=>{S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};S.loadedProduct=null;render();};
 const _xid=(p)=>p+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
-window._addExtraCarb=()=>{ S.extraCarbs.push({id:_xid('xc'),name:'',grams:0,mw:180,particles:1}); render(); };
-window._addExtraLyte=()=>{ S.extraLytes.push({id:_xid('xl'),name:'',grams:0,mw:58.44,particles:2,naFrac:0}); render(); };
+window._addExtraCarb=()=>{ S.extraCarbs.push({id:_xid('xc'),key:CARB_LIB[0].key,grams:0}); render(); };
+window._addExtraLyte=()=>{ S.extraLytes.push({id:_xid('xl'),key:ELYTE_LIB[0].key,grams:0}); render(); };
 window._rmExtra=(kind,id)=>{ if(kind==='c') S.extraCarbs=S.extraCarbs.filter(x=>x.id!==id); else S.extraLytes=S.extraLytes.filter(x=>x.id!==id); render(); };
 window._createCustom=()=>{ S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0}; S.extraCarbs=[]; S.extraLytes=[]; S.loadedProduct=null; render(); };
 window._addHours=(n)=>{ S.projHours=Math.min(36,(S.projHours||8)+n); render(); };
