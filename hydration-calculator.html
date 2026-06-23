@@ -252,8 +252,10 @@ function viewCalculator(){
         <div class="sub-h">Targets</div>
         ${numField('Acceptable weight loss','acceptLoss','%',0.5)}
         ${numField('Sweat sodium','sweatNa','mg/L',10)}
-        ${numField('Body Na⁺ concentration','bodyNaConc','mmol/L',1)}
         ${sweatNaRefTable()}
+        <div class="field"><label>Body Na⁺ concentration 🔒</label>
+          <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
+          <span class="u">mmol/L</span></div>
       </div>
       <div class="panel" style="margin-top:16px">
         <h2>Bottle</h2>
