@@ -621,12 +621,17 @@ function bind(){
 window._loadProd=(id)=>{
   const p=allProducts().find(x=>x._id===id) || allProducts()[0];
   if(!p) return;
-  S.comp.glucose=p.split.glucose; S.comp.sucrose=p.split.sucrose;
-  S.comp.malto=p.split.malto; S.comp.fructose=p.split.fructose;
-  S.maltoDE=p.de; S.bottleOz=p.oz; S.comp.citrate=0; S.comp.nacl=0;
-  // put product sodium in as NaCl-equivalent so osmolality reflects it
-  S.comp.nacl = +( (p.sodium/1000/0.3934) ).toFixed(2); // Na fraction of NaCl = 0.3934
-  active='calc'; render();
+  // Keep the user's bottle size; scale the product (a per-serving recipe) to fill it,
+  // preserving the product's concentration -> same osmolality at any bottle size.
+  const f = (+S.bottleOz || p.oz) / p.oz;
+  S.comp.glucose  = +(p.split.glucose  * f).toFixed(2);
+  S.comp.sucrose  = +(p.split.sucrose  * f).toFixed(2);
+  S.comp.malto    = +(p.split.malto    * f).toFixed(2);
+  S.comp.fructose = +(p.split.fructose * f).toFixed(2);
+  S.maltoDE = p.de; S.comp.citrate = 0;
+  // product sodium as NaCl-equivalent (Na fraction of NaCl = 0.3934), scaled to the bottle
+  S.comp.nacl = +((p.sodium/1000/0.3934) * f).toFixed(2);
+  active='calc'; render();   // S.bottleOz deliberately unchanged
 };
 window._adminToggle=()=>{
   if(ADMIN){ ADMIN=false; sessionStorage.removeItem('hydra_admin'); render(); return; }
