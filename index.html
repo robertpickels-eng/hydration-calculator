@@ -160,6 +160,7 @@ const S = {
   bodyNaConc:140,                              // mmol/L (locked physiological constant)
   maltoDE:18,
   projHours:8,                                 // hour-by-hour table length (expandable)
+  loadedProduct:null,                          // name of last-loaded product (cleared on manual edit)
   // bottle composition (grams per bottle)
   comp:{ glucose:0, sucrose:130, malto:0, fructose:0, nacl:0, citrate:4.3 }
 };
@@ -364,6 +365,7 @@ function viewCalculator(){
           <select id="loadProd"><option value="">— load a product —</option>
             ${loadableProducts().map(p=>`<option value="${p._id}">${p.name}</option>`).join('')}</select>
         </div>
+        ${S.loadedProduct?`<div class="note" style="color:var(--accent2)">Loaded <b>${S.loadedProduct}</b> — values reflect the manufacturer's standard mix ratio, scaled to your bottle volume (${fmt(S.bottleOz,1)} oz / ${fmt(S.bottleOz/OZ_PER_L,2)} L). Edit any field to customize.</div>`:''}
         <div class="sub-h">Carbohydrate sources — g/bottle</div>
         <div class="fgrid">
           ${compField('Glucose','glucose','g')}
@@ -637,6 +639,7 @@ function bind(){
   document.querySelectorAll('input[data-k]').forEach(el=>el.oninput=()=>{
     const obj = el.dataset.obj==='comp'?S.comp:S;
     let v=el.value; obj[el.dataset.k] = (v===''?(el.dataset.k==='manualSweat'?null:''):+v);
+    if(el.dataset.k==='bottleOz'||el.dataset.k==='maltoDE') S.loadedProduct=null; // manual change → no longer the stock mix
     // SOLVE inputs share data-k but target SOLVE via numField(obj)
     render();
   });
@@ -646,11 +649,11 @@ function bind(){
       el.oninput=()=>{SOLVE[el.dataset.k]=el.value===''?'':+el.value;render();};
     }
   });
-  document.querySelectorAll('input[data-comp]').forEach(el=>el.oninput=()=>{S.comp[el.dataset.comp]=+el.value||0;render();});
+  document.querySelectorAll('input[data-comp]').forEach(el=>el.oninput=()=>{S.comp[el.dataset.comp]=+el.value||0;S.loadedProduct=null;render();});
   // Body Mass (kg) is the twin of Body weight (lbs) — editing it writes back to lbs
   const bm=$('input[data-kgmass]'); if(bm) bm.onchange=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*2.2).toFixed(1); render(); };
   // Bottle size in liters is the twin of oz — editing it writes back to oz
-  const bv=$('input[data-lvol]'); if(bv) bv.onchange=()=>{ const v=+bv.value; if(v>0) S.bottleOz=+(v*OZ_PER_L).toFixed(2); render(); };
+  const bv=$('input[data-lvol]'); if(bv) bv.onchange=()=>{ const v=+bv.value; if(v>0){ S.bottleOz=+(v*OZ_PER_L).toFixed(2); S.loadedProduct=null; } render(); };
   const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(lp.value); };
   const ss=$('#sweatNaSel'); if(ss) ss.onchange=()=>{
     if(ss.value==='manual'){ S.sweatNaMode='manual'; }
@@ -687,6 +690,7 @@ window._loadProd=(id)=>{
   S.maltoDE = p.de; S.comp.citrate = 0;
   // product sodium as NaCl-equivalent (Na fraction of NaCl = 0.3934), scaled to the bottle
   S.comp.nacl = +((p.sodium/1000/0.3934) * f).toFixed(2);
+  S.loadedProduct = p.name;
   active='calc'; render();   // S.bottleOz deliberately unchanged
 };
 window._adminToggle=()=>{
@@ -705,7 +709,7 @@ window._addDrink=()=>{
 window._approve=(id)=>{ const it=DB.userItems.find(u=>u.id===id); if(it){ it.status='approved'; saveDB(); render(); } };
 window._reject =(id)=>{ DB.userItems=DB.userItems.filter(u=>u.id!==id); saveDB(); render(); };
 window._resetRow=(id)=>{ if(id.startsWith('c:')){ delete DB.overrides[id.slice(2)]; saveDB(); render(); } };
-window._clearComp=()=>{S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};render();};
+window._clearComp=()=>{S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};S.loadedProduct=null;render();};
 window._addHours=(n)=>{ S.projHours=Math.min(36,(S.projHours||8)+n); render(); };
 window._setHours=(n)=>{ S.projHours=n; render(); };
 window._setSweatNa=(mg)=>{S.sweatNa=mg;render();};
