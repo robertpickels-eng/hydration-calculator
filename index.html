@@ -110,17 +110,25 @@ const PLASMA_OSM = 290;       // reference plasma osmolality, mOsm/L
 const maltoMW = de => 18016 / Math.max(1, de);
 
 // osmolarity of a composition (grams) in a bottle of `oz`, with maltodextrin DE `de` -> mOsm/L
-function osmolality(c, oz, de){
-  if(!oz) return 0;
-  const osmol =
-      (c.glucose||0)/MW.glucose
+// moles of osmotically-active particles from the base composition
+function osmolesOf(c, de){
+  return (c.glucose||0)/MW.glucose
     + (c.fructose||0)/MW.fructose
     + (c.sucrose||0)/MW.sucrose
     + (c.malto||0)/maltoMW(de)
     + 2*(c.nacl||0)/MW.nacl          // NaCl -> Na+ + Cl-  (2 particles)
     + 4*(c.citrate||0)/MW.citrate;   // Na3-citrate -> 3 Na+ + citrate3- (4 particles)
-  return osmol * OZ_PER_L * 1000 / oz; // mOsm/L
 }
+function osmolality(c, oz, de){ return oz ? osmolesOf(c,de) * OZ_PER_L * 1000 / oz : 0; } // mOsm/L
+// custom extra ingredients (added on top of base comp)
+function extrasOsmoles(){
+  let m=0;
+  (S.extraCarbs||[]).forEach(x=>{ if(+x.mw>0) m += (+x.grams||0)/(+x.mw)*(+x.particles||1); });
+  (S.extraLytes||[]).forEach(x=>{ if(+x.mw>0) m += (+x.grams||0)/(+x.mw)*(+x.particles||1); });
+  return m;
+}
+function extrasCarbG(){ return (S.extraCarbs||[]).reduce((s,x)=>s+(+x.grams||0),0); }
+function extrasNaMg(){ return (S.extraLytes||[]).reduce((s,x)=>s+(+x.grams||0)*(+x.naFrac||0)*1000,0); }
 // osmolality contribution from a sodium amount treated as a simple monovalent salt (2 particles)
 function osmolFromSodium(mg){ return 2*(mg/NA_MW/1000); } // mol of particles
 
@@ -162,7 +170,9 @@ const S = {
   projHours:8,                                 // hour-by-hour table length (expandable)
   loadedProduct:null,                          // name of last-loaded product (cleared on manual edit)
   // bottle composition (grams per bottle)
-  comp:{ glucose:0, sucrose:130, malto:0, fructose:0, nacl:0, citrate:4.3 }
+  comp:{ glucose:0, sucrose:130, malto:0, fructose:0, nacl:0, citrate:4.3 },
+  extraCarbs:[],                               // custom add-on carbs  {id,name,grams,mw,particles}
+  extraLytes:[]                                // custom add-on salts  {id,name,grams,mw,particles,naFrac}
 };
 
 /* derived athlete numbers */
@@ -178,7 +188,7 @@ function bodyNaContentMmol(){ return S.bodyNaConc*totalECF(); }
 // sodium delivered by the actual salts in the bottle (mg)
 function naFromSaltsMg(){
   const c=S.comp;
-  return ((c.nacl||0)*NA_MW/MW.nacl + (c.citrate||0)*3*NA_MW/MW.citrate)*1000;
+  return ((c.nacl||0)*NA_MW/MW.nacl + (c.citrate||0)*3*NA_MW/MW.citrate)*1000 + extrasNaMg();
 }
 function calcDrinkNaPerOz(){ return S.bottleOz ? naFromSaltsMg()/S.bottleOz : 0; } // mg/oz (computed)
 function sodiumPerHour(){ return naFromSaltsMg()*S.bottlesPerHour; }              // mg/hr
@@ -295,19 +305,47 @@ const SWEAT_NA_REF = [
   [20, 460, 'Low'], [40, 920, 'L Norm'], [60, 1380, 'H Norm'],
   [80, 1840, 'Salty'], [100, 2300, 'Highest'], [140, 3220, 'Body'],
 ];
+// custom add-on ingredient rows (rendered only when present)
+function extraRow(x, kind){
+  const a = kind==='c' ? 'data-xc' : 'data-xl';
+  const naCol = kind==='l'
+    ? `<input type="number" step="0.01" value="${x.naFrac}" ${a}="${x.id}" data-xf="naFrac" style="width:46px" title="sodium fraction of mass (0–1)" placeholder="Na f">`
+    : '';
+  return `<div class="field" style="gap:5px">
+    <input type="text" value="${(x.name||'').replace(/"/g,'&quot;')}" ${a}="${x.id}" data-xf="name" placeholder="${kind==='c'?'e.g. Trehalose':'e.g. KCl'}" style="flex:1;min-width:40px;text-align:left">
+    <input type="number" step="0.5" value="${x.grams}" ${a}="${x.id}" data-xf="grams" style="width:52px" title="grams" placeholder="g">
+    <input type="number" step="1" value="${x.mw}" ${a}="${x.id}" data-xf="mw" style="width:56px" title="molar mass g/mol" placeholder="MW">
+    <input type="number" step="1" value="${x.particles}" ${a}="${x.id}" data-xf="particles" style="width:42px" title="osmotic particles per molecule" placeholder="prt">
+    ${naCol}
+    <button class="sm ghost" onclick="window._rmExtra('${kind}','${x.id}')" title="remove">×</button>
+  </div>`;
+}
+function extraCarbsSection(){
+  if(!S.extraCarbs.length) return '';
+  return `<div class="sub-h">Additional carbohydrate</div>
+    <div class="note" style="margin:0 0 3px">name · grams · molar&nbsp;mass · particles (per molecule)</div>
+    ${S.extraCarbs.map(x=>extraRow(x,'c')).join('')}`;
+}
+function extraLytesSection(){
+  if(!S.extraLytes.length) return '';
+  return `<div class="sub-h">Additional electrolytes</div>
+    <div class="note" style="margin:0 0 3px">name · grams · molar&nbsp;mass · particles · Na&nbsp;fraction of mass (0–1)</div>
+    ${S.extraLytes.map(x=>extraRow(x,'l')).join('')}`;
+}
+
 /* ---------- TAB: CALCULATOR ---------- */
 function viewCalculator(){
   const sr = sweatRateLhr();
   const c  = effComp();
   const oz = S.bottleOz;
-  const carbG = (c.glucose+c.sucrose+c.malto+c.fructose);
+  const carbG = (c.glucose+c.sucrose+c.malto+c.fructose) + extrasCarbG();
   const kcal  = carbG*4;
   const ml    = oz*ML_PER_OZ;
   const carbPct = carbG/ml*100;
-  const mosm  = osmolality(c, oz, S.maltoDE);
+  const mosm  = oz ? (osmolesOf(c, S.maltoDE) + extrasOsmoles()) * OZ_PER_L * 1000 / oz : 0;
   const ton   = tonicity(mosm);
   const naBottle = sodiumPerHour()/S.bottlesPerHour; // mg per bottle (drink Na model)
-  const naFromSalts = ( (c.nacl*NA_MW/MW.nacl) + (c.citrate*3*NA_MW/MW.citrate) )*1000; // mg from actual salts
+  const naFromSalts = naFromSaltsMg(); // mg from base salts + extra electrolytes
   const carbPerHr = carbG*S.bottlesPerHour;
   const mk = Math.max(0,Math.min(100,(mosm/700)*100));
 
@@ -380,14 +418,18 @@ function viewCalculator(){
           ${compField('NaCl','nacl','g')}
           ${compField('Na citrate','citrate','g')}
           <div class="field"><label>Drink Na <span class="muted">(calc)</span></label>
-            <input type="number" value="${fmt(calcDrinkNaPerOz(),1)}" disabled title="Calculated from NaCl + sodium citrate ÷ bottle size">
+            <input type="number" value="${fmt(calcDrinkNaPerOz(),1)}" disabled title="Calculated from NaCl + sodium citrate (+ any added electrolytes) ÷ bottle size">
             <span class="u">mg/oz</span></div>
         </div>
-        <div class="res"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
-        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}">${fmt(sodiumPerHour()-S.sweatNa*sr,0)} mg</span></div>
-        <div class="row-actions" style="margin-top:6px">
-          <button class="ghost sm" onclick="window._clearComp()">Clear carbs/salts</button>
+        ${extraCarbsSection()}
+        ${extraLytesSection()}
+        <div class="row-actions" style="margin-top:8px">
+          <button class="sm ghost" onclick="window._addExtraCarb()">＋ Carbohydrate</button>
+          <button class="sm ghost" onclick="window._addExtraLyte()">＋ Electrolyte</button>
+          <button class="sm" onclick="window._createCustom()" title="Clear everything to a blank custom formula">Create Custom</button>
         </div>
+        <div class="res" style="margin-top:6px"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
+        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}">${fmt(sodiumPerHour()-S.sweatNa*sr,0)} mg</span></div>
       </div>
     </div>
   </div>
@@ -654,6 +696,13 @@ function bind(){
   const bm=$('input[data-kgmass]'); if(bm) bm.onchange=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*2.2).toFixed(1); render(); };
   // Bottle size in liters is the twin of oz — editing it writes back to oz
   const bv=$('input[data-lvol]'); if(bv) bv.onchange=()=>{ const v=+bv.value; if(v>0){ S.bottleOz=+(v*OZ_PER_L).toFixed(2); S.loadedProduct=null; } render(); };
+  // custom add-on ingredient edits (name commits on blur; numbers update live)
+  document.querySelectorAll('[data-xc],[data-xl]').forEach(el=>{
+    const arr=el.hasAttribute('data-xc')?S.extraCarbs:S.extraLytes;
+    const id=el.dataset.xc||el.dataset.xl, f=el.dataset.xf;
+    const handler=()=>{ const x=arr.find(i=>i.id===id); if(!x) return; x[f]= f==='name'?el.value:(+el.value||0); render(); };
+    if(f==='name') el.onchange=handler; else el.oninput=handler;
+  });
   const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(lp.value); };
   const ss=$('#sweatNaSel'); if(ss) ss.onchange=()=>{
     if(ss.value==='manual'){ S.sweatNaMode='manual'; }
@@ -710,6 +759,11 @@ window._approve=(id)=>{ const it=DB.userItems.find(u=>u.id===id); if(it){ it.sta
 window._reject =(id)=>{ DB.userItems=DB.userItems.filter(u=>u.id!==id); saveDB(); render(); };
 window._resetRow=(id)=>{ if(id.startsWith('c:')){ delete DB.overrides[id.slice(2)]; saveDB(); render(); } };
 window._clearComp=()=>{S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};S.loadedProduct=null;render();};
+const _xid=(p)=>p+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
+window._addExtraCarb=()=>{ S.extraCarbs.push({id:_xid('xc'),name:'',grams:0,mw:180,particles:1}); render(); };
+window._addExtraLyte=()=>{ S.extraLytes.push({id:_xid('xl'),name:'',grams:0,mw:58.44,particles:2,naFrac:0}); render(); };
+window._rmExtra=(kind,id)=>{ if(kind==='c') S.extraCarbs=S.extraCarbs.filter(x=>x.id!==id); else S.extraLytes=S.extraLytes.filter(x=>x.id!==id); render(); };
+window._createCustom=()=>{ S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0}; S.extraCarbs=[]; S.extraLytes=[]; S.loadedProduct=null; render(); };
 window._addHours=(n)=>{ S.projHours=Math.min(36,(S.projHours||8)+n); render(); };
 window._setHours=(n)=>{ S.projHours=n; render(); };
 window._setSweatNa=(mg)=>{S.sweatNa=mg;render();};
