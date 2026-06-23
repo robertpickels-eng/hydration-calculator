@@ -63,6 +63,8 @@
   table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
   th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
   th:first-child,td:first-child{text-align:left}
+  table.tc th,table.tc td{text-align:center}
+  table.tc input{text-align:center}
   th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
   tr:hover td{background:var(--panel2)}
   .scroll{overflow:auto;max-height:560px;border-radius:10px}
@@ -505,7 +507,7 @@ function viewProjection(){
   const r=projectionRows(hrs);
   return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
   <div class="note">Carries the workbook's "Minimum Hydration Needs" + "Hydrating w/ specified drink" math. <b>Body weight</b> is green while within your acceptable-loss band, red below it. <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146 — same as your sheet.</div>
-  <div class="scroll" style="margin-top:10px"><table>
+  <div class="scroll" style="margin-top:10px"><table class="tc">
     <thead><tr><th>Hr</th><th>Water lost (L)</th><th>ECF (L)</th><th>To replace (oz)</th>
       <th>Bottles/hr</th><th>Total bottles</th><th>Body wt (lbs)</th>
       <th>Body Na⁺ (g)</th><th>Na⁺ (mmol)</th><th>Na⁺ (mM)</th></tr></thead>
@@ -537,7 +539,7 @@ function viewDatabase(){
   </div>
   <div class="note">Per-serving sodium/calories from the workbook; carb-source splits are <span class="est">editable estimates</span>.
     Existing rows are editable in <b>Admin</b> mode only. Anyone can <b>Add drink</b> — new rows are flagged <b>Pending</b> until an admin approves. <b>Load</b> sends an approved product into the Calculator.</div>
-  <div class="scroll" style="margin-top:10px"><table>
+  <div class="scroll" style="margin-top:10px"><table class="tc">
     <thead><tr><th>Product</th><th>oz</th><th>Na (mg)</th><th>kcal</th>
       <th>Glu</th><th>Suc</th><th>Malto</th><th>Fru</th><th>DE</th>
       <th>Carb g</th><th>Carb %</th><th>mOsm/L</th><th>Status / actions</th></tr></thead>
