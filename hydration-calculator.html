@@ -128,12 +128,10 @@ const S = {
   bottleOz:33.8, bottlesPerHour:1,
   acceptLoss:2,                                // % acceptable weight loss
   sweatNa:1380,                                // mg/L
-  drinkNaPerOz:37,                             // mg/oz  (used by projection)
-  bodyNaConc:140,                              // mmol/L
+  bodyNaConc:140,                              // mmol/L (locked physiological constant)
   maltoDE:18,
   // bottle composition (grams per bottle)
-  comp:{ glucose:0, sucrose:130, malto:0, fructose:0, nacl:0, citrate:0 },
-  autoCitrate:true   // derive citrate grams from drink sodium target (like J3)
+  comp:{ glucose:0, sucrose:130, malto:0, fructose:0, nacl:0, citrate:4.3 }
 };
 
 /* derived athlete numbers */
@@ -146,14 +144,14 @@ function bodyKg(){ return S.bodyLbs/2.2; }
 function totalECF(){ return bodyKg()*0.25; }            // L
 function bodyNaContentG(){ return (bodyNaContentMmol()*23)/1000; }
 function bodyNaContentMmol(){ return S.bodyNaConc*totalECF(); }
-function sodiumPerHour(){ return S.drinkNaPerOz*S.bottlesPerHour*S.bottleOz; } // mg
-function citrateAutoG(){ return (sodiumPerHour()/0.29)/1000; }                // workbook J3
-
-function effComp(){
-  const c = Object.assign({}, S.comp);
-  if(S.autoCitrate) c.citrate = citrateAutoG();
-  return c;
+// sodium delivered by the actual salts in the bottle (mg)
+function naFromSaltsMg(){
+  const c=S.comp;
+  return ((c.nacl||0)*NA_MW/MW.nacl + (c.citrate||0)*3*NA_MW/MW.citrate)*1000;
 }
+function calcDrinkNaPerOz(){ return S.bottleOz ? naFromSaltsMg()/S.bottleOz : 0; } // mg/oz (computed)
+function sodiumPerHour(){ return naFromSaltsMg()*S.bottlesPerHour; }              // mg/hr
+function effComp(){ return Object.assign({}, S.comp); }
 
 /* ============================================================
    PRODUCT DATABASE  (serving values from workbook; carb-source
@@ -261,7 +259,10 @@ function viewCalculator(){
         <h2>Bottle</h2>
         ${numField('Bottle size','bottleOz','oz',0.1)}
         ${numField('Bottles per hour','bottlesPerHour','',0.25)}
-        ${numField('Drink sodium (for projection)','drinkNaPerOz','mg/oz',1)}
+        <div class="row-actions">
+          <select id="loadProd"><option value="">— load a product —</option>
+            ${PRODUCTS.map((p,i)=>`<option value="${i}">${p.name}</option>`).join('')}</select>
+        </div>
         <div class="sub-h">Carbohydrate sources — grams per bottle</div>
         ${compField('Glucose / Dextrose','glucose','g')}
         ${compField('Sucrose','sucrose','g')}
@@ -271,14 +272,11 @@ function viewCalculator(){
         <div class="note">DE drives maltodextrin's osmotic weight (eff. MW ≈ 18016/DE ≈ ${fmt(maltoMW(S.maltoDE),0)} g/mol). Higher DE → more particles → higher osmolality.</div>
         <div class="sub-h">Electrolyte salts — grams per bottle</div>
         ${compField('Sodium chloride (NaCl)','nacl','g')}
-        <div class="field"><label>Sodium citrate ${S.autoCitrate?'<span class="muted">(auto)</span>':''}</label>
-          <input type="number" step="0.1" value="${fmt(c.citrate,2)}" data-comp="citrate" ${S.autoCitrate?'disabled':''}>
-          <span class="u">g</span></div>
-        <div class="field"><label class="muted">Auto-derive citrate from sodium target</label>
-          <input type="checkbox" id="autoCit" ${S.autoCitrate?'checked':''} style="width:auto"></div>
+        ${compField('Sodium citrate','citrate','g')}
+        <div class="field"><label>Drink sodium <span class="muted">(calculated)</span></label>
+          <input type="number" value="${fmt(calcDrinkNaPerOz(),1)}" disabled title="Calculated from NaCl + sodium citrate ÷ bottle size">
+          <span class="u">mg/oz</span></div>
         <div class="row-actions">
-          <select id="loadProd"><option value="">— load a product —</option>
-            ${PRODUCTS.map((p,i)=>`<option value="${i}">${p.name}</option>`).join('')}</select>
           <button class="ghost sm" onclick="window._clearComp()">Clear carbs/salts</button>
         </div>
       </div>
@@ -321,7 +319,7 @@ function viewCalculator(){
 /* ---------- TAB: PROJECTION (port of Bare-Minimum hours table) ---------- */
 function projectionRows(hours=24){
   const C6=sweatRateLhr(), H8=totalECF(), C3=S.bodyLbs, C7=S.acceptLoss/100,
-        H2=S.bottlesPerHour, C5=S.bottleOz, H5=S.drinkNaPerOz, H6=S.sweatNa, H11=bodyNaContentG();
+        H2=S.bottlesPerHour, C5=S.bottleOz, H5=calcDrinkNaPerOz(), H6=S.sweatNa, H11=bodyNaContentG();
   const rows=[]; let Jprev=H8, Mprev=0;
   for(let h=1;h<=hours;h++){
     const lost=h*C6;
@@ -513,7 +511,6 @@ function bind(){
     }
   });
   document.querySelectorAll('input[data-comp]').forEach(el=>el.oninput=()=>{S.comp[el.dataset.comp]=+el.value||0;render();});
-  const ac=$('#autoCit'); if(ac) ac.onchange=()=>{S.autoCitrate=ac.checked;render();};
   const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(+lp.value); };
   // product table edits
   document.querySelectorAll('input[data-prod]').forEach(el=>el.oninput=()=>{
@@ -536,7 +533,7 @@ window._loadProd=(i)=>{
   const p=PRODUCTS[i];
   S.comp.glucose=p.split.glucose; S.comp.sucrose=p.split.sucrose;
   S.comp.malto=p.split.malto; S.comp.fructose=p.split.fructose;
-  S.maltoDE=p.de; S.bottleOz=p.oz; S.autoCitrate=false; S.comp.citrate=0; S.comp.nacl=0;
+  S.maltoDE=p.de; S.bottleOz=p.oz; S.comp.citrate=0; S.comp.nacl=0;
   // put product sodium in as NaCl-equivalent so osmolality reflects it
   S.comp.nacl = +( (p.sodium/1000/0.3934) ).toFixed(2); // Na fraction of NaCl = 0.3934
   active='calc'; render();
