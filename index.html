@@ -143,6 +143,7 @@ const S = {
   sweatNa:1380,                                // mg/L
   bodyNaConc:140,                              // mmol/L (locked physiological constant)
   maltoDE:18,
+  projHours:8,                                 // hour-by-hour table length (expandable)
   // bottle composition (grams per bottle)
   comp:{ glucose:0, sucrose:130, malto:0, fructose:0, nacl:0, citrate:4.3 }
 };
@@ -419,7 +420,8 @@ function projectionRows(hours=24){
   return rows;
 }
 function viewProjection(){
-  const r=projectionRows(24);
+  const hrs=S.projHours||8;
+  const r=projectionRows(hrs);
   return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
   <div class="note">Carries the workbook's "Minimum Hydration Needs" + "Hydrating w/ specified drink" math. <b>Body weight</b> is green while within your acceptable-loss band, red below it. <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146 — same as your sheet.</div>
   <div class="scroll" style="margin-top:10px"><table>
@@ -430,7 +432,13 @@ function viewProjection(){
       <td>${x.h}</td><td>${fmt(x.lost,1)}</td><td>${fmt(x.ecf,1)}</td><td>${fmt(x.repOz,1)}</td>
       <td>${fmt(x.bph,2)}</td><td>${fmt(x.btot,1)}</td><td ${wtCF(x.wt)}>${fmt(x.wt,1)}</td>
       <td>${fmt(x.Ng,1)}</td><td>${fmt(x.Ommol,0)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td></tr>`).join('')}
-    </tbody></table></div></div>`;
+    </tbody></table></div>
+  <div class="row-actions" style="margin-top:8px;align-items:center">
+    <span class="muted" style="font-size:12px">Showing ${hrs} hours</span>
+    <button class="sm" onclick="window._addHours(4)" ${hrs>=36?'disabled':''}>＋4 hours</button>
+    <button class="sm" onclick="window._addHours(8)" ${hrs>=36?'disabled':''}>＋8 hours</button>
+    ${hrs>8?`<button class="sm ghost" onclick="window._setHours(8)">Reset to 8</button>`:''}
+  </div></div>`;
 }
 
 /* ---------- TAB: DRINK DATABASE ---------- */
@@ -678,6 +686,8 @@ window._approve=(id)=>{ const it=DB.userItems.find(u=>u.id===id); if(it){ it.sta
 window._reject =(id)=>{ DB.userItems=DB.userItems.filter(u=>u.id!==id); saveDB(); render(); };
 window._resetRow=(id)=>{ if(id.startsWith('c:')){ delete DB.overrides[id.slice(2)]; saveDB(); render(); } };
 window._clearComp=()=>{S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};render();};
+window._addHours=(n)=>{ S.projHours=Math.min(36,(S.projHours||8)+n); render(); };
+window._setHours=(n)=>{ S.projHours=n; render(); };
 window._setSweatNa=(mg)=>{S.sweatNa=mg;render();};
 window._useSweat=(i)=>{const c=swCalc(SWEATLOG[i]);S.manualSweat=+c.lHr.toFixed(3);active='calc';render();};
 window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'',oz:0,na:''});render();};
