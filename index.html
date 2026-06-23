@@ -523,11 +523,11 @@ function viewProjection(){
   return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
   <div class="note">Projects <b>your plan</b>: Bottles = hours × your Bottles/hr, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146.</div>
   <div class="scroll" style="margin-top:10px"><table class="tc">
-    <thead><tr><th>Hr</th><th>Water lost (L)</th><th>Bottles</th><th>Replaced (oz)</th>
+    <thead><tr><th>Hr</th><th>Water lost (L)</th><th>Replaced (oz)</th>
       <th>Wt loss (lbs)</th><th>Wt loss (%)</th><th>Body wt (lbs)</th>
       <th>New ECF (L)</th><th>Body Na⁺ (g)</th><th>Na⁺ (mM)</th></tr></thead>
     <tbody>${r.map(x=>`<tr>
-      <td>${x.h}</td><td>${fmt(x.lostL,1)}</td><td>${fmt(x.bottles,1)}</td><td>${fmt(x.replOz,0)}</td>
+      <td>${x.h}</td><td>${fmt(x.lostL,1)}</td><td>${fmt(x.replOz,0)}</td>
       <td>${fmt(x.lossLbs,1)}</td><td ${lossCF(x.lossPct)}>${fmt(x.lossPct,1)}%</td>
       <td ${wtCF(x.wt)}>${fmt(x.wt,1)}</td><td>${fmt(x.ecf,1)}</td>
       <td>${fmt(x.Ng,1)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td></tr>`).join('')}
