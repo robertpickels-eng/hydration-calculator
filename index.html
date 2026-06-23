@@ -341,24 +341,6 @@ function viewCalculator(){
           <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
           <span class="u">mM</span></div>
       </div>
-
-      <div class="panel" style="margin-top:16px">
-        <h2>Bottle Osmolality</h2>
-        <div style="display:flex;align-items:baseline;gap:12px">
-          <span class="big">${fmt(mosm,0)}</span><span class="muted">mOsm/L</span>
-          <span class="pill" style="background:var(--${ton.cls});color:#06121f;margin-left:auto">${ton.label}</span>
-        </div>
-        <div class="gauge"><div class="mk" style="left:calc(${mk}% - 1px)"></div></div>
-        <div class="muted" style="font-size:12px">Hypo&nbsp;·&nbsp;Iso(~290)&nbsp;·&nbsp;Hyper&nbsp;→ ${ton.desc}</div>
-        <div style="margin-top:12px">
-          <div class="res"><span>Carbohydrate total</span><span class="v">${fmt(carbG,1)} g</span></div>
-          <div class="res"><span>Carbohydrate concentration</span><span class="v">${fmt(carbPct,1)} %</span></div>
-          <div class="res"><span>Calories (carb)</span><span class="v">${fmt(kcal,0)} kcal</span></div>
-          <div class="res"><span>Carb per hour</span><span class="v">${fmt(carbPerHr,0)} g/hr</span></div>
-          <div class="res"><span>Sodium from salts in bottle</span><span class="v">${fmt(naFromSalts,0)} mg</span></div>
-        </div>
-        <div class="note">Σ(g ÷ molar mass × particles) ÷ volume. Sugars = 1, NaCl = 2, Na-citrate = 4, maltodextrin ≈ 1 per (18016/DE) g.</div>
-      </div>
     </div>
 
     <div>
@@ -394,6 +376,28 @@ function viewCalculator(){
         <div class="row-actions" style="margin-top:6px">
           <button class="ghost sm" onclick="window._clearComp()">Clear carbs/salts</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h2>Bottle Osmolality</h2>
+    <div class="grid cols2" style="align-items:center;gap:20px">
+      <div>
+        <div style="display:flex;align-items:baseline;gap:12px">
+          <span class="big">${fmt(mosm,0)}</span><span class="muted">mOsm/L</span>
+          <span class="pill" style="background:var(--${ton.cls});color:#06121f;margin-left:auto">${ton.label}</span>
+        </div>
+        <div class="gauge"><div class="mk" style="left:calc(${mk}% - 1px)"></div></div>
+        <div class="muted" style="font-size:12px">Hypo&nbsp;·&nbsp;Iso(~290)&nbsp;·&nbsp;Hyper&nbsp;→ ${ton.desc}</div>
+        <div class="note">Σ(g ÷ molar mass × particles) ÷ volume. Sugars = 1, NaCl = 2, Na-citrate = 4, maltodextrin ≈ 1 per (18016/DE) g.</div>
+      </div>
+      <div>
+        <div class="res"><span>Carbohydrate total</span><span class="v">${fmt(carbG,1)} g</span></div>
+        <div class="res"><span>Carbohydrate concentration</span><span class="v">${fmt(carbPct,1)} %</span></div>
+        <div class="res"><span>Calories (carb)</span><span class="v">${fmt(kcal,0)} kcal</span></div>
+        <div class="res"><span>Carb per hour</span><span class="v">${fmt(carbPerHr,0)} g/hr</span></div>
+        <div class="res"><span>Sodium from salts in bottle</span><span class="v">${fmt(naFromSalts,0)} mg</span></div>
       </div>
     </div>
   </div>
