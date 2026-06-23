@@ -180,6 +180,7 @@ const S = {
   sweatMethod:'prepost',                       // 'prepost' | 'estimate' | 'manual'
   bottleOz:33.8, bottlesPerHour:1,
   acceptLoss:2,                                // % acceptable weight loss
+  acceptLossMode:'preset',                     // 'preset' | 'manual'
   sweatNa:1380,                                // mg/L
   sweatNaMode:'preset',                        // 'preset' (acclimatization dropdown) | 'manual'
   bodyNaConc:140,                              // mmol/L (locked physiological constant)
@@ -197,6 +198,11 @@ const S = {
 const SWEAT_GUESS = [
   [0.4,'Barely sweating'], [0.7,'A little sweaty'], [1.0,'Sweaty'],
   [1.5,'Disgustingly sweaty'], [2.0,'Drowning in it'],
+];
+// acceptable body-mass loss presets -> %
+const ACCEPT_LOSS = [
+  [0,"I wouldn't recommend"], [1,"I don't like being thirsty"],
+  [2,'Maximize Performance'], [4,'Things get ugly after this'],
 ];
 function sweatRateLhr(){
   if((S.sweatMethod||'prepost')==='prepost')
@@ -397,12 +403,16 @@ function viewCalculator(){
         <div class="res"><span>Fluid need / hour</span><span class="v">${fmt(S.bottleOz*S.bottlesPerHour,1)} oz</span></div>
         <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg</span></div>
         <div class="sub-h">Targets</div>
-        <div class="fgrid">
-          ${numField('Accept. loss','acceptLoss','%',0.5)}
-          <div class="field"><label>Body Na⁺ 🔒</label>
-            <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
-            <span class="u">mM</span></div>
-        </div>
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Accept. loss</label>
+          <select id="acceptLossSel" style="flex:1;min-width:0">
+            ${ACCEPT_LOSS.map(([v,desc])=>`<option value="${v}"${S.acceptLossMode!=='manual'&&S.acceptLoss==v?' selected':''}>${v}% — ${desc}</option>`).join('')}
+            <option value="manual"${S.acceptLossMode==='manual'?' selected':''}>Manual entry…</option>
+          </select></div>
+        ${S.acceptLossMode==='manual'?`<div class="field"><label class="muted">↳ manual</label>
+          <input type="number" step="0.5" value="${S.acceptLoss}" data-k="acceptLoss" data-obj="S"><span class="u">%</span></div>`:''}
+        <div class="field"><label>Body Na⁺ 🔒</label>
+          <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
+          <span class="u">mM</span></div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Sweat sodium</label>
           <select id="sweatNaSel" style="flex:1;min-width:0">
             ${SWEAT_NA_REF.map(([mM,mg,desc])=>`<option value="${mg}"${S.sweatNaMode!=='manual'&&S.sweatNa==mg?' selected':''}>${desc} — ${mg} mg/L · ${mM} mM</option>`).join('')}
@@ -754,6 +764,11 @@ function bind(){
     render();
   };
   const sg=$('#sweatGuess'); if(sg) sg.onchange=()=>{ S.manualSweat=+sg.value; render(); };
+  const al=$('#acceptLossSel'); if(al) al.onchange=()=>{
+    if(al.value==='manual'){ S.acceptLossMode='manual'; }
+    else { S.acceptLossMode='preset'; S.acceptLoss=+al.value; }
+    render();
+  };
   const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(lp.value); };
   const ss=$('#sweatNaSel'); if(ss) ss.onchange=()=>{
     if(ss.value==='manual'){ S.sweatNaMode='manual'; }
