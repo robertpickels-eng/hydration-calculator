@@ -402,6 +402,15 @@ function viewCalculator(){
         <div class="note">Want a precise number? Use the detailed <a href="https://www.sweatratecalculator.com" target="_blank" rel="noopener" style="color:var(--accent)">sweatratecalculator.com</a>, then enter the result above.</div>
         <div class="res"><span>Fluid need / hour</span><span class="v">${fmt(S.bottleOz*S.bottlesPerHour,1)} oz</span></div>
         <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg</span></div>
+        <div class="sub-h">Sweat sodium</div>
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Concentration</label>
+          <select id="sweatNaSel" style="flex:1;min-width:0">
+            ${SWEAT_NA_REF.map(([mM,mg,desc])=>`<option value="${mg}"${S.sweatNaMode!=='manual'&&S.sweatNa==mg?' selected':''}>${desc} — ${mg} mg/L · ${mM} mM</option>`).join('')}
+            <option value="manual"${S.sweatNaMode==='manual'?' selected':''}>Manual entry…</option>
+          </select></div>
+        ${S.sweatNaMode==='manual'?`<div class="field"><label class="muted">↳ manual value</label>
+          <input type="number" step="10" value="${S.sweatNa}" data-k="sweatNa" data-obj="S"><span class="u">mg/L</span></div>`:''}
+        <div class="note">With heat acclimatization, sweat [Na⁺] concentration <b>drops</b> — you lose less sodium per liter of sweat (sweat gets less salty).</div>
         <div class="sub-h">Targets</div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Accept. loss</label>
           <select id="acceptLossSel" style="flex:1;min-width:0">
@@ -410,17 +419,6 @@ function viewCalculator(){
           </select></div>
         ${S.acceptLossMode==='manual'?`<div class="field"><label class="muted">↳ manual</label>
           <input type="number" step="0.5" value="${S.acceptLoss}" data-k="acceptLoss" data-obj="S"><span class="u">%</span></div>`:''}
-        <div class="field"><label>Body Na⁺ 🔒</label>
-          <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
-          <span class="u">mM</span></div>
-        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Sweat sodium</label>
-          <select id="sweatNaSel" style="flex:1;min-width:0">
-            ${SWEAT_NA_REF.map(([mM,mg,desc])=>`<option value="${mg}"${S.sweatNaMode!=='manual'&&S.sweatNa==mg?' selected':''}>${desc} — ${mg} mg/L · ${mM} mM</option>`).join('')}
-            <option value="manual"${S.sweatNaMode==='manual'?' selected':''}>Manual entry…</option>
-          </select></div>
-        ${S.sweatNaMode==='manual'?`<div class="field"><label class="muted">↳ manual value</label>
-          <input type="number" step="10" value="${S.sweatNa}" data-k="sweatNa" data-obj="S"><span class="u">mg/L</span></div>`:''}
-        <div class="note">Sweat [Na⁺] rises (gets less salty) with heat acclimatization.</div>
       </div>
     </div>
 
