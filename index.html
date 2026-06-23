@@ -15,7 +15,7 @@
   body{margin:0;background:var(--bg);color:var(--txt);
     font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
   h1{font-size:20px;margin:0}
-  h2{font-size:15px;margin:0 0 10px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
+  h2{font-size:14px;margin:0 0 6px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
   header{display:flex;align-items:center;gap:14px;padding:14px 20px;background:var(--panel);
     border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
   header .sub{color:var(--muted);font-size:12px}
@@ -27,22 +27,29 @@
   .grid{display:grid;gap:16px}
   .cols2{grid-template-columns:1fr 1fr}
   .cols3{grid-template-columns:repeat(3,1fr)}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:var(--shadow)}
-  .field{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:7px 0}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px;box-shadow:var(--shadow)}
+  .field{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:3px 0}
   .field label{color:var(--muted);font-size:13px;flex:1}
-  .field .u{color:var(--muted);font-size:11px;width:46px;text-align:left}
+  .field .u{color:var(--muted);font-size:11px;width:42px;text-align:left}
   input[type=number],input[type=text],select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
-    border-radius:7px;padding:7px 9px;width:92px;font-size:14px;text-align:right}
+    border-radius:6px;padding:4px 7px;width:86px;font-size:13px;text-align:right}
   input[type=text],select{text-align:left;width:160px}
   input:focus,select:focus{outline:none;border-color:var(--accent)}
   input:disabled{opacity:.5;cursor:not-allowed;background:var(--panel)}
-  .res{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line)}
+  /* two-up field rows to keep inputs compact so the table stays in view */
+  .fgrid{display:grid;grid-template-columns:1fr 1fr;column-gap:14px}
+  .fgrid .field{gap:5px}
+  .fgrid label{font-size:12px}
+  .fgrid input[type=number]{width:58px}
+  .fgrid .u{width:28px;font-size:10px}
+  @media(max-width:560px){.fgrid{grid-template-columns:1fr}}
+  .res{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed var(--line)}
   .res:last-child{border-bottom:none}
   .res .v{font-weight:700;font-variant-numeric:tabular-nums}
   .big{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
   .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700}
   .muted{color:var(--muted)}
-  .note{font-size:12px;color:var(--muted);margin-top:8px}
+  .note{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.3}
   table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
   th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
   th:first-child,td:first-child{text-align:left}
@@ -56,7 +63,12 @@
   .gauge .mk{position:absolute;top:-4px;width:3px;height:18px;background:#fff;border-radius:2px;box-shadow:0 0 4px #000}
   .hint{cursor:help;border-bottom:1px dotted var(--muted)}
   .row-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-  .sub-h{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent2);margin:14px 0 4px}
+  .sub-h{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent2);margin:8px 0 2px}
+  details.refbox{margin:2px 0}
+  summary.sub-h{cursor:pointer;list-style:none}
+  summary.sub-h::-webkit-details-marker{display:none}
+  summary.sub-h::before{content:"▸ ";font-size:9px}
+  details[open] summary.sub-h::before{content:"▾ "}
   .est{color:var(--warn);font-size:11px}
   @media(max-width:880px){.cols2,.cols3{grid-template-columns:1fr}.tabs{top:51px}}
 </style>
@@ -266,15 +278,18 @@ const SWEAT_NA_REF = [
   [80, 1840, 'Salty'], [100, 2300, 'Highest'], [140, 3220, 'Body'],
 ];
 function sweatNaRefTable(){
-  return `<div class="sub-h">Typical sweat [Na⁺] — acclimatization</div>
-  <table style="font-size:12px">
-    <thead><tr><th>mmol/L</th><th>mg/L</th><th>Level</th></tr></thead>
-    <tbody>${SWEAT_NA_REF.map(([mM,mg,desc])=>`<tr onclick="window._setSweatNa(${mg})"
-      style="cursor:pointer;${S.sweatNa==mg?'outline:2px solid var(--accent);outline-offset:-2px':''}">
-      <td>${mM}</td><td>${mg}</td><td style="text-align:left">${desc}</td></tr>`).join('')}
-    </tbody>
-  </table>
-  <div class="note">Sweat [Na⁺] rises (gets less salty) with heat acclimatization. Click a row to set the value above.</div>`;
+  const cur = SWEAT_NA_REF.find(([,mg])=>S.sweatNa==mg);
+  return `<details class="refbox"${S._refOpen?' open':''}>
+    <summary class="sub-h">Typical sweat [Na⁺] — acclimatization${cur?` · now: ${cur[2]}`:''}</summary>
+    <table style="font-size:12px">
+      <thead><tr><th>mmol/L</th><th>mg/L</th><th>Level</th></tr></thead>
+      <tbody>${SWEAT_NA_REF.map(([mM,mg,desc])=>`<tr onclick="window._setSweatNa(${mg})"
+        style="cursor:pointer;${S.sweatNa==mg?'outline:2px solid var(--accent);outline-offset:-2px':''}">
+        <td>${mM}</td><td>${mg}</td><td style="text-align:left">${desc}</td></tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="note">Sweat [Na⁺] rises (gets less salty) with heat acclimatization. Click a row to set the value above.</div>
+  </details>`;
 }
 
 /* ---------- TAB: CALCULATOR ---------- */
@@ -297,20 +312,26 @@ function viewCalculator(){
     <div>
       <div class="panel">
         <h2>Athlete & Session</h2>
-        ${numField('Body weight','bodyLbs','lbs')}
+        <div class="fgrid">
+          ${numField('Body weight','bodyLbs','lbs')}
+          ${numField('Accept. loss','acceptLoss','%',0.5)}
+        </div>
         <div class="sub-h">Sweat rate — from pre/post weight</div>
-        ${numField('Pre-ride weight','pre','lbs')}
-        ${numField('Post-ride weight','post','lbs')}
-        ${numField('Duration','time','hr',0.1)}
-        ${numField('…or set sweat rate directly','manualSweat','L/hr',0.01)}
+        <div class="fgrid">
+          ${numField('Pre weight','pre','lbs')}
+          ${numField('Post weight','post','lbs')}
+          ${numField('Duration','time','hr',0.1)}
+          ${numField('or set L/hr','manualSweat','L/hr',0.01)}
+        </div>
         <div class="res"><span class="muted">Computed sweat rate</span><span class="v">${fmt(sr,2)} L/hr</span></div>
         <div class="sub-h">Targets</div>
-        ${numField('Acceptable weight loss','acceptLoss','%',0.5)}
-        ${numField('Sweat sodium','sweatNa','mg/L',10)}
+        <div class="fgrid">
+          ${numField('Sweat sodium','sweatNa','mg/L',10)}
+          <div class="field"><label>Body Na⁺ 🔒</label>
+            <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
+            <span class="u">mM</span></div>
+        </div>
         ${sweatNaRefTable()}
-        <div class="field"><label>Body Na⁺ concentration 🔒</label>
-          <input type="number" value="${S.bodyNaConc}" disabled title="Locked — physiological constant ≈140 mmol/L">
-          <span class="u">mmol/L</span></div>
       </div>
 
       <div class="panel" style="margin-top:16px">
@@ -328,33 +349,39 @@ function viewCalculator(){
           <div class="res"><span>Carb per hour</span><span class="v">${fmt(carbPerHr,0)} g/hr</span></div>
           <div class="res"><span>Sodium from salts in bottle</span><span class="v">${fmt(naFromSalts,0)} mg</span></div>
         </div>
-        <div class="note">Osmolality = Σ(grams ÷ molar mass × particles) ÷ volume. Sucrose/glucose/fructose = 1 particle, NaCl = 2, trisodium-citrate = 4, maltodextrin ≈ 1 per (18016/DE) g.</div>
+        <div class="note">Σ(g ÷ molar mass × particles) ÷ volume. Sugars = 1, NaCl = 2, Na-citrate = 4, maltodextrin ≈ 1 per (18016/DE) g.</div>
       </div>
     </div>
 
     <div>
       <div class="panel">
         <h2>Bottle</h2>
-        ${numField('Bottle size','bottleOz','oz',0.1)}
-        ${numField('Bottles per hour','bottlesPerHour','',0.25)}
-        <div class="row-actions">
+        <div class="fgrid">
+          ${numField('Bottle size','bottleOz','oz',0.1)}
+          ${numField('Bottles / hr','bottlesPerHour','',0.25)}
+        </div>
+        <div class="row-actions" style="margin-top:6px">
           <select id="loadProd"><option value="">— load a product —</option>
             ${loadableProducts().map(p=>`<option value="${p._id}">${p.name}</option>`).join('')}</select>
         </div>
-        <div class="sub-h">Carbohydrate sources — grams per bottle</div>
-        ${compField('Glucose / Dextrose','glucose','g')}
-        ${compField('Sucrose','sucrose','g')}
-        ${compField('Maltodextrin','malto','g')}
-        ${compField('Fructose','fructose','g')}
-        ${numField('Maltodextrin DE','maltoDE','',1)}
-        <div class="note">DE drives maltodextrin's osmotic weight (eff. MW ≈ 18016/DE ≈ ${fmt(maltoMW(S.maltoDE),0)} g/mol). Higher DE → more particles → higher osmolality.</div>
-        <div class="sub-h">Electrolyte salts — grams per bottle</div>
-        ${compField('Sodium chloride (NaCl)','nacl','g')}
-        ${compField('Sodium citrate','citrate','g')}
-        <div class="field"><label>Drink sodium <span class="muted">(calculated)</span></label>
-          <input type="number" value="${fmt(calcDrinkNaPerOz(),1)}" disabled title="Calculated from NaCl + sodium citrate ÷ bottle size">
-          <span class="u">mg/oz</span></div>
-        <div class="row-actions">
+        <div class="sub-h">Carbohydrate sources — g/bottle</div>
+        <div class="fgrid">
+          ${compField('Glucose','glucose','g')}
+          ${compField('Sucrose','sucrose','g')}
+          ${compField('Malto','malto','g')}
+          ${compField('Fructose','fructose','g')}
+          ${numField('Malto DE','maltoDE','',1)}
+        </div>
+        <div class="note">Malto eff. MW ≈ ${fmt(maltoMW(S.maltoDE),0)} g/mol (18016/DE) — higher DE → more particles → higher osmolality.</div>
+        <div class="sub-h">Electrolyte salts — g/bottle</div>
+        <div class="fgrid">
+          ${compField('NaCl','nacl','g')}
+          ${compField('Na citrate','citrate','g')}
+          <div class="field"><label>Drink Na <span class="muted">(calc)</span></label>
+            <input type="number" value="${fmt(calcDrinkNaPerOz(),1)}" disabled title="Calculated from NaCl + sodium citrate ÷ bottle size">
+            <span class="u">mg/oz</span></div>
+        </div>
+        <div class="row-actions" style="margin-top:6px">
           <button class="ghost sm" onclick="window._clearComp()">Clear carbs/salts</button>
         </div>
       </div>
@@ -601,6 +628,7 @@ function bind(){
   });
   document.querySelectorAll('input[data-comp]').forEach(el=>el.oninput=()=>{S.comp[el.dataset.comp]=+el.value||0;render();});
   const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(lp.value); };
+  const rb=document.querySelector('details.refbox'); if(rb) rb.addEventListener('toggle',()=>{ S._refOpen=rb.open; });
   // product table edits (role-aware)
   document.querySelectorAll('input[data-id]').forEach(el=>el.onchange=()=>{
     const f=el.dataset.f, sub=el.dataset.sub;
