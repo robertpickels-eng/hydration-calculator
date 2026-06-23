@@ -695,10 +695,27 @@ const TABS = [
   ['plan','Fuel Plan',viewPlan],
 ];
 let active='calc';
+// build a re-findable selector for the focused field, so live re-renders don't drop the cursor
+function elSig(el){
+  if(!el || el.tagName!=='INPUT' && el.tagName!=='SELECT') return null;
+  if(el.id) return '#'+el.id;
+  const attrs=['data-k','data-obj','data-comp','data-lvol','data-kgmass','data-id','data-f','data-sub','data-xc','data-xl','data-xf','data-sw','data-swk','data-pl','data-plk'];
+  let sel=el.tagName.toLowerCase(), has=false;
+  attrs.forEach(a=>{ if(el.hasAttribute(a)){ sel+=`[${a}="${el.getAttribute(a)}"]`; has=true; } });
+  return has?sel:null;
+}
 function render(){
+  const ae=document.activeElement;
+  const sig = (ae && $('#app').contains(ae)) ? elSig(ae) : null;
+  let ss=null, se=null;
+  if(sig){ try{ ss=ae.selectionStart; se=ae.selectionEnd; }catch(e){} }
   $('#tabs').innerHTML = TABS.map(t=>`<div class="tab ${t[0]===active?'active':''}" data-tab="${t[0]}">${t[1]}</div>`).join('');
   $('#app').innerHTML = TABS.find(t=>t[0]===active)[2]();
   bind();
+  if(sig){
+    const el=$('#app').querySelector(sig);
+    if(el){ el.focus(); if(ss!=null){ try{ el.setSelectionRange(ss,se); }catch(e){} } }
+  }
 }
 function bind(){
   document.querySelectorAll('[data-tab]').forEach(el=>el.onclick=()=>{active=el.dataset.tab;render();});
