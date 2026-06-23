@@ -35,6 +35,7 @@
     border-radius:7px;padding:7px 9px;width:92px;font-size:14px;text-align:right}
   input[type=text],select{text-align:left;width:160px}
   input:focus,select:focus{outline:none;border-color:var(--accent)}
+  input:disabled{opacity:.5;cursor:not-allowed;background:var(--panel)}
   .res{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line)}
   .res:last-child{border-bottom:none}
   .res .v{font-weight:700;font-variant-numeric:tabular-nums}
@@ -188,6 +189,62 @@ function productOsm(p){
 }
 
 /* ============================================================
+   ROLES & MODERATION  (browser-local; not server-enforced)
+   ------------------------------------------------------------
+   - Canonical PRODUCTS (above) are editable only in Admin mode.
+   - Anyone can "Add drink": new rows are flagged Pending until an
+     admin Approves. Approved rows become loadable in the Calculator.
+   - State persists in this browser's localStorage only — submissions
+     are NOT shared between devices/visitors. To make submissions
+     reach the admin from other browsers, swap this for the
+     "GitHub-native" path: have _addDrink() open a prefilled issue at
+     https://github.com/robertpickels-eng/hydration-calculator/issues/new
+     (or a PR editing a products.json), and keep the canonical list in
+     that file instead of in code.
+   - ADMIN_PASS gates Admin mode CLIENT-SIDE ONLY. On a public static
+     page this is a guardrail against casual edits, NOT real security
+     (anyone can read this JS). Change it below.
+   ============================================================ */
+const ADMIN_PASS = 'boulder-admin';            // CHANGE ME — client-side guardrail only
+const DB_KEY = 'hydra_db_v1';
+function loadDB(){
+  try{ const d=JSON.parse(localStorage.getItem(DB_KEY)); if(d) return {userItems:d.userItems||[], overrides:d.overrides||{}}; }catch(e){}
+  return {userItems:[], overrides:{}};
+}
+let DB = loadDB();
+function saveDB(){ try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} }
+let ADMIN = sessionStorage.getItem('hydra_admin')==='1';
+
+// canonical rows (with any admin overrides applied) + user-submitted rows
+function allProducts(){
+  const canon = PRODUCTS.map(p=>{
+    const ov = DB.overrides[p.name];
+    const merged = ov ? {...p, ...ov, split:{...p.split, ...(ov.split||{})}} : p;
+    return {...merged, _id:'c:'+p.name, _kind:'canonical', _status:'approved', _edited:!!ov};
+  });
+  const user = DB.userItems.map(u=>({...u, _id:u.id, _kind:'user', _status:u.status||'pending'}));
+  return canon.concat(user);
+}
+function loadableProducts(){ return allProducts().filter(p=>p._status==='approved'); }
+function pendingCount(){ return DB.userItems.filter(u=>(u.status||'pending')==='pending').length; }
+function canEditRow(p){ return p._kind==='canonical' ? ADMIN : (p._status==='pending' || ADMIN); }
+
+// apply an inline edit honoring permissions
+function dbEdit(id, field, sub, val){
+  if(id.startsWith('c:')){
+    if(!ADMIN) return;
+    const name=id.slice(2);
+    const ov=DB.overrides[name]||(DB.overrides[name]={});
+    if(sub){ ov.split=ov.split||{}; ov.split[sub]=val; } else ov[field]=val;
+  } else {
+    const it=DB.userItems.find(u=>u.id===id);
+    if(!it || !(((it.status||'pending')==='pending') || ADMIN)) return;
+    if(sub){ it.split[sub]=val; } else it[field]=val;
+  }
+  saveDB(); render();
+}
+
+/* ============================================================
    RENDER HELPERS
    ============================================================ */
 const $ = (s,el=document)=>el.querySelector(s);
@@ -282,7 +339,7 @@ function viewCalculator(){
         ${numField('Bottles per hour','bottlesPerHour','',0.25)}
         <div class="row-actions">
           <select id="loadProd"><option value="">— load a product —</option>
-            ${PRODUCTS.map((p,i)=>`<option value="${i}">${p.name}</option>`).join('')}</select>
+            ${loadableProducts().map(p=>`<option value="${p._id}">${p.name}</option>`).join('')}</select>
         </div>
         <div class="sub-h">Carbohydrate sources — grams per bottle</div>
         ${compField('Glucose / Dextrose','glucose','g')}
@@ -353,23 +410,54 @@ function viewProjection(){
 
 /* ---------- TAB: DRINK DATABASE ---------- */
 function viewDatabase(){
+  const rows=allProducts();
+  const pend=pendingCount();
   return `<div class="panel"><h2>Drink Database & Osmolality</h2>
-  <div class="note">Per-serving sodium/calories from the workbook. Carb-source splits are <span class="est">editable estimates</span> (live label lookup was unavailable). Edit any cell; osmolality recomputes. <b>Load</b> sends a product into the Calculator.</div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+    <span class="pill" style="background:${ADMIN?'var(--accent2)':'var(--panel2)'};color:${ADMIN?'#06121f':'var(--muted)'}">
+      ${ADMIN?'🔓 Admin':'👁 Viewer'}</span>
+    <button class="sm ghost" onclick="window._adminToggle()">${ADMIN?'Exit admin':'Admin login'}</button>
+    <button class="sm" onclick="window._addDrink()">＋ Add drink</button>
+    ${pend?`<span class="pill" style="background:var(--warn);color:#06121f">⏳ ${pend} pending review</span>`:''}
+    <span class="muted" style="font-size:12px;margin-left:auto">Saved in this browser only</span>
+  </div>
+  <div class="note">Per-serving sodium/calories from the workbook; carb-source splits are <span class="est">editable estimates</span>.
+    Existing rows are editable in <b>Admin</b> mode only. Anyone can <b>Add drink</b> — new rows are flagged <b>Pending</b> until an admin approves. <b>Load</b> sends an approved product into the Calculator.</div>
   <div class="scroll" style="margin-top:10px"><table>
     <thead><tr><th>Product</th><th>oz</th><th>Na (mg)</th><th>kcal</th>
       <th>Glu</th><th>Suc</th><th>Malto</th><th>Fru</th><th>DE</th>
-      <th>Carb g</th><th>Carb %</th><th>mOsm/L</th><th></th></tr></thead>
-    <tbody>${PRODUCTS.map((p,i)=>{
+      <th>Carb g</th><th>Carb %</th><th>mOsm/L</th><th>Status / actions</th></tr></thead>
+    <tbody>${rows.map(p=>{
       const carb=productCarb(p), pct=carb/(p.oz*ML_PER_OZ)*100, osm=productOsm(p), t=tonicity(osm);
-      const ce=(k)=>`<td><input type="number" step="0.5" value="${p.split[k]}" data-prod="${i}" data-split="${k}" style="width:54px"></td>`;
-      return `<tr>
-        <td>${p.name} ${p.conf==='est'?'<span class="est" title="estimated split">~</span>':''}</td>
-        <td>${p.oz}</td><td>${p.sodium}</td><td>${p.kcal}</td>
-        ${ce('glucose')}${ce('sucrose')}${ce('malto')}${ce('fructose')}
-        <td><input type="number" step="1" value="${p.de}" data-prod="${i}" data-de="1" style="width:48px"></td>
+      const ed=canEditRow(p), pending=p._status==='pending';
+      const dis=ed?'':'disabled';
+      const num=(field,val,w=54,step=0.5)=>`<td><input type="number" step="${step}" value="${val}" ${dis}
+        data-id="${p._id}" data-f="${field}" style="width:${w}px"></td>`;
+      const nm = (p._kind==='user' && ed)
+        ? `<input type="text" value="${(p.name||'').replace(/"/g,'&quot;')}" data-id="${p._id}" data-f="name" style="width:130px">`
+        : `${p.name} ${p.conf==='est'?'<span class="est" title="estimated split">~</span>':''}`;
+      let act;
+      if(pending){
+        act = ADMIN
+          ? `<button class="sm" onclick="window._approve('${p._id}')">✓ Approve</button>
+             <button class="sm ghost" onclick="window._reject('${p._id}')">✗ Reject</button>`
+          : `<span class="pill" style="background:var(--warn);color:#06121f">⏳ Pending</span>`;
+      } else {
+        act = `<button class="sm" onclick="window._loadProd('${p._id}')">Load</button>`
+            + (ADMIN && p._kind==='user' ? ` <button class="sm ghost" onclick="window._reject('${p._id}')">Delete</button>` : '')
+            + (ADMIN && p._edited ? ` <button class="sm ghost" onclick="window._resetRow('${p._id}')" title="revert admin edits">Reset</button>` : '');
+      }
+      return `<tr style="${pending?'background:rgba(255,180,84,.10)':''}">
+        <td>${nm}</td>
+        ${num('oz',p.oz,46,0.1)}${num('sodium',p.sodium,56,1)}${num('kcal',p.kcal,52,1)}
+        <td><input type="number" step="0.5" value="${p.split.glucose}" ${dis} data-id="${p._id}" data-f="split" data-sub="glucose" style="width:54px"></td>
+        <td><input type="number" step="0.5" value="${p.split.sucrose}" ${dis} data-id="${p._id}" data-f="split" data-sub="sucrose" style="width:54px"></td>
+        <td><input type="number" step="0.5" value="${p.split.malto}" ${dis} data-id="${p._id}" data-f="split" data-sub="malto" style="width:54px"></td>
+        <td><input type="number" step="0.5" value="${p.split.fructose}" ${dis} data-id="${p._id}" data-f="split" data-sub="fructose" style="width:54px"></td>
+        <td><input type="number" step="1" value="${p.de}" ${dis} data-id="${p._id}" data-f="de" style="width:48px"></td>
         <td>${fmt(carb,0)}</td><td>${fmt(pct,1)}</td>
         <td style="color:var(--${t.cls});font-weight:700">${fmt(osm,0)}</td>
-        <td><button class="sm" onclick="window._loadProd(${i})">Load</button></td>
+        <td style="text-align:left">${act}</td>
       </tr>`;}).join('')}
     </tbody></table></div></div>`;
 }
@@ -512,12 +600,12 @@ function bind(){
     }
   });
   document.querySelectorAll('input[data-comp]').forEach(el=>el.oninput=()=>{S.comp[el.dataset.comp]=+el.value||0;render();});
-  const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(+lp.value); };
-  // product table edits
-  document.querySelectorAll('input[data-prod]').forEach(el=>el.oninput=()=>{
-    const p=PRODUCTS[+el.dataset.prod];
-    if(el.dataset.de) p.de=+el.value||1; else p.split[el.dataset.split]=+el.value||0;
-    render();
+  const lp=$('#loadProd'); if(lp) lp.onchange=()=>{ if(lp.value!=='') window._loadProd(lp.value); };
+  // product table edits (role-aware)
+  document.querySelectorAll('input[data-id]').forEach(el=>el.onchange=()=>{
+    const f=el.dataset.f, sub=el.dataset.sub;
+    const val = f==='name' ? el.value : (+el.value||0);
+    dbEdit(el.dataset.id, f, sub, val);
   });
   // sweat log edits
   document.querySelectorAll('input[data-sw]').forEach(el=>el.oninput=()=>{
@@ -530,8 +618,9 @@ function bind(){
   });
 }
 /* actions */
-window._loadProd=(i)=>{
-  const p=PRODUCTS[i];
+window._loadProd=(id)=>{
+  const p=allProducts().find(x=>x._id===id) || allProducts()[0];
+  if(!p) return;
   S.comp.glucose=p.split.glucose; S.comp.sucrose=p.split.sucrose;
   S.comp.malto=p.split.malto; S.comp.fructose=p.split.fructose;
   S.maltoDE=p.de; S.bottleOz=p.oz; S.comp.citrate=0; S.comp.nacl=0;
@@ -539,6 +628,22 @@ window._loadProd=(i)=>{
   S.comp.nacl = +( (p.sodium/1000/0.3934) ).toFixed(2); // Na fraction of NaCl = 0.3934
   active='calc'; render();
 };
+window._adminToggle=()=>{
+  if(ADMIN){ ADMIN=false; sessionStorage.removeItem('hydra_admin'); render(); return; }
+  const p=prompt('Admin passphrase:');
+  if(p==null) return;
+  if(p===ADMIN_PASS){ ADMIN=true; sessionStorage.setItem('hydra_admin','1'); render(); }
+  else alert('Incorrect passphrase.');
+};
+window._addDrink=()=>{
+  const id='u:'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
+  DB.userItems.push({id, name:'New drink', oz:16, sodium:0, kcal:0,
+    split:{glucose:0,sucrose:0,malto:0,fructose:0}, de:18, status:'pending'});
+  saveDB(); render();
+};
+window._approve=(id)=>{ const it=DB.userItems.find(u=>u.id===id); if(it){ it.status='approved'; saveDB(); render(); } };
+window._reject =(id)=>{ DB.userItems=DB.userItems.filter(u=>u.id!==id); saveDB(); render(); };
+window._resetRow=(id)=>{ if(id.startsWith('c:')){ delete DB.overrides[id.slice(2)]; saveDB(); render(); } };
 window._clearComp=()=>{S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};render();};
 window._setSweatNa=(mg)=>{S.sweatNa=mg;render();};
 window._useSweat=(i)=>{const c=swCalc(SWEATLOG[i]);S.manualSweat=+c.lHr.toFixed(3);active='calc';render();};
