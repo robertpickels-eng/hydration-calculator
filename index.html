@@ -552,7 +552,7 @@ function fuelLabel(p){ return p ? `${p.brand?p.brand+' ':''}${p.product||''}${p.
 function fuelGF(p){ const s=(p&&p.split)||{};
   const glu=(+s.glucose||0)+(+s.malto||0)+(+s.sucrose||0)/2, fru=(+s.fructose||0)+(+s.sucrose||0)/2;
   if(glu+fru<=0) return '—'; if(fru<=0) return 'all glu'; if(glu<=0) return 'all fru';
-  return (glu/fru).toFixed(2).replace(/\.?0+$/,'')+':1';
+  return (glu/fru).toFixed(1)+':1';
 }
 
 /* ============================================================
