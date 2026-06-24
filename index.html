@@ -508,40 +508,31 @@ function headWithAdd(label, onclick){
     <span>${label}</span><button class="sm ghost" style="padding:1px 7px" onclick="${onclick}">＋ Add Extra</button></div>`;
 }
 
-/* ---------- TAB: RIDER INFO  (shared profile for every other tab) ---------- */
-function viewRider(){
-  const sr = sweatRateLhr();
-  return `<div class="grid cols2">
-    <div>
-      <div class="panel">
-        <h2>Rider Profile</h2>
-        <div class="fgrid">
-          ${numField('Body weight','bodyLbs','lbs')}
-          <div class="field"><label>Body Mass</label>
-            <input type="number" step="0.1" value="${fmt(bodyKg(),1)}" data-kgmass title="Linked to body weight (kg = lbs ÷ 2.2)">
-            <span class="u">kg</span></div>
-        </div>
-        <div class="fgrid">
-          <div class="field"><label>Gender</label>
-            <select id="genderSel" style="width:86px">
-              <option value="male"${S.gender==='male'?' selected':''}>Male</option>
-              <option value="female"${S.gender==='female'?' selected':''}>Female</option>
-            </select><span class="u">&nbsp;</span></div>
-          ${numField('FTP','ftp','W',5)}
-        </div>
-        ${numField('Event duration','eventHours','hr',0.5)}
-        <div class="res"><span>FTP / kg</span><span class="v">${fmt(ftpPerKg(),2)} W/kg</span></div>
-        <div class="res"><span>Predicted glycogen</span><span class="v">${fmt(glycogenKcal()/4,0)} g · ${fmt(glycogenKcal(),0)} kcal</span></div>
-        <div class="note">Body weight, gender, FTP and event duration feed the <b>Caloric</b> and <b>Event Plan</b> tabs; body weight and the sweat numbers below feed the <b>Hydration</b> tab.</div>
-        <div class="row-actions" style="margin-top:8px;align-items:center">
-          <span class="muted" style="font-size:11px">✓ Inputs are saved in this browser and restored next visit.</span>
-          <button class="sm ghost" onclick="window._resetAthlete()" style="margin-left:auto">Reset to defaults</button>
-        </div>
-      </div>
-    </div>
+/* shared athlete-inputs summary bar (shown atop Caloric + Hydration) */
+function athleteSummary(){
+  const sr=sweatRateLhr();
+  const it=(l,v)=>`<div style="display:flex;flex-direction:column;line-height:1.15">
+    <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">${l}</span>
+    <span style="font-weight:700;font-variant-numeric:tabular-nums">${v}</span></div>`;
+  return `<div class="panel" style="margin-bottom:16px;padding:10px 16px">
+    <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center">
+      <span class="sub-h" style="margin:0;color:var(--accent)">Athlete</span>
+      ${it('Weight', fmt(S.bodyLbs,0)+' lb')}
+      ${it('Gender', S.gender==='male'?'Male':'Female')}
+      ${it('FTP', S.ftp+' W')}
+      ${it('FTP/kg', fmt(ftpPerKg(),2))}
+      ${it('Event', fmt(S.eventHours,1)+' hr')}
+      ${it('Sweat', fmt(sr,2)+' L/hr')}
+      ${it('Sweat Na⁺', fmt(S.sweatNa,0)+' mg/L')}
+      ${it('Accept. loss', fmt(S.acceptLoss,0)+'%')}
+      <a onclick="active='rider';render()" style="margin-left:auto;color:var(--accent);cursor:pointer;font-size:12px">Edit on Rider Info →</a>
+    </div></div>`;
+}
 
-    <div>
-      <div class="panel">
+/* Sweat & Sodium inputs — lives on the Hydration tab */
+function sweatSodiumPanel(){
+  const sr = sweatRateLhr();
+  return `<div class="panel" style="margin-top:16px">
         <h2>Sweat & Sodium</h2>
         <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
@@ -582,6 +573,45 @@ function viewRider(){
           </select></div>
         ${S.acceptLossMode==='manual'?`<div class="field"><label class="muted">↳ manual</label>
           <input type="number" step="0.5" value="${S.acceptLoss}" data-k="acceptLoss" data-obj="S"><span class="u">%</span></div>`:''}
+      </div>`;
+}
+
+/* ---------- TAB: RIDER INFO  (shared core profile) ---------- */
+function viewRider(){
+  return `<div class="grid cols2">
+    <div>
+      <div class="panel">
+        <h2>Rider Profile</h2>
+        <div class="fgrid">
+          ${numField('Body weight','bodyLbs','lbs')}
+          <div class="field"><label>Body Mass</label>
+            <input type="number" step="0.1" value="${fmt(bodyKg(),1)}" data-kgmass title="Linked to body weight (kg = lbs ÷ 2.2)">
+            <span class="u">kg</span></div>
+        </div>
+        <div class="fgrid">
+          <div class="field"><label>Gender</label>
+            <select id="genderSel" style="width:86px">
+              <option value="male"${S.gender==='male'?' selected':''}>Male</option>
+              <option value="female"${S.gender==='female'?' selected':''}>Female</option>
+            </select><span class="u">&nbsp;</span></div>
+          ${numField('FTP','ftp','W',5)}
+        </div>
+        <div class="note">Body weight, gender and FTP are shared across every tab. Set <b>event duration</b> on the <b>Caloric</b> tab and your <b>sweat / sodium</b> numbers on the <b>Hydration</b> tab.</div>
+        <div class="row-actions" style="margin-top:8px;align-items:center">
+          <span class="muted" style="font-size:11px">✓ Inputs are saved in this browser and restored next visit.</span>
+          <button class="sm ghost" onclick="window._resetAthlete()" style="margin-left:auto">Reset to defaults</button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Profile Readout</h2>
+        <div class="res"><span>FTP / kg</span><span class="v">${fmt(ftpPerKg(),2)} W/kg</span></div>
+        <div class="res"><span>Predicted glycogen</span><span class="v">${fmt(glycogenKcal()/4,0)} g · ${fmt(glycogenKcal(),0)} kcal</span></div>
+        <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
+        <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
+        <div class="note">Derived from your weight, gender and FTP — these feed the Caloric (glycogen, time-to-bonk) and Hydration (ECF, sodium balance) models.</div>
       </div>
     </div>
   </div>`;
@@ -590,7 +620,8 @@ function viewRider(){
 /* ---------- TAB: HYDRATION  (bottle + osmolality + projection) ---------- */
 function viewHydration(){
   const sr = sweatRateLhr(), ev=eventTotals();
-  return `<div class="panel" style="margin-bottom:16px;border-color:var(--accent2)">
+  return `${athleteSummary()}
+  <div class="panel" style="margin-bottom:16px;border-color:var(--accent2)">
     <h2 style="color:var(--accent2)">Calorie target from Caloric tab</h2>
     <div class="grid cols3">
       <div class="res"><span>Carb fuel target</span><span class="v">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
@@ -611,6 +642,7 @@ function viewHydration(){
         </div>
         ${numField('Bottles / hr','bottlesPerHour','',0.25)}
       </div>
+      ${sweatSodiumPanel()}
     </div>
 
     <div>
@@ -775,7 +807,8 @@ function viewCaloric(){
   const ev=eventTotals(), ints=intensities(), wl=S.intensityMode==='workload';
   // dropdown options for the active intensity list (avg + per-segment)
   const intOpts = (sel)=>ints.map((z,i)=>`<option value="${i}"${i==sel?' selected':''}>${z.pct!=null?`${z.label} — ${z.pct}% · ${Math.round(z.watts)}W`:z.label}</option>`).join('');
-  return `<div class="grid cols2">
+  return `${athleteSummary()}
+  <div class="grid cols2">
     <div>
       <div class="panel">
         <h2>Predicted Glycogen & Time to Bonk</h2>
@@ -792,6 +825,7 @@ function viewCaloric(){
     <div>
       <div class="panel">
         <h2>Event Intensity</h2>
+        ${numField('Event duration','eventHours','hr',0.5)}
         <div class="field" style="justify-content:flex-start;gap:6px">
           <label style="flex:0 0 auto;margin-right:4px">Intensity model</label>
           <button class="sm ${wl?'ghost':''}" onclick="window._setIntMode('zone')">Zone</button>
