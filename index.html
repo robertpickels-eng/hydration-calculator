@@ -306,9 +306,13 @@ const ZONES = [
   { label:'VO₂max',    pct:120, cls:'z5' },
 ];
 function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
-// glycogen stores (kcal): 450 + (kg×lean)×muscle×6×4.18 ; male lean .8/musc .55, female .7/.6
+// glycogen stores (kcal): 450 (liver) + skeletal-muscle mass × 6 × 4.18.
+// The ×6 is the effective g/kg that already folds in the cycling-active-muscle fraction (don't add a
+// separate one). Body comp = TRAINED CYCLIST (was gen-pop .8/.55 M, .7/.6 F):
+//   male   lean .88 (~12% fat) · skeletal-muscle .55 of FFM
+//   female lean .82 (~18% fat) · skeletal-muscle .50 of FFM (fixes the old .60 > male .55 inversion)
 function glycogenKcal(){
-  const kg=S.bodyLbs/2.2, lean=S.gender==='male'?0.8:0.7, musc=S.gender==='male'?0.55:0.6;
+  const kg=S.bodyLbs/2.2, lean=S.gender==='male'?0.88:0.82, musc=S.gender==='male'?0.55:0.50;
   return 450 + (kg*lean)*musc*6*4.18;
 }
 function calcVO2(watts){ const kg=S.bodyLbs/2.2; return ((1.8*watts*6/kg)+7)*kg/1000; }   // L/min
