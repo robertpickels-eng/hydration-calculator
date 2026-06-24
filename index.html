@@ -77,6 +77,9 @@
   .reco-box{display:inline-block;padding:5px 10px;border-radius:7px;font-weight:600;
     line-height:1.25;text-align:center;border:1px solid currentColor}
   /* event-plan summary pills + zone-time chips */
+  /* segmented two-state toggle (intensity model, ride breakdown) */
+  .modeseg{display:inline-flex;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:4px}
+  .modeseg button.sm{padding:4px 12px}
   .stat-pill{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:center}
   .stat-pill .sp-v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
   .stat-pill .sp-l{font-size:11px;color:var(--muted);margin-top:2px}
@@ -807,43 +810,83 @@ function viewCaloric(){
   const ev=eventTotals(), ints=intensities(), wl=S.intensityMode==='workload';
   // dropdown options for the active intensity list (avg + per-segment)
   const intOpts = (sel)=>ints.map((z,i)=>`<option value="${i}"${i==sel?' selected':''}>${z.pct!=null?`${z.label} — ${z.pct}% · ${Math.round(z.watts)}W`:z.label}</option>`).join('');
+  // the reference table body (zone or workload mode)
+  const refTable = wl
+    ? `<div class="scroll" style="margin-top:8px"><table class="tc">
+        <thead><tr><th>Watts</th><th>% FTP</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
+          <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th><th></th></tr></thead>
+        <tbody>${S.workloads.map((w,i)=>{const m=zoneMetrics(+w||0), b=bonkHours(i);return `<tr>
+          <td><input type="number" step="5" value="${w}" style="width:72px" onchange="window._setWorkload(${i},this.value)"></td>
+          <td>${fmt((+w||0)/S.ftp*100,0)}%</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
+          <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
+          <td>${b>=12?'&gt;12':b.toFixed(1)}</td>
+          <td><button class="sm ghost" onclick="window._rmWorkload(${i})" title="remove">×</button></td></tr>`;}).join('')}
+        </tbody></table></div>
+      <div class="row-actions"><button class="ghost sm" onclick="window._addWorkload()">＋ Add workload (+25W)</button></div>
+      <div class="note">Enter the steady wattages you plan to ride. Each row computes energy & substrate use just like the zones. Bonk = hours at that steady wattage before stored glycogen is exhausted with no fuel.</div>`
+    : `<div class="scroll" style="margin-top:8px"><table class="tc">
+        <thead><tr><th>Zone</th><th>% FTP</th><th>Watts</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
+          <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th></tr></thead>
+        <tbody>${ZONES.map((z,i)=>{const m=zoneMetrics(zoneWatts(i)), b=bonkHours(i);return `<tr>
+          <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.label}</span></td>
+          <td>${z.pct}%</td><td>${Math.round(m.watts)}</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
+          <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
+          <td>${b>=12?'&gt;12':b.toFixed(1)}</td></tr>`;}).join('')}
+        </tbody></table></div>
+      <div class="note">ACSM cycling VO₂ · Weir caloric equivalent · RQ-based substrate split. Bonk = hours at that steady zone before stored glycogen is exhausted with no fuel.</div>`;
+
   return `${athleteSummary()}
-  <div class="grid cols2">
-    <div>
-      <div class="panel">
-        <h2>Predicted Glycogen & Time to Bonk</h2>
-        <div class="grid cols2" style="gap:10px">
-          <div class="res"><span>Glycogen stored</span><span class="v">${fmt(glycogenKcal()/4,0)} g</span></div>
-          <div class="res"><span>Energy stored</span><span class="v">${fmt(glycogenKcal(),0)} kcal</span></div>
-        </div>
-        <div class="sub-h">Hours until bonk — no fuel</div>
-        ${ints.map((z,i)=>{const b=bonkHours(i);return `<div class="bonk-item ${z.cls}">
-          <span class="zn">${z.pct!=null?z.label:('Workload '+(i+1))} <span style="font-weight:400;opacity:.6">${Math.round(z.watts)}W</span></span>
-          <span class="bv">${b>=12?'&gt; 12 hrs':b.toFixed(1)+' hrs'}</span></div>`;}).join('')}
+
+  <!-- 1) Predicted glycogen + time to bonk -->
+  <div class="panel">
+    <h2>Predicted Glycogen & Time to Bonk</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:24px">
+      <div class="res" style="border:none"><span>Glycogen stored&nbsp;</span><span class="v">${fmt(glycogenKcal()/4,0)} g</span></div>
+      <div class="res" style="border:none"><span>Energy stored&nbsp;</span><span class="v">${fmt(glycogenKcal(),0)} kcal</span></div>
+    </div>
+    <div class="sub-h">Hours until bonk — no fuel</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">
+      ${ints.map((z,i)=>{const b=bonkHours(i);return `<div class="bonk-item ${z.cls}">
+        <span class="zn">${z.pct!=null?z.label:('WL '+(i+1))} <span style="font-weight:400;opacity:.6">${Math.round(z.watts)}W</span></span>
+        <span class="bv">${b>=12?'&gt; 12 hrs':b.toFixed(1)+' hrs'}</span></div>`;}).join('')}
+    </div>
+  </div>
+
+  <!-- 2) Reference table — intensity-model toggle lives in this header -->
+  <div class="panel" style="margin-top:16px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0">${wl?'Pre-Set Workload Reference':`Zone Reference (at your FTP ${S.ftp}W)`}</h2>
+      <div class="modeseg" style="margin-left:auto">
+        <span class="muted" style="font-size:11px;margin-right:2px">Intensity model</span>
+        <button class="sm ${wl?'ghost':''}" onclick="window._setIntMode('zone')">Zone</button>
+        <button class="sm ${wl?'':'ghost'}" onclick="window._setIntMode('workload')">Pre-Set Workload</button>
       </div>
     </div>
-    <div>
-      <div class="panel">
-        <h2>Event Intensity</h2>
+    ${refTable}
+  </div>
+
+  <!-- 3) Event intensity + totals -->
+  <div class="panel" style="margin-top:16px">
+    <h2>Event Intensity</h2>
+    <div class="grid cols2">
+      <div>
         ${numField('Event duration','eventHours','hr',0.5)}
-        <div class="field" style="justify-content:flex-start;gap:6px">
-          <label style="flex:0 0 auto;margin-right:4px">Intensity model</label>
-          <button class="sm ${wl?'ghost':''}" onclick="window._setIntMode('zone')">Zone</button>
-          <button class="sm ${wl?'':'ghost'}" onclick="window._setIntMode('workload')">Pre-Set Workload</button>
-        </div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg intensity</label>
           <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select></div>
-        <div class="field" style="justify-content:flex-start;gap:8px">
-          <label style="flex:0 0 auto">Break down by ride segment</label>
-          <button class="sm ${S.segBreakdown?'':'ghost'}" onclick="window._toggleSeg()">${S.segBreakdown?'On — 30-min segments':'Off'}</button>
+        <div class="sub-h">Ride breakdown</div>
+        <div class="modeseg">
+          <button class="sm ${S.segBreakdown?'ghost':''}" onclick="window._setSegMode(false)">Single average</button>
+          <button class="sm ${S.segBreakdown?'':'ghost'}" onclick="window._setSegMode(true)">30-min segments</button>
         </div>
-        ${S.segBreakdown?`<div class="note">Set the average intensity for each 30-minute block of your ${fmt(S.eventHours,1)}-hr ride. Calories are summed across segments for a finer total.</div>
-        <div class="scroll" style="max-height:260px;margin-top:8px">
+        ${S.segBreakdown?`<div class="note">Pick the average intensity for each 30-minute block of your ${fmt(S.eventHours,1)}-hr ride — calories are summed across segments for a finer total.</div>
+        <div class="scroll" style="max-height:240px;margin-top:8px">
           ${ev.segs.map((s,i)=>`<div class="field" style="gap:8px">
-            <span class="u" style="width:90px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
+            <span class="u" style="width:96px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
             <select style="flex:1;min-width:0" onchange="window._setSegZone(${i}, this.value)">${intOpts(s.zi)}</select>
           </div>`).join('')}
-        </div>`:`<div class="note">One average intensity is applied to the whole ride. Turn on the breakdown to vary it across 30-minute segments.</div>`}
+        </div>`:`<div class="note">One average intensity is applied to the whole ride.</div>`}
+      </div>
+      <div>
         <div class="sub-h">Event totals (${fmt(S.eventHours,1)} hr)</div>
         <div class="res"><span>Total energy</span><span class="v">${fmt(ev.kcal,0)} kcal · ${fmt(ev.kcalHr,0)}/hr</span></div>
         <div class="res"><span>Carbohydrate burned</span><span class="v">${fmt(ev.choG,0)} g · ${fmt(ev.choKcal,0)} kcal</span></div>
@@ -853,32 +896,7 @@ function viewCaloric(){
         ${ev.overGut?`<div class="note" style="color:var(--warn)">Target exceeds the ${GUT_MAX_CHO} g/hr gut-absorption limit — you'll dip into reserves; spread carbs across drink + food and train your gut.</div>`:''}
       </div>
     </div>
-  </div>
-
-  ${wl?`<div class="panel" style="margin-top:16px"><h2>Pre-Set Workload Reference</h2>
-  <div class="scroll" style="margin-top:8px"><table class="tc">
-    <thead><tr><th>Watts</th><th>% FTP</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
-      <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th><th></th></tr></thead>
-    <tbody>${S.workloads.map((w,i)=>{const m=zoneMetrics(+w||0), b=bonkHours(i);return `<tr>
-      <td><input type="number" step="5" value="${w}" style="width:72px" onchange="window._setWorkload(${i},this.value)"></td>
-      <td>${fmt((+w||0)/S.ftp*100,0)}%</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
-      <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
-      <td>${b>=12?'&gt;12':b.toFixed(1)}</td>
-      <td><button class="sm ghost" onclick="window._rmWorkload(${i})" title="remove">×</button></td></tr>`;}).join('')}
-    </tbody></table></div>
-  <div class="row-actions"><button class="ghost sm" onclick="window._addWorkload()">＋ Add workload (+25W)</button></div>
-  <div class="note">Enter the steady wattages you plan to ride. Each row computes energy & substrate use just like the zones. Bonk = hours at that steady wattage before stored glycogen is exhausted with no fuel.</div></div>`
-  :`<div class="panel" style="margin-top:16px"><h2>Zone Reference (at your FTP ${S.ftp}W)</h2>
-  <div class="scroll" style="margin-top:8px"><table class="tc">
-    <thead><tr><th>Zone</th><th>% FTP</th><th>Watts</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
-      <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th></tr></thead>
-    <tbody>${ZONES.map((z,i)=>{const m=zoneMetrics(zoneWatts(i)), b=bonkHours(i);return `<tr>
-      <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.label}</span></td>
-      <td>${z.pct}%</td><td>${Math.round(m.watts)}</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
-      <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
-      <td>${b>=12?'&gt;12':b.toFixed(1)}</td></tr>`;}).join('')}
-    </tbody></table></div>
-  <div class="note">ACSM cycling VO₂ · Weir caloric equivalent · RQ-based substrate split. Bonk = hours at that steady zone before stored glycogen is exhausted with no fuel.</div></div>`}`;
+  </div>`;
 }
 
 /* ---------- TAB: EVENT PLAN  (deeper fuel plan: target − drink = food gap) ---------- */
@@ -1246,12 +1264,10 @@ window._addWorkload=()=>{ const last=S.workloads[S.workloads.length-1]; S.worklo
 window._rmWorkload=(i)=>{ if(S.workloads.length<=1) return; S.workloads.splice(i,1); clampIntensityIdx(); render(); };
 /* --- caloric: event intensity + 30-min segments --- */
 window._setEventZone=(v)=>{ S.eventZone=+v; render(); };
-window._toggleSeg=()=>{
-  S.segBreakdown=!S.segBreakdown;
-  if(S.segBreakdown){ // seed each segment from the current average zone
-    const n=segCount();
-    S.segZones = Array.from({length:n},(_,i)=> S.segZones[i]??S.eventZone);
-  }
+window._setSegMode=(on)=>{
+  if(S.segBreakdown===on) return;
+  S.segBreakdown=on;
+  if(on){ const n=segCount(); S.segZones=Array.from({length:n},(_,i)=> S.segZones[i]??S.eventZone); }
   render();
 };
 window._setSegZone=(i,v)=>{ S.segZones[i]=+v; render(); };
