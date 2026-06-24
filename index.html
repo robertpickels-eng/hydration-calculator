@@ -90,6 +90,7 @@
   .z3{background:rgba(255,235,156,.14);color:#ffe08a}
   .z4{background:rgba(255,180,84,.16);color:#ffc77f}
   .z5{background:rgba(255,107,107,.16);color:#ff9d9d}
+  .z6{background:rgba(186,130,255,.18);color:#d3b8ff}
   button{background:var(--accent);color:#06121f;border:none;border-radius:7px;padding:7px 12px;font-weight:700;cursor:pointer;font-size:13px}
   button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
   button.sm{padding:3px 8px;font-size:11px}
@@ -313,14 +314,15 @@ const ZONES_CYC = [
   { label:'Threshold', pct:100, cls:'z4' },
   { label:'VO₂max',    pct:120, cls:'z5' },
 ];
-// running: Rob's "RP Run Zones" (Daniels) — % RANGES of THRESHOLD SPEED (Threshold tops at 100%).
-// Metrics are computed at the zone midpoint; the table shows the full range.
+// running: Rob's "JD" (Jack Daniels) zones — % RANGES of THRESHOLD SPEED.
+// Ranges can overlap; metrics compute at each zone's MIDPOINT, the table shows the full range.
 const ZONES_RUN = [
-  { label:'Recovery',  lo:75,  hi:82,  cls:'z1' },
-  { label:'Aerobic',   lo:82,  hi:89,  cls:'z2' },
-  { label:'Marathon',  lo:89,  hi:95,  cls:'z3' },
-  { label:'Threshold', lo:95,  hi:100, cls:'z4' },
-  { label:'Interval',  lo:100, hi:110, cls:'z5' },
+  { label:'Active Recovery', lo:60,  hi:75,  cls:'z1' },
+  { label:'Base',            lo:75,  hi:82,  cls:'z2' },
+  { label:'Marathon',        lo:82,  hi:95,  cls:'z3' },
+  { label:'Threshold',       lo:93,  hi:103, cls:'z4' },
+  { label:'Interval',        lo:103, hi:109, cls:'z5' },
+  { label:'Rep',             lo:109, hi:120, cls:'z6' },
 ];
 function zones(){ return isRun()?ZONES_RUN:ZONES_CYC; }
 function zMid(z){ return z.pct!=null ? z.pct : (z.lo+z.hi)/2; }   // representative % (midpoint for ranges)
