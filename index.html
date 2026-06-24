@@ -651,7 +651,7 @@ function athleteSummary(){
       ${it('Sweat', fmt(sr,2)+' L/hr')}
       ${it('Sweat Na⁺', fmt(S.sweatNa,0)+' mg/L')}
       ${it('Accept. loss', fmt(S.acceptLoss,0)+'%')}
-      <a onclick="active='rider';render()" style="margin-left:auto;color:var(--accent);cursor:pointer;font-size:12px">Edit on Athlete →</a>
+      <a onclick="active='rider';render()" style="margin-left:auto;color:var(--accent);cursor:pointer;font-size:12px">Edit on Athlete &amp; Activity →</a>
     </div></div>`;
 }
 
@@ -704,7 +704,13 @@ function sweatSodiumPanel(){
 
 /* ---------- TAB: ATHLETE  (shared core profile + activity) ---------- */
 function viewRider(){
-  const run=isRun();
+  const run=isRun(), ev=eventTotals(), ints=intensities();
+  const intLbl = z => run ? paceFmt(z.pace)+'/mi' : Math.round(z.watts)+'W';
+  const intOpts = (sel)=>ints.map((z,i)=>{
+    const lab = z.lo!=null ? `${z.label} — ${z.lo}–${z.hi}% · ~${paceFmt(z.pace)}/mi`
+              : z.pct!=null ? `${z.label} — ${z.pct}% · ${intLbl(z)}` : z.label;
+    return `<option value="${i}"${i==sel?' selected':''}>${lab}</option>`;
+  }).join('');
   // intensity-anchor input: FTP (cycling) or threshold pace mi+km twin (running)
   const anchor = run
     ? `<div class="sub-h">Threshold pace <span class="muted" style="text-transform:none">(pace you can hold ~1 hr)</span></div>
@@ -736,7 +742,7 @@ function viewRider(){
             <option value="female"${S.gender==='female'?' selected':''}>Female</option>
           </select><span class="u">&nbsp;</span></div>
         ${anchor}
-        <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>event duration${run?' / grade':''}</b> on the <b>Caloric</b> tab and your <b>sweat / sodium</b> numbers on the <b>Hydration</b> tab.</div>
+        <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>event duration${run?' / grade':''}</b> in <b>Event Information</b> below, and your <b>sweat / sodium</b> numbers on the <b>Hydration</b> tab.</div>
         <div class="row-actions" style="margin-top:8px;align-items:center">
           <span class="muted" style="font-size:11px">✓ Inputs are saved in this browser and restored next visit.</span>
           <button class="sm ghost" onclick="window._resetAthlete()" style="margin-left:auto">Reset to defaults</button>
@@ -757,6 +763,42 @@ function viewRider(){
         <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
         <div class="note">Derived from weight, gender, sport &amp; ${run?'pace':'FTP'} — these feed the Caloric (glycogen, time-to-bonk) and Hydration (ECF, sodium balance) models. Running engages more total muscle than cycling, so its active fraction is higher.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Event Information (moved from Caloric) -->
+  <div class="panel" style="margin-top:16px">
+    <h2>Event Information</h2>
+    <div class="grid cols2">
+      <div>
+        ${numField('Event duration','eventHours','hr',0.5)}
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg ${run?'pace':'intensity'}</label>
+          <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select></div>
+        ${run&&!S.segBreakdown?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg grade</label>
+          <input type="number" step="0.5" value="${S.eventGrade}" style="width:72px" onchange="window._setEventGrade(this.value)"><span class="u">%</span></div>`:''}
+        <div class="sub-h">${run?'Run':'Ride'} breakdown</div>
+        <div class="modeseg">
+          <button class="sm ${S.segBreakdown?'ghost':''}" onclick="window._setSegMode(false)">Single average</button>
+          <button class="sm ${S.segBreakdown?'':'ghost'}" onclick="window._setSegMode(true)">30-min segments</button>
+        </div>
+        ${S.segBreakdown?`<div class="note">Pick the average ${run?'pace + grade':'intensity'} for each 30-minute block of your ${fmt(S.eventHours,1)}-hr ${run?'run':'ride'} — calories are summed across segments for a finer total.</div>
+        <div class="scroll" style="max-height:240px;margin-top:8px">
+          ${ev.segs.map((s,i)=>`<div class="field" style="gap:6px">
+            <span class="u" style="width:${run?78:96}px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
+            <select style="flex:1;min-width:0" onchange="window._setSegZone(${i}, this.value)">${intOpts(s.zi)}</select>
+            ${run?`<input type="number" step="0.5" value="${s.grade}" style="width:50px" onchange="window._setSegGrade(${i},this.value)" title="% grade"><span class="u" style="width:auto">%</span>`:''}
+          </div>`).join('')}
+        </div>`:`<div class="note">One average ${run?'pace &amp; grade are':'intensity is'} applied to the whole ${run?'run':'ride'}.</div>`}
+      </div>
+      <div>
+        <div class="sub-h">Event totals (${fmt(S.eventHours,1)} hr)</div>
+        <div class="res"><span>Total energy</span><span class="v">${fmt(ev.kcal,0)} kcal · ${fmt(ev.kcalHr,0)}/hr</span></div>
+        <div class="res"><span>Carbohydrate burned</span><span class="v">${fmt(ev.choG,0)} g · ${fmt(ev.choKcal,0)} kcal</span></div>
+        <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
+        <div class="res"><span>Carb fuel target <span class="muted">(keep ${S.reservePct}% reserve)</span></span>
+          <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
+        ${ev.overGut?`<div class="note" style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut-absorption limit${S.highCarbAdapted?' (high-carb-adapted)':''} — you'll dip into reserves; spread carbs across drink + food and train your gut.</div>`:''}
       </div>
     </div>
   </div>`;
@@ -1001,7 +1043,27 @@ function viewCaloric(){
         </tbody></table></div>
       <div class="note">ACSM ${run?'running (level-ground reference)':'cycling'} VO₂ · Weir caloric equivalent · RQ-based substrate split.${run?' Pace/% show the zone range; VO₂/Cal/CHO/Fat/Bonk are computed at the zone midpoint.':''} Bonk = hours at that steady ${run?'pace':'zone'} before stored glycogen is exhausted with no fuel.</div>`;
 
+  const evZone = ints[Math.min(S.eventZone, ints.length-1)] || {};
+  const evIntLabel = S.segBreakdown ? '30-min segments'
+    : (evZone.pct!=null ? `${evZone.label} · ${run?paceFmt(evZone.pace)+'/mi':Math.round(evZone.watts)+'W'}` : (evZone.label||'—'));
   return `${athleteSummary()}
+
+  <!-- Event summary (read-only reference; edit on the Athlete & Activity tab) -->
+  <div class="panel" style="margin-bottom:16px;border-color:var(--accent2)">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+      <h2 style="margin:0;color:var(--accent2)">Event Summary</h2>
+      <span class="muted" style="font-size:12px">${fmt(S.eventHours,1)} hr ${run?'run':'ride'} · ${evIntLabel}</span>
+      <a onclick="active='rider';render()" style="margin-left:auto;color:var(--accent);cursor:pointer;font-size:12px">Edit on Athlete &amp; Activity →</a>
+    </div>
+    <div class="grid cols3">
+      <div class="res"><span>Total energy</span><span class="v">${fmt(ev.kcal,0)} kcal · ${fmt(ev.kcalHr,0)}/hr</span></div>
+      <div class="res"><span>Carbohydrate burned</span><span class="v">${fmt(ev.choG,0)} g · ${fmt(ev.choKcal,0)} kcal</span></div>
+      <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
+      <div class="res"><span>Carb fuel target <span class="muted">(${S.reservePct}% reserve)</span></span>
+        <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
+    </div>
+    <div class="note">Read-only reference — set event duration &amp; intensity on the <b>Athlete &amp; Activity</b> tab.</div>
+  </div>
 
   <!-- 1) Predicted glycogen + time to bonk -->
   <div class="panel">
@@ -1076,43 +1138,7 @@ function viewCaloric(){
         “—” = stored glycogen alone covers it. Toggle <b>High-carb</b> if you've trained your gut to absorb up to 150 g/hr.
       </div>
     </div>`;
-  })()}
-
-  <!-- 3) Event intensity + totals -->
-  <div class="panel" style="margin-top:16px">
-    <h2>Event Information</h2>
-    <div class="grid cols2">
-      <div>
-        ${numField('Event duration','eventHours','hr',0.5)}
-        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg ${run?'pace':'intensity'}</label>
-          <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select></div>
-        ${run&&!S.segBreakdown?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg grade</label>
-          <input type="number" step="0.5" value="${S.eventGrade}" style="width:72px" onchange="window._setEventGrade(this.value)"><span class="u">%</span></div>`:''}
-        <div class="sub-h">${run?'Run':'Ride'} breakdown</div>
-        <div class="modeseg">
-          <button class="sm ${S.segBreakdown?'ghost':''}" onclick="window._setSegMode(false)">Single average</button>
-          <button class="sm ${S.segBreakdown?'':'ghost'}" onclick="window._setSegMode(true)">30-min segments</button>
-        </div>
-        ${S.segBreakdown?`<div class="note">Pick the average ${run?'pace + grade':'intensity'} for each 30-minute block of your ${fmt(S.eventHours,1)}-hr ${run?'run':'ride'} — calories are summed across segments for a finer total.</div>
-        <div class="scroll" style="max-height:240px;margin-top:8px">
-          ${ev.segs.map((s,i)=>`<div class="field" style="gap:6px">
-            <span class="u" style="width:${run?78:96}px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
-            <select style="flex:1;min-width:0" onchange="window._setSegZone(${i}, this.value)">${intOpts(s.zi)}</select>
-            ${run?`<input type="number" step="0.5" value="${s.grade}" style="width:50px" onchange="window._setSegGrade(${i},this.value)" title="% grade"><span class="u" style="width:auto">%</span>`:''}
-          </div>`).join('')}
-        </div>`:`<div class="note">One average ${run?'pace &amp; grade are':'intensity is'} applied to the whole ${run?'run':'ride'}.</div>`}
-      </div>
-      <div>
-        <div class="sub-h">Event totals (${fmt(S.eventHours,1)} hr)</div>
-        <div class="res"><span>Total energy</span><span class="v">${fmt(ev.kcal,0)} kcal · ${fmt(ev.kcalHr,0)}/hr</span></div>
-        <div class="res"><span>Carbohydrate burned</span><span class="v">${fmt(ev.choG,0)} g · ${fmt(ev.choKcal,0)} kcal</span></div>
-        <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
-        <div class="res"><span>Carb fuel target <span class="muted">(keep ${S.reservePct}% reserve)</span></span>
-          <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
-        ${ev.overGut?`<div class="note" style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut-absorption limit${S.highCarbAdapted?' (high-carb-adapted)':''} — you'll dip into reserves; spread carbs across drink + food and train your gut.</div>`:''}
-      </div>
-    </div>
-  </div>`;
+  })()}`;
 }
 
 /* ---------- TAB: EVENT PLAN  (deeper fuel plan: target − drink = food gap) ---------- */
@@ -1332,7 +1358,7 @@ function viewSweatLog(){
    TABS / ROUTER
    ============================================================ */
 const TABS = [
-  ['rider','Athlete',viewRider],
+  ['rider','Athlete & Activity',viewRider],
   ['cal','Caloric',viewCaloric],
   ['hydr','Hydration',viewHydration],
   ['plan','Event Plan',viewEventPlan],
