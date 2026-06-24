@@ -91,6 +91,13 @@
   .z4{background:rgba(255,180,84,.16);color:#ffc77f}
   .z5{background:rgba(255,107,107,.16);color:#ff9d9d}
   .z6{background:rgba(186,130,255,.18);color:#d3b8ff}
+  /* Zone × Time supplementation matrix cells (feasibility of CHO/hr) */
+  table.zxt td.sc{font-variant-numeric:tabular-nums;font-weight:700;text-align:center}
+  td.st-w{background:transparent;color:var(--muted)}
+  td.st-g{background:rgba(51,214,166,.16);color:#7ef0cd}
+  td.st-y{background:rgba(255,235,156,.16);color:#ffe08a}
+  td.st-o{background:rgba(255,180,84,.18);color:#ffc77f}
+  td.st-r{background:rgba(255,107,107,.20);color:#ff9d9d}
   button{background:var(--accent);color:#06121f;border:none;border-radius:7px;padding:7px 12px;font-weight:700;cursor:pointer;font-size:13px}
   button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
   button.sm{padding:3px 8px;font-size:11px}
@@ -264,6 +271,19 @@ function naFromSaltsMg(){
 function calcDrinkNaPerOz(){ return S.bottleOz ? naFromSaltsMg()/S.bottleOz : 0; } // mg/oz (computed)
 function sodiumPerHour(){ return naFromSaltsMg()*S.bottlesPerHour; }              // mg/hr
 function effComp(){ return Object.assign({}, S.comp); }
+// Changing bottle volume holds CONCENTRATION constant (mg/oz, %carb, mOsm/L) rather than diluting:
+// the DB stores each product per its manufacturer-recommended oz, so grams scale with volume.
+function applyBottleVolume(newOz){
+  newOz=+newOz; if(!(newOz>0)) return;
+  const oldOz=+S.bottleOz;
+  if(oldOz>0 && newOz!==oldOz){
+    const f=newOz/oldOz;
+    ['glucose','sucrose','malto','fructose','nacl','citrate'].forEach(k=>{ S.comp[k]=+(((+S.comp[k]||0)*f).toFixed(3)); });
+    (S.extraCarbs||[]).forEach(x=>{ x.grams=+(((+x.grams||0)*f).toFixed(3)); });
+    (S.extraLytes||[]).forEach(x=>{ x.grams=+(((+x.grams||0)*f).toFixed(3)); });
+  }
+  S.bottleOz=+newOz.toFixed(2);   // concentration preserved → loadedProduct stays valid
+}
 
 /* ============================================================
    PRODUCT DATABASE  (serving values from workbook; carb-source
@@ -359,9 +379,21 @@ function glycogenKcal(){
 function activeMuscleKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*g.musc*activeFrac(); }
 
 /* ---- metabolic core (activity-aware: ACSM cycling power or ACSM running pace+grade) ---- */
-// "trained" = steeper fat→CHO transition (more fat at submax). cycling: >4 W/kg ; running: threshold faster than 7:30/mi
-function isTrained(){ return isRun() ? vThreshold()>paceToSpeed(450) : ftpPerKg()>4; }
-function rqFromFrac(frac){ if(frac>=1) return 1.0; return isTrained()?frac*0.4+0.6:frac*0.3+0.7; }
+// training status, 0 = recreational → 1 = elite. cycling: 2.5→5.5 W/kg ; running: 9:00→6:00/mi threshold.
+function fitFrac(){
+  const c=(x,a,b)=>Math.min(b,Math.max(a,x));
+  if(isRun()){ const sec=speedToPace(vThreshold()); return c((540-sec)/(540-360),0,1); } // 9:00→6:00/mi
+  return c((ftpPerKg()-2.5)/(5.5-2.5),0,1);                                               // 2.5→5.5 W/kg
+}
+// substrate split via RQ. Two fitness-driven knobs: resting RQ (fat at the low end) and the
+// intensity where oxidation goes all-CHO. Untrained burn little fat across all zones & saturate early.
+function rqFromFrac(frac){
+  const f=fitFrac();
+  const rq0=0.78-0.18*f;       // resting RQ: rec 0.78 (little fat) → elite 0.60 (lots of fat)
+  const fracMax=0.85+0.20*f;   // all-CHO point: rec 85% → elite 105% of threshold
+  if(frac>=fracMax) return 1.0;
+  return rq0+(1-rq0)*(frac/fracMax);
+}
 // metrics for an intensity item: {watts} (cycling) or {speed m/min} (running), at % grade (running only)
 function imetrics(item, grade=0){
   const kg=S.bodyLbs/2.2; let vo2, frac;
@@ -691,9 +723,10 @@ function viewRider(){
       <div class="panel">
         <h2>Profile Readout</h2>
         ${run
-          ? `<div class="res"><span>Threshold speed</span><span class="v">${fmt(vThreshold()/1000*60,2)} kph · ${fmt(vThreshold()/26.8224,2)} mph</span></div>
-             <div class="res"><span>Fat-ox slope</span><span class="v">${isTrained()?'Trained (≤7:30/mi thr)':'Developing'}</span></div>`
+          ? `<div class="res"><span>Threshold speed</span><span class="v">${fmt(vThreshold()/1000*60,2)} kph · ${fmt(vThreshold()/26.8224,2)} mph</span></div>`
           : `<div class="res"><span>FTP / kg</span><span class="v">${fmt(ftpPerKg(),2)} W/kg</span></div>`}
+        ${(()=>{const f=fitFrac();const lbl=f<0.2?'Recreational':f<0.45?'Developing':f<0.7?'Trained':f<0.9?'Well-trained':'Elite';
+          return `<div class="res"><span>Training status <span class="muted">(fat-ox)</span></span><span class="v">${lbl} · ${fmt(f*100,0)}%</span></div>`;})()}
         <div class="res"><span>Active muscle <span class="muted">(${run?'running':'cycling'})</span></span><span class="v">${fmt(activeMuscleKg(),1)} kg · ${fmt(activeFrac()*100,0)}% of SMM</span></div>
         <div class="res"><span>Predicted glycogen</span><span class="v">${fmt(glycogenKcal()/4,0)} g · ${fmt(glycogenKcal(),0)} kcal</span></div>
         <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
@@ -719,6 +752,10 @@ function viewHydration(){
   </div>
   <div class="grid cols2">
     <div>
+      ${sweatSodiumPanel()}
+    </div>
+
+    <div>
       <div class="panel">
         <h2>Bottle</h2>
         <div class="fgrid">
@@ -729,10 +766,6 @@ function viewHydration(){
         </div>
         ${numField('Bottles / hr','bottlesPerHour','',0.25)}
       </div>
-      ${sweatSodiumPanel()}
-    </div>
-
-    <div>
       <div class="panel">
         <h2>Product</h2>
         <div class="row-actions">
@@ -762,6 +795,8 @@ function viewHydration(){
         ${S.extraLytes.map(x=>extraRow(x,'l')).join('')}
         <div class="res" style="margin-top:6px"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
         <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}">${fmt(sodiumPerHour()-S.sweatNa*sr,0)} mg</span></div>
+        <div class="res"><span>Drink carb / hour</span><span class="v">${fmt(drinkCarbGperHr(),0)} g</span></div>
+        <div class="res"><span>Net carb balance / hour <span class="muted">(vs burn)</span></span><span class="v" style="color:${(drinkCarbGperHr()-ev.choGhr)>=0?'var(--good)':'var(--bad)'}" title="Drink carbs/hr − carbohydrate oxidized/hr at event intensity. Negative = net glycogen drawdown.">${fmt(drinkCarbGperHr()-ev.choGhr,0)} g</span></div>
       </div>
     </div>
   </div>
@@ -971,9 +1006,38 @@ function viewCaloric(){
     ${refTable}
   </div>
 
+  <!-- 2b) Zone × Time — CHO supplementation matrix to hold the reserve -->
+  ${(()=>{
+    const DURS=[1,2,3,4,5,6,7,8,9,10,11,12];
+    const usableGly=glycogenKcal()*(1-S.reservePct/100);
+    // supplemental CHO (g/hr) so glycogen never drops below the reserve over a T-hour effort
+    const suppG=(choKcalHr,T)=>Math.max(0,(choKcalHr - usableGly/T)/4);
+    const cls=g=> g<=0?'st-w' : g<=60?'st-g' : g<=90?'st-y' : g<=GUT_MAX_CHO?'st-o' : 'st-r';
+    const cell=g=> g<=0?'—':fmt(g,0);
+    return `<div class="panel" style="margin-top:16px">
+      <h2 style="margin:0 0 2px">Zone × Time — carbs to hold a ${S.reservePct}% reserve</h2>
+      <div class="note" style="margin-top:4px">Recommended carbohydrate intake (<b>g/hr</b>) by ${wl?(run?'pace':'workload'):'zone'} and total ${run?'run':'ride'} duration, so predicted glycogen never falls below your ${S.reservePct}% reserve. Glycogen store ${fmt(glycogenKcal()/4,0)} g · usable ${fmt(usableGly/4,0)} g.</div>
+      <div class="scroll" style="margin-top:8px"><table class="tc zxt">
+        <thead><tr><th style="text-align:left">${wl?(run?'Pace':'Workload'):'Zone'}</th><th>CHO burn (g/hr)</th>
+          ${DURS.map(d=>`<th>${d} hr</th>`).join('')}</tr></thead>
+        <tbody>${ints.map((z,i)=>{const m=imetrics(z,0); const burnG=m.choKcalHr/4; return `<tr>
+          <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.pct!=null?z.label:((run?'P':'WL')+' '+(i+1))}</span> <span class="muted" style="font-size:10px">${intLbl(z)}</span></td>
+          <td style="text-align:center">${fmt(burnG,0)}</td>
+          ${DURS.map(d=>{const g=suppG(m.choKcalHr,d);return `<td class="sc ${cls(g)}">${cell(g)}</td>`;}).join('')}
+        </tr>`;}).join('')}</tbody></table></div>
+      <div class="note" style="margin-top:8px">
+        <span class="st-g" style="padding:1px 6px;border-radius:4px">≤60</span> all glucose / whole foods ·
+        <span class="st-y" style="padding:1px 6px;border-radius:4px">60–90</span> 2:1 glucose:fructose ·
+        <span class="st-o" style="padding:1px 6px;border-radius:4px">90–${GUT_MAX_CHO}</span> 1:1 glucose:fructose ·
+        <span class="st-r" style="padding:1px 6px;border-radius:4px">&gt;${GUT_MAX_CHO}</span> exceeds gut limit — not sustainable.
+        “—” = stored glycogen alone covers it. Recommendations capped at the ${GUT_MAX_CHO} g/hr absorption limit.
+      </div>
+    </div>`;
+  })()}
+
   <!-- 3) Event intensity + totals -->
   <div class="panel" style="margin-top:16px">
-    <h2>Event Intensity</h2>
+    <h2>Event Information</h2>
     <div class="grid cols2">
       <div>
         ${numField('Event duration','eventHours','hr',0.5)}
@@ -1255,12 +1319,16 @@ function bind(){
   // page doesn't re-render mid-keystroke (which would drop focus / transpose digits)
   document.querySelectorAll('input[data-k]').forEach(el=>{
     const obj = el.dataset.obj==='comp'?S.comp:S;
+    const isBottle = el.dataset.k==='bottleOz';
     const commit=()=>{
-      let v=el.value; obj[el.dataset.k] = (v===''?(el.dataset.k==='manualSweat'?null:''):+v);
-      if(el.dataset.k==='bottleOz'||el.dataset.k==='maltoDE') S.loadedProduct=null; // manual change → no longer stock mix
+      let v=el.value;
+      if(isBottle){ applyBottleVolume(v); return; } // scales comp to hold concentration; keeps loadedProduct
+      obj[el.dataset.k] = (v===''?(el.dataset.k==='manualSweat'?null:''):+v);
+      if(el.dataset.k==='maltoDE') S.loadedProduct=null; // manual change → no longer stock mix
     };
     el.onchange=()=>{ commit(); render(); };
-    if(active==='hydr') el.oninput=()=>{ commit(); refreshOutputs(); }; // live table/osmolality (SOLVE handled below)
+    // bottle size scales the recipe, so commit only on blur (not per keystroke) to avoid rounding drift
+    if(active==='hydr' && !isBottle) el.oninput=()=>{ commit(); refreshOutputs(); };
   });
   // Gender select (rider profile) → drives glycogen estimate
   const gs=$('#genderSel'); if(gs) gs.onchange=()=>{ S.gender=gs.value; render(); };
@@ -1282,8 +1350,7 @@ function bind(){
   const bm=$('input[data-kgmass]'); if(bm){ const commit=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*2.2).toFixed(1); };
     bm.onchange=()=>{ commit(); render(); }; bm.oninput=()=>{ commit(); refreshOutputs(); }; }
   // Bottle size in liters is the twin of oz — editing it writes back to oz
-  const bv=$('input[data-lvol]'); if(bv){ const commit=()=>{ const v=+bv.value; if(v>0){ S.bottleOz=+(v*OZ_PER_L).toFixed(2); S.loadedProduct=null; } };
-    bv.onchange=()=>{ commit(); render(); }; bv.oninput=()=>{ commit(); refreshOutputs(); }; }
+  const bv=$('input[data-lvol]'); if(bv){ bv.onchange=()=>{ const v=+bv.value; if(v>0) applyBottleVolume(v*OZ_PER_L); render(); }; }
   // custom add-on ingredient edits (key dropdown + grams)
   document.querySelectorAll('[data-xc],[data-xl]').forEach(el=>{
     const arr=el.hasAttribute('data-xc')?S.extraCarbs:S.extraLytes;
