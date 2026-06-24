@@ -305,27 +305,28 @@ function applyBottleVolume(newOz){
 let PRODUCTS = [
   // brand, product, unit, cat('drink'|'lyte'), oz(serving), sodium_mg, kcal, {glucose,sucrose,malto,fructose}, de, conf
   // --- carbohydrate drink mixes ---
-  ['Skratch Labs','Sport Hydration Mix','per 16 oz','drink',16,380,80,{glucose:7,sucrose:14,malto:0,fructose:0},100,'est'],
-  ['Skratch Labs','Super High-Carb','per 17 oz','drink',17,200,400,{glucose:0,sucrose:0,malto:67,fructose:33},15,'est'],
-  ['Gatorade','Thirst Quencher','per 12 oz','drink',12,160,80,{glucose:11,sucrose:9,malto:0,fructose:0},100,'est'],
-  ['Gatorade','Endurance Formula','per 16 oz','drink',16,310,90,{glucose:0,sucrose:9,malto:9,fructose:4},15,'est'],
-  ['First Endurance','EFS Drink Mix','per serving','drink',16,300,96,{glucose:8,sucrose:4,malto:12,fructose:0},15,'est'],
-  ['First Endurance','EFS-PRO','per serving','drink',16,380,120,{glucose:5,sucrose:0,malto:20,fructose:5},12,'est'],
-  ['Tailwind Nutrition','Endurance Fuel','per scoop','drink',24,160,100,{glucose:17,sucrose:8,malto:0,fructose:0},100,'est'],
-  ['Tailwind Nutrition','High-Carb','per serving','drink',16,300,200,{glucose:34,sucrose:16,malto:0,fructose:0},100,'est'],
-  ['Infinit Nutrition','Go Far','per serving','drink',20,379,280,{glucose:10,sucrose:0,malto:55,fructose:5},15,'est'],
-  ['Maurten','Drink Mix 320','per 500 mL','drink',17,245,320,{glucose:14,sucrose:0,malto:30,fructose:36},15,'est'],
-  ['Maurten','Drink Mix 160','per 500 mL','drink',17,123,160,{glucose:7,sucrose:0,malto:15,fructose:18},15,'est'],
-  ['Styrkr','MIX90','per serving','drink',16,80,360,{glucose:0,sucrose:0,malto:60,fructose:30},15,'est'],
-  ['Flow Formulas','Endurance','per serving','drink',16,390,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
-  ['Flow Formulas','Endurance (High Sodium)','per serving','drink',16,780,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
-  ['NeverSecond','C30 Drink Mix','per 500 mL','drink',17,20,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
-  ['NeverSecond','C30 Fuel+Hydrate','per 500 mL','drink',17,300,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
-  ['SiS','Beta Fuel','per 500 mL','drink',17,200,320,{glucose:0,sucrose:0,malto:44,fructose:36},15,'est'],
-  ['Carbs Fuel','Energy Drink Mix','per serving','drink',16,100,200,{glucose:0,sucrose:0,malto:50,fructose:0},15,'est'],
-  ['Precision Fuel & Hydration','PF 30 Drink Mix','per 500 mL','drink',17,250,116,{glucose:0,sucrose:0,malto:16.7,fructose:13.3},15,'est'],
-  ['Precision Fuel & Hydration','PF 60 Drink Mix','per 500 mL','drink',17,500,232,{glucose:0,sucrose:0,malto:33,fructose:27},15,'est'],
-  ['Precision Fuel & Hydration','PF 90 Drink Mix','per 500 mL','drink',17,750,348,{glucose:0,sucrose:0,malto:50,fructose:40},15,'est'],
+  // unit = manufacturer dose (scoops/sachets/etc); oz = recommended fluid volume it's mixed into
+  ['Skratch Labs','Sport Hydration Mix','1 scoop','drink',16,380,80,{glucose:7,sucrose:14,malto:0,fructose:0},100,'est'],
+  ['Skratch Labs','Super High-Carb','1 packet','drink',17,200,400,{glucose:0,sucrose:0,malto:67,fructose:33},15,'est'],
+  ['Gatorade','Thirst Quencher','1 scoop','drink',12,160,80,{glucose:11,sucrose:9,malto:0,fructose:0},100,'est'],
+  ['Gatorade','Endurance Formula','2 scoops','drink',16,310,90,{glucose:0,sucrose:9,malto:9,fructose:4},15,'est'],
+  ['First Endurance','EFS Drink Mix','1 scoop','drink',16,300,96,{glucose:8,sucrose:4,malto:12,fructose:0},15,'est'],
+  ['First Endurance','EFS-PRO','1 scoop','drink',16,380,120,{glucose:5,sucrose:0,malto:20,fructose:5},12,'est'],
+  ['Tailwind Nutrition','Endurance Fuel','1 scoop','drink',24,160,100,{glucose:17,sucrose:8,malto:0,fructose:0},100,'est'],
+  ['Tailwind Nutrition','High-Carb','2 scoops','drink',16,300,200,{glucose:34,sucrose:16,malto:0,fructose:0},100,'est'],
+  ['Infinit Nutrition','Go Far','2 scoops','drink',20,379,280,{glucose:10,sucrose:0,malto:55,fructose:5},15,'est'],
+  ['Maurten','Drink Mix 320','1 sachet','drink',17,245,320,{glucose:14,sucrose:0,malto:30,fructose:36},15,'est'],
+  ['Maurten','Drink Mix 160','1 sachet','drink',17,123,160,{glucose:7,sucrose:0,malto:15,fructose:18},15,'est'],
+  ['Styrkr','MIX90','1 sachet','drink',16,80,360,{glucose:0,sucrose:0,malto:60,fructose:30},15,'est'],
+  ['Flow Formulas','Endurance','1 scoop','drink',16,390,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
+  ['Flow Formulas','Endurance (High Sodium)','1 scoop','drink',16,780,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
+  ['NeverSecond','C30 Drink Mix','1 sachet','drink',17,20,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
+  ['NeverSecond','C30 Fuel+Hydrate','1 sachet','drink',17,300,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
+  ['SiS','Beta Fuel','1 sachet','drink',17,200,320,{glucose:0,sucrose:0,malto:44,fructose:36},15,'est'],
+  ['Carbs Fuel','Energy Drink Mix','1 scoop','drink',16,100,200,{glucose:0,sucrose:0,malto:50,fructose:0},15,'est'],
+  ['Precision Fuel & Hydration','PF 30 Drink Mix','1 sachet','drink',17,250,116,{glucose:0,sucrose:0,malto:16.7,fructose:13.3},15,'est'],
+  ['Precision Fuel & Hydration','PF 60 Drink Mix','1 sachet','drink',17,500,232,{glucose:0,sucrose:0,malto:33,fructose:27},15,'est'],
+  ['Precision Fuel & Hydration','PF 90 Drink Mix','1 sachet','drink',17,750,348,{glucose:0,sucrose:0,malto:50,fructose:40},15,'est'],
   // --- electrolyte solutions (low / no carb) --- trailing K, Mg, Ca (mg) are informative only; only Na feeds the math
   ['LMNT','Recharge','per stick (16 oz)','lyte',16,1000,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',200,60,0],
   ['Precision Fuel & Hydration','PH 1000','per 500 mL','lyte',17,500,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',0,0,0],
@@ -534,6 +535,13 @@ let FUEL_PRODUCTS = [
   ['GU','Stroopwafel','Each',                               130, 65, {glucose:3,  fructose:0,    sucrose:14, malto:5   }, 15],
   ['GU','Liquid Energy Gel','Each',                          90, 65, {glucose:0,  fructose:7,    sucrose:0,  malto:14  }, 15],
   ['ProBar','Bolt Chews','Pack',                            100, 50, {glucose:8,  fructose:5,    sucrose:12, malto:0   }, 15],
+  // --- whole / real foods ---
+  ['Whole Food','Banana (medium)','Each',                   105,  1, {glucose:5,  fructose:6,    sucrose:6,  malto:10  }, 20],
+  ['Whole Food','PB&J Sandwich','Each',                     380,400, {glucose:5,  fructose:8,    sucrose:10, malto:27  }, 20],
+  ['Whole Food','Medjool Dates','2 dates',                  130,  0, {glucose:16, fructose:16,   sucrose:2,  malto:0   }, 100],
+  ['Whole Food','Boiled Potato (salted)','Medium',          130,250, {glucose:0,  fructose:0,    sucrose:1,  malto:29  }, 20],
+  ['Whole Food','Pretzels','1 oz',                          110,350, {glucose:0,  fructose:0,    sucrose:1,  malto:22  }, 20],
+  ['Whole Food','Orange (medium)','Each',                    62,  0, {glucose:6,  fructose:6,    sucrose:3,  malto:0   }, 100],
 ].map((p,i)=>({id:'f'+i, brand:p[0], product:p[1], unit:p[2], kcal:p[3], sodium:p[4], split:{...p[5]}, de:p[6]}));
 // snapshot of factory foods so new default products can be merged into a user's saved list
 const FUEL_DEFAULTS = FUEL_PRODUCTS.map(p=>({...p, split:{...p.split}}));
@@ -1300,8 +1308,10 @@ function viewLibrary(){
     return `<tr style="${pending?'background:rgba(255,180,84,.10)':''}">
       <td style="text-align:left">${txt('brand',p.brand,120)}</td>
       <td style="text-align:left">${txt('product',p.product,130)}</td>
-      <td>${ed?`<input type="text" value="${esc(p.unit)}" data-id="${p._id}" data-f="unit" style="width:84px">`:esc(p.unit)}</td>
-      <td>${num('oz',p.oz,44,0.1)}</td><td>${num('sodium',p.sodium,56,1)}</td><td>${num('kcal',p.kcal,50,1)}</td>
+      <td style="text-align:left">${ed
+        ? `<input type="text" value="${esc(p.unit)}" data-id="${p._id}" data-f="unit" style="width:80px"> / ${num('oz',p.oz,42,0.1)} <span class="u" style="width:auto">oz</span>`
+        : `${esc(p.unit)} / ${fmt(p.oz,0)} oz<div class="muted" style="font-size:10px">≈ ${fmt(p.oz*ML_PER_OZ,0)} mL</div>`}</td>
+      <td>${num('sodium',p.sodium,56,1)}</td><td>${num('kcal',p.kcal,50,1)}</td>
       <td>${num('split',p.split.glucose,44,0.5,'glucose')}</td>
       <td>${num('split',p.split.fructose,44,0.5,'fructose')}</td>
       <td>${num('split',p.split.sucrose,44,0.5,'sucrose')}</td>
@@ -1311,7 +1321,7 @@ function viewLibrary(){
       <td style="color:var(--${t.cls});font-weight:700">${p.oz>0?fmt(osm,0):'—'}</td>
       <td style="text-align:left">${act}</td></tr>`;
   };
-  const dbHead=`<thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Unit</th><th>oz</th><th>Na (mg)</th><th>kcal</th><th>Glu</th><th>Fru</th><th>Suc</th><th>Malto</th><th>DE</th><th>Carb (g)</th><th>mOsm/L</th><th>Status / actions</th></tr></thead>`;
+  const dbHead=`<thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Serving <span class="muted" style="font-weight:400;text-transform:none">(mix / fluid)</span></th><th>Na (mg)</th><th>kcal</th><th>Glu</th><th>Fru</th><th>Suc</th><th>Malto</th><th>DE</th><th>Carb (g)</th><th>mOsm/L</th><th>Status / actions</th></tr></thead>`;
   // electrolytes: only Na drives the math; K/Mg/Ca are informative
   const lyteHead=`<thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Unit</th><th>Na (mg)</th><th>K (mg)</th><th>Mg (mg)</th><th>Ca (mg)</th><th>kcal</th><th>Status / actions</th></tr></thead>`;
   const lyteRow=p=>{
