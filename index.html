@@ -71,6 +71,11 @@
   th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
   tr:hover td{background:var(--panel2)}
   .scroll{overflow:auto;max-height:560px;border-radius:10px}
+  /* projection table: tighter columns so the Recommendation column fits in view */
+  table.proj th,table.proj td{padding:5px 6px;font-size:12px}
+  table.proj td.reco{text-align:center;white-space:normal;min-width:160px;max-width:250px}
+  .reco-box{display:inline-block;padding:5px 10px;border-radius:7px;font-weight:600;
+    line-height:1.25;text-align:center;border:1px solid currentColor}
   button{background:var(--accent);color:#06121f;border:none;border-radius:7px;padding:7px 12px;font-weight:700;cursor:pointer;font-size:13px}
   button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
   button.sm{padding:3px 8px;font-size:11px}
@@ -517,20 +522,61 @@ function projectionRows(hours=8){
   }
   return rows;
 }
+/* Per-hour coaching for a projection row: flags fluid + sodium and, where out of band,
+   computes how much to add/cut PER HOUR to bring that metric back into the green.
+   Fluid: 1 lb water ≈ 15.4 oz (lbs ÷ 2.2 → L × 33.814).  Na: ΔmM × ECF(L) × 23 = mg Na. */
+function recoFor(x){
+  const acceptableLbs = S.bodyLbs * S.acceptLoss/100;       // allowed net loss (lbs)
+  const lbsToOz = lbs => lbs/2.2*OZ_PER_L;                  // lbs of water → fluid oz
+  const naToSaltG = mg => mg/1000/0.3934;                   // mg Na⁺ → g of NaCl (table salt)
+  const parts=[]; let cls='good';
+  // --- 1) Fluid: how much to add/cut, AND the ECF that results once it's corrected ---
+  // The two are coupled: adding water raises ECF (dilutes Na⁺), cutting it lowers ECF
+  // (concentrates Na⁺). We fix fluid first, then judge sodium at that corrected ECF.
+  let ecfAdj = x.ecf;                                        // ECF after the fluid fix (L)
+  if(x.lossPct > S.acceptLoss){                              // drying out → drink more, up to the floor
+    ecfAdj = totalECF() - acceptableLbs/2.2;                 // ECF held at the acceptable-loss floor
+    const oz = lbsToOz(x.lossLbs - acceptableLbs)/x.h;       // extra oz PER HOUR
+    parts.push(`💧 Add ≈ <b>${fmt(oz,0)} oz/hr</b> fluid`);
+    cls='bad';
+  } else if(x.wt > S.bodyLbs){                               // gaining weight → ease back to start weight
+    ecfAdj = totalECF();
+    const oz = lbsToOz(x.wt - S.bodyLbs)/x.h;
+    parts.push(`💧 Cut ≈ <b>${fmt(oz,0)} oz/hr</b> fluid`);
+    if(cls==='good') cls='warn';
+  }
+  // --- 2) Sodium: judged at the CORRECTED ECF so the volume + Na⁺ move together (mM green 135–146) ---
+  const mMadj = ecfAdj ? x.Ommol/ecfAdj : x.mM;             // body Na⁺ concentration once the fluid fix lands
+  if(mMadj < 135){                                           // too dilute → add sodium
+    const mg = (135 - mMadj)*ecfAdj*23/x.h;                  // extra mg Na⁺ PER HOUR
+    parts.push(`🧂 Add ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺ (~${fmt(naToSaltG(mg),1)} g salt)`);
+    if(cls!=='bad') cls='warn';
+  } else if(mMadj > 146){                                    // too concentrated → ease off salt
+    const mg = (mMadj - 146)*ecfAdj*23/x.h;
+    parts.push(`🧂 Cut ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺`);
+    cls='bad';
+  }
+  if(!parts.length) return {cls:'good', html:'✓ Good to go'};
+  return {cls, html:parts.join('<br>')};
+}
+// colored box (bg + text) for the recommendation cell — sits on the blue table background
+const recoBoxStyle = cls => { const c = cls==='warn'?CF.amber : cls==='bad'?CF.red : CF.green;
+  return `style="background:${c.bg};color:${c.fg}"`; };
 function viewProjection(){
   const hrs=S.projHours||8;
   const r=projectionRows(hrs);
   return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
-  <div class="note">Projects <b>your plan</b>: Bottles = hours × your Bottles/hr, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146.</div>
-  <div class="scroll" style="margin-top:10px"><table class="tc">
+  <div class="note">Projects <b>your plan</b>: Bottles = hours × your Bottles/hr, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146. The <b>Recommendation</b> column reads those flags for each hour: green = good to go, otherwise it estimates how much fluid and sodium to add (or cut) per hour to get back in band — solved together, so the sodium amount accounts for how the corrected fluid volume dilutes or concentrates your Na⁺.</div>
+  <div class="scroll" style="margin-top:10px"><table class="tc proj">
     <thead><tr><th>Hr</th><th>Water lost (L)</th><th>Replaced (oz)</th>
       <th>Wt loss (lbs)</th><th>Wt loss (%)</th><th>Body wt (lbs)</th>
-      <th>New ECF (L)</th><th>Body Na⁺ (g)</th><th>Na⁺ (mM)</th></tr></thead>
-    <tbody>${r.map(x=>`<tr>
+      <th>New ECF (L)</th><th>Body Na⁺ (g)</th><th>Na⁺ (mM)</th><th>Recommendation</th></tr></thead>
+    <tbody>${r.map(x=>{const rc=recoFor(x);return `<tr>
       <td>${x.h}</td><td>${fmt(x.lostL,1)}</td><td>${fmt(x.replOz,0)}</td>
       <td>${fmt(x.lossLbs,1)}</td><td ${lossCF(x.lossPct)}>${fmt(x.lossPct,1)}%</td>
       <td ${wtCF(x.wt)}>${fmt(x.wt,1)}</td><td>${fmt(x.ecf,1)}</td>
-      <td>${fmt(x.Ng,1)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td></tr>`).join('')}
+      <td>${fmt(x.Ng,1)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td>
+      <td class="reco"><span class="reco-box" ${recoBoxStyle(rc.cls)}>${rc.html}</span></td></tr>`;}).join('')}
     </tbody></table></div>
   <div class="row-actions" style="margin-top:8px;align-items:center">
     <span class="muted" style="font-size:12px">Showing ${hrs} hours</span>
