@@ -326,25 +326,25 @@ let PRODUCTS = [
   ['Precision Fuel & Hydration','PF 30 Drink Mix','per 500 mL','drink',17,250,116,{glucose:0,sucrose:0,malto:16.7,fructose:13.3},15,'est'],
   ['Precision Fuel & Hydration','PF 60 Drink Mix','per 500 mL','drink',17,500,232,{glucose:0,sucrose:0,malto:33,fructose:27},15,'est'],
   ['Precision Fuel & Hydration','PF 90 Drink Mix','per 500 mL','drink',17,750,348,{glucose:0,sucrose:0,malto:50,fructose:40},15,'est'],
-  // --- electrolyte solutions (low / no carb) ---
-  ['LMNT','Recharge','per stick (16 oz)','lyte',16,1000,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est'],
-  ['Precision Fuel & Hydration','PH 1000','per 500 mL','lyte',17,500,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est'],
-  ['Precision Fuel & Hydration','PH 1500','per 500 mL','lyte',17,750,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est'],
-  ['Nuun','Sport','per tablet (16 oz)','lyte',16,300,15,{glucose:4,sucrose:0,malto:0,fructose:0},100,'est'],
-  ['SaltStick','Electrolyte Caps','per capsule','lyte',0,215,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl'],
-  ['Skratch Labs','Hydration (High-Sodium)','per serving','lyte',16,800,35,{glucose:3,sucrose:6,malto:0,fructose:0},100,'est'],
-  ['Clif','Shot Electrolyte Mix','per serving','lyte',8,125,40,{glucose:4,sucrose:6,malto:0,fructose:0},100,'est'],
-  ['Bonk Breaker','Real Hydration','per serving','lyte',8,150,35,{glucose:4,sucrose:5,malto:0,fructose:0},100,'est'],
-  ['Liquid I.V.','Hydration Multiplier','per stick (16 oz)','lyte',16,510,45,{glucose:5,sucrose:6,malto:0,fructose:0},100,'est'],
-  ['DripDrop','ORS','per stick (8 oz)','lyte',8,330,35,{glucose:4,sucrose:5,malto:0,fructose:0},100,'est'],
-  ['Mortal Hydration','Electrolyte Mix','per stick','lyte',16,600,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est'],
-  ['Hammer Nutrition','Endurolytes Fizz','per tablet','lyte',16,100,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est'],
-  ['Thorne','Catalyte','per scoop','lyte',16,250,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est'],
-  ['Tailwind Nutrition','Active Hydration','per serving','lyte',16,200,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est'],
-  ['GU','Roctane Electrolyte Caps','per capsule','lyte',0,100,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est'],
-  ['SaltStick','FastChews','per 2 chews','lyte',0,60,10,{glucose:1,sucrose:1,malto:0,fructose:0},100,'est'],
-  ['Precision Fuel & Hydration','PH Electrolyte Caps','per capsule','lyte',0,250,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est'],
-].map(p=>({brand:p[0],product:p[1],unit:p[2],cat:p[3],name:p[0]+' '+p[1],oz:p[4],sodium:p[5],kcal:p[6],split:p[7],de:p[8],conf:p[9]}));
+  // --- electrolyte solutions (low / no carb) --- trailing K, Mg, Ca (mg) are informative only; only Na feeds the math
+  ['LMNT','Recharge','per stick (16 oz)','lyte',16,1000,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',200,60,0],
+  ['Precision Fuel & Hydration','PH 1000','per 500 mL','lyte',17,500,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',0,0,0],
+  ['Precision Fuel & Hydration','PH 1500','per 500 mL','lyte',17,750,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',0,0,0],
+  ['Nuun','Sport','per tablet (16 oz)','lyte',16,300,15,{glucose:4,sucrose:0,malto:0,fructose:0},100,'est',150,25,13],
+  ['SaltStick','Electrolyte Caps','per capsule','lyte',0,215,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',63,11,22],
+  ['Skratch Labs','Hydration (High-Sodium)','per serving','lyte',16,800,35,{glucose:3,sucrose:6,malto:0,fructose:0},100,'est',40,0,0],
+  ['Clif','Shot Electrolyte Mix','per serving','lyte',8,125,40,{glucose:4,sucrose:6,malto:0,fructose:0},100,'est',45,0,0],
+  ['Bonk Breaker','Real Hydration','per serving','lyte',8,150,35,{glucose:4,sucrose:5,malto:0,fructose:0},100,'est',40,0,0],
+  ['Liquid I.V.','Hydration Multiplier','per stick (16 oz)','lyte',16,510,45,{glucose:5,sucrose:6,malto:0,fructose:0},100,'est',380,0,0],
+  ['DripDrop','ORS','per stick (8 oz)','lyte',8,330,35,{glucose:4,sucrose:5,malto:0,fructose:0},100,'est',185,39,0],
+  ['Mortal Hydration','Electrolyte Mix','per stick','lyte',16,600,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',200,50,0],
+  ['Hammer Nutrition','Endurolytes Fizz','per tablet','lyte',16,100,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',80,25,50],
+  ['Thorne','Catalyte','per scoop','lyte',16,250,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',100,20,20],
+  ['Tailwind Nutrition','Active Hydration','per serving','lyte',16,200,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',90,14,26],
+  ['GU','Roctane Electrolyte Caps','per capsule','lyte',0,100,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',63,12,50],
+  ['SaltStick','FastChews','per 2 chews','lyte',0,60,10,{glucose:1,sucrose:1,malto:0,fructose:0},100,'est',16,4,6],
+  ['Precision Fuel & Hydration','PH Electrolyte Caps','per capsule','lyte',0,250,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',0,0,0],
+].map(p=>({brand:p[0],product:p[1],unit:p[2],cat:p[3],name:p[0]+' '+p[1],oz:p[4],sodium:p[5],kcal:p[6],split:p[7],de:p[8],conf:p[9],potassium:p[10]||0,magnesium:p[11]||0,calcium:p[12]||0}));
 
 function productCarb(p){ const s=p.split; return s.glucose+s.sucrose+s.malto+s.fructose; }
 function productOsm(p){
@@ -1312,6 +1312,30 @@ function viewLibrary(){
       <td style="text-align:left">${act}</td></tr>`;
   };
   const dbHead=`<thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Unit</th><th>oz</th><th>Na (mg)</th><th>kcal</th><th>Glu</th><th>Fru</th><th>Suc</th><th>Malto</th><th>DE</th><th>Carb (g)</th><th>mOsm/L</th><th>Status / actions</th></tr></thead>`;
+  // electrolytes: only Na drives the math; K/Mg/Ca are informative
+  const lyteHead=`<thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Unit</th><th>Na (mg)</th><th>K (mg)</th><th>Mg (mg)</th><th>Ca (mg)</th><th>kcal</th><th>Status / actions</th></tr></thead>`;
+  const lyteRow=p=>{
+    const ed=canEditRow(p), pending=p._status==='pending';
+    const txt=(f,v,w)=> ed ? `<input type="text" value="${esc(v)}" data-id="${p._id}" data-f="${f}" style="width:${w}px">`
+                           : `${esc(v)}${(f==='product'&&p.conf==='est')?' <span class="est" title="estimated">~</span>':''}`;
+    const num=(f,v,w=54)=> ed ? `<input type="number" step="1" value="${v||0}" data-id="${p._id}" data-f="${f}" style="width:${w}px">`
+                              : `<span style="font-variant-numeric:tabular-nums">${v||0}</span>`;
+    let act;
+    if(pending) act = ADMIN ? `<button class="sm" onclick="window._approve('${p._id}')">✓</button> <button class="sm ghost" onclick="window._reject('${p._id}')">✗</button>` : `<span class="pill" style="background:var(--warn);color:#06121f">⏳ Pending</span>`;
+    else act = (p.oz>0?`<button class="sm" onclick="window._loadProd('${p._id}')">Load</button>`:'')
+        + (ADMIN && p._kind==='user' ? ` <button class="sm ghost" onclick="window._reject('${p._id}')">Del</button>` : '')
+        + (ADMIN && p._edited ? ` <button class="sm ghost" onclick="window._resetRow('${p._id}')" title="revert admin edits">Reset</button>` : '');
+    return `<tr style="${pending?'background:rgba(255,180,84,.10)':''}">
+      <td style="text-align:left">${txt('brand',p.brand,120)}</td>
+      <td style="text-align:left">${txt('product',p.product,150)}</td>
+      <td>${ed?`<input type="text" value="${esc(p.unit)}" data-id="${p._id}" data-f="unit" style="width:96px">`:esc(p.unit)}</td>
+      <td style="font-weight:700">${num('sodium',p.sodium)}</td>
+      <td>${num('potassium',p.potassium)}</td>
+      <td>${num('magnesium',p.magnesium)}</td>
+      <td>${num('calcium',p.calcium)}</td>
+      <td>${num('kcal',p.kcal)}</td>
+      <td style="text-align:left">${act}</td></tr>`;
+  };
   const foodRow=p=>{const s=p.split||{};return `<tr>
       <td style="text-align:left"><input type="text" value="${esc(p.brand)}" style="width:140px" onchange="window._setFuel('${p.id}','brand',this.value)"></td>
       <td style="text-align:left"><input type="text" value="${esc(p.product)}" style="width:130px" onchange="window._setFuel('${p.id}','product',this.value)"></td>
@@ -1347,8 +1371,8 @@ function viewLibrary(){
   <div class="scroll" style="margin-top:6px"><table class="tc">${dbHead}<tbody>${drinks.map(dbRow).join('')}</tbody></table></div>
   <div class="row-actions"><button class="sm" onclick="window._addDrink('drink')">＋ Add drink</button></div>
 
-  <div class="sub-h" style="margin-top:18px">Electrolytes <span class="muted" style="text-transform:none">— low / no-carb</span></div>
-  <div class="scroll" style="margin-top:6px"><table class="tc">${dbHead}<tbody>${lytes.map(dbRow).join('')}</tbody></table></div>
+  <div class="sub-h" style="margin-top:18px">Electrolytes <span class="muted" style="text-transform:none">— K / Mg / Ca shown for reference; only Na is used in the calculations</span></div>
+  <div class="scroll" style="margin-top:6px"><table class="tc">${lyteHead}<tbody>${lytes.map(lyteRow).join('')}</tbody></table></div>
   <div class="row-actions"><button class="sm" onclick="window._addDrink('lyte')">＋ Add electrolyte</button></div>
 
   <div class="sub-h" style="margin-top:18px">Foods <span class="muted" style="text-transform:none">— gels / chews / bars / whole food</span></div>
@@ -1590,7 +1614,7 @@ window._addDrink=(cat='drink')=>{
   const id='u:'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
   DB.userItems.push({id, brand:'', product:'New '+(cat==='lyte'?'electrolyte':'drink'), unit:'per serving', cat,
     name:'New '+(cat==='lyte'?'electrolyte':'drink'), oz:16, sodium:0, kcal:0,
-    split:{glucose:0,sucrose:0,malto:0,fructose:0}, de:18, status:'pending'});
+    split:{glucose:0,sucrose:0,malto:0,fructose:0}, de:18, potassium:0, magnesium:0, calcium:0, status:'pending'});
   saveDB(); render();
 };
 window._approve=(id)=>{ const it=DB.userItems.find(u=>u.id===id); if(it){ it.status='approved'; saveDB(); render(); } };
