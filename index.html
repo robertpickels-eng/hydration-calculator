@@ -76,6 +76,10 @@
   table.proj td.reco{text-align:center;white-space:normal;min-width:160px;max-width:250px}
   .reco-box{display:inline-block;padding:5px 10px;border-radius:7px;font-weight:600;
     line-height:1.25;text-align:center;border:1px solid currentColor}
+  /* box drawn around the projection row where the planned event ends */
+  tr.proj-evrow td{border-top:2px solid var(--accent2);border-bottom:2px solid var(--accent2)}
+  tr.proj-evrow td:first-child{border-left:2px solid var(--accent2);border-top-left-radius:6px;border-bottom-left-radius:6px}
+  tr.proj-evrow td:last-child{border-right:2px solid var(--accent2);border-top-right-radius:6px;border-bottom-right-radius:6px}
   /* event-plan summary pills + zone-time chips */
   /* segmented two-state toggle (intensity model, ride breakdown) */
   .modeseg{display:inline-flex;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:4px}
@@ -306,8 +310,8 @@ let PRODUCTS = [
   ['Maurten',            17, 500, 320, {glucose:14, sucrose:0,  malto:30, fructose:36}, 15, 'est'],
   ['Nuun',               20, 360, 0,   {glucose:0,  sucrose:0,  malto:0,  fructose:0 }, 100,'est'],
   ['salt stick',         20, 215, 0,   {glucose:0,  sucrose:0,  malto:0,  fructose:0 }, 100,'lbl'],
-  ['Flow Norm (PF&H)',   16, 390, 240, {glucose:0,  sucrose:0,  malto:40, fructose:20}, 15, 'est'],
-  ['Flow High Na+ (PF&H)',16,780, 240, {glucose:0,  sucrose:0,  malto:40, fructose:20}, 15, 'est'],
+  ['Flow Formulas Endurance',16, 390, 240, {glucose:0,  sucrose:0,  malto:40, fructose:20}, 15, 'est'],
+  ['Flow Formulas Endurance (High Sodium)',16,780, 240, {glucose:0,  sucrose:0,  malto:40, fructose:20}, 15, 'est'],
   ['Stryker (Styrkr)',   16,  80, 375, {glucose:0,  sucrose:0,  malto:60, fructose:30}, 15, 'est'],
   ['Superfuel (~NV C90)',20, 400, 400, {glucose:47, sucrose:0,  malto:20, fructose:33}, 15, 'est'],
 ].map(p=>({name:p[0],oz:p[1],sodium:p[2],kcal:p[3],split:p[4],de:p[5],conf:p[6]}));
@@ -977,16 +981,17 @@ function recoFor(x){
 const recoBoxStyle = cls => { const c = cls==='warn'?CF.amber : cls==='bad'?CF.red : CF.green;
   return `style="background:${c.bg};color:${c.fg}"`; };
 function viewProjection(){
-  const hrs=S.projHours||8;
+  const evHour=Math.max(1,Math.ceil(+S.eventHours||0));      // projection row where the event finishes
+  const hrs=Math.min(36,Math.max(S.projHours||8, evHour+2)); // always show ≥2 hours past the event
   const r=projectionRows(hrs);
   return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
-  <div class="note">Projects <b>your plan</b>: Bottles = hours × your Bottles/hr, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146. The <b>Recommendation</b> column reads those flags for each hour: green = good to go, otherwise it estimates how much fluid and sodium to add (or cut) per hour to get back in band — solved together, so the sodium amount accounts for how the corrected fluid volume dilutes or concentrates your Na⁺.</div>
+  <div class="note">Projects <b>your plan</b>: Bottles = hours × your Bottles/hr, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146. The <b>Recommendation</b> column reads those flags for each hour: green = good to go, otherwise it estimates how much fluid and sodium to add (or cut) per hour to get back in band — solved together, so the sodium amount accounts for how the corrected fluid volume dilutes or concentrates your Na⁺. The <b style="color:var(--accent2)">boxed</b> row marks the hour your ${fmt(S.eventHours,1)}-hr event ends (set on Athlete &amp; Activity); the table runs a couple hours past it.</div>
   <div class="scroll" style="margin-top:10px"><table class="tc proj">
     <thead><tr><th>Hr</th><th>Water lost (L)</th><th>Replaced (oz)</th>
       <th>Wt loss (lbs)</th><th>Wt loss (%)</th><th>Body wt (lbs)</th>
       <th>New ECF (L)</th><th>Body Na⁺ (g)</th><th>Na⁺ (mM)</th><th>Recommendation</th></tr></thead>
-    <tbody>${r.map(x=>{const rc=recoFor(x);return `<tr>
-      <td>${x.h}</td><td>${fmt(x.lostL,1)}</td><td>${fmt(x.replOz,0)}</td>
+    <tbody>${r.map(x=>{const rc=recoFor(x);return `<tr${x.h===evHour?' class="proj-evrow"':''}>
+      <td>${x.h}${x.h===evHour?`<div class="muted" style="font-size:9px;color:var(--accent2)">event end</div>`:''}</td><td>${fmt(x.lostL,1)}</td><td>${fmt(x.replOz,0)}</td>
       <td>${fmt(x.lossLbs,1)}</td><td ${lossCF(x.lossPct)}>${fmt(x.lossPct,1)}%</td>
       <td ${wtCF(x.wt)}>${fmt(x.wt,1)}</td><td>${fmt(x.ecf,1)}</td>
       <td>${fmt(x.Ng,1)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td>
