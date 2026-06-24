@@ -217,8 +217,13 @@ const S = {
   extraLytes:[],                               // custom add-on salts  {id,name,grams,mw,particles,naFrac}
   // --- caloric / power model (ported from the Cycling Nutrition Calculator) ---
   gender:'male',                               // 'male' | 'female'  (glycogen store estimate)
+  activity:'cycling',                          // 'cycling' | 'running'  — drives intensity units + active muscle
   carbLoaded:false,                            // muscle-glycogen concentration: false=trained-rested, true=carb-loaded
-  ftp:250,                                     // functional threshold power (watts)
+  ftp:250,                                     // functional threshold power (watts) — cycling
+  runThreshold:420,                            // running threshold pace, seconds per mile (7:00/mi)
+  runPaces:[600,540,480,450,420],              // pre-set pace rows (sec/mi): 10:00,9:00,8:00,7:30,7:00
+  eventGrade:0,                                // % grade for the whole ride (running, single-average)
+  segGrades:[],                                // per-30-min-segment % grade (running, breakdown)
   eventHours:2,                                // planned event duration — drives caloric + plan
   intensityMode:'zone',                        // 'zone' (%FTP zones) | 'workload' (custom wattage rows)
   workloads:[100,125,150,175,200],             // pre-set wattage rows (Pre-Set Workload mode)
@@ -299,59 +304,94 @@ function productOsm(p){
    substrate-oxidation RQ model). Reads the shared rider profile in S.
    ============================================================ */
 const GUT_MAX_CHO = 120;          // g/hr — practical upper carbohydrate-absorption limit
-const ZONES = [
+function isRun(){ return S.activity==='running'; }
+// zone sets per activity
+const ZONES_CYC = [
   { label:'Recovery',  pct:55,  cls:'z1' },
   { label:'Endurance', pct:70,  cls:'z2' },
   { label:'Tempo',     pct:85,  cls:'z3' },
   { label:'Threshold', pct:100, cls:'z4' },
   { label:'VO₂max',    pct:120, cls:'z5' },
 ];
+// running: Daniels E/M/T/I/R as % of THRESHOLD SPEED (T = 100%)
+const ZONES_RUN = [
+  { label:'Easy',      pct:74,  cls:'z1' },
+  { label:'Marathon',  pct:89,  cls:'z2' },
+  { label:'Threshold', pct:100, cls:'z3' },
+  { label:'Interval',  pct:107, cls:'z4' },
+  { label:'Rep',       pct:112, cls:'z5' },
+];
+function zones(){ return isRun()?ZONES_RUN:ZONES_CYC; }
+
+/* ---- pace ↔ speed helpers (running). Threshold/paces stored as seconds per mile ---- */
+const M_PER_MI = 1609.34, MI_PER_KM = 1.60934;
+function paceToSpeed(secMi){ return secMi>0 ? M_PER_MI/(secMi/60) : 0; }   // m/min
+function speedToPace(mMin){ return mMin>0 ? M_PER_MI/(mMin/60) : 0; }       // sec/mi
+function vThreshold(){ return paceToSpeed(S.runThreshold); }                // threshold speed, m/min
+function paceFmt(sec){ sec=Math.max(0,Math.round(sec)); return Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0'); }
+function parsePace(str){ if(typeof str==='number') return str; const p=(''+str).split(':');
+  return p.length>=2 ? (+p[0]||0)*60+(+p[1]||0) : Math.round((+str||0)*60); }  // "7:30"→450; bare "7"→420
+function miToKmPace(secMi){ return secMi/MI_PER_KM; }
+function kmToMiPace(secKm){ return secKm*MI_PER_KM; }
+
 function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
+
 // glycogen stores (kcal) = 450 (liver) + active-muscle glycogen.
-// active-muscle glycogen = skeletal-muscle mass × active fraction × concentration × 4.18 kcal/g
-//   muscle mass = body kg × LEAN (FFM frac) × MUSC (skeletal muscle / FFM)
-//   ACTIVE      = cycling-engaged fraction of total skeletal muscle (legs/glutes; rest barely deplete)
-//   CONC        = g glycogen / kg active muscle: ~24 trained-rested, ~36 carb-loaded (~220 mmol/kg ww)
-// Trained-cyclist defaults (MRI-honest):
-//   male   lean .88 (~12% fat) · musc .53 · active .27
-//   female lean .82 (~18% fat) · musc .48 · active .30  (gynoid distribution → slightly more leg muscle)
-const GLY = {
-  male:  { lean:0.88, musc:0.53, active:0.27 },
-  female:{ lean:0.82, musc:0.48, active:0.30 },
+// active-muscle glycogen = muscle mass (kg×LEAN×MUSC) × ACTIVE fraction × CONC (g/kg) × 4.18 kcal/g.
+// LEAN/MUSC are body comp (gender); ACTIVE (engaged fraction of total skeletal muscle) is ACTIVITY×gender:
+//   cycling legs/glutes ~.27 M / .30 F ; running is more whole-body ~.40 M / .43 F.
+// CONC = g glycogen / kg active muscle: ~24 trained-rested, ~36 carb-loaded (~220 mmol/kg ww).
+const GLY = { male:{ lean:0.88, musc:0.53 }, female:{ lean:0.82, musc:0.48 } };
+const ACTIVE = {
+  cycling:{ male:0.27, female:0.30 },
+  running:{ male:0.40, female:0.43 },
 };
+function activeFrac(){ return (ACTIVE[S.activity]||ACTIVE.cycling)[S.gender] ?? 0.27; }
 function glycogenKcal(){
-  const kg=S.bodyLbs/2.2, g=GLY[S.gender]||GLY.male;
-  const conc = S.carbLoaded ? 36 : 24;          // g glycogen / kg active muscle
-  const activeMuscleKg = kg*g.lean*g.musc*g.active;
-  return 450 + activeMuscleKg*conc*4.18;
+  const kg=S.bodyLbs/2.2, g=GLY[S.gender]||GLY.male, conc=S.carbLoaded?36:24;
+  return 450 + (kg*g.lean*g.musc*activeFrac())*conc*4.18;
 }
-// active (cycling-engaged) muscle mass in kg — exposed for display
-function activeMuscleKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*g.musc*g.active; }
-function calcVO2(watts){ const kg=S.bodyLbs/2.2; return ((1.8*watts*6/kg)+7)*kg/1000; }   // L/min
-function calcRQ(watts){
-  if(watts>=S.ftp) return 1.0;
-  const pct=watts/S.ftp;
-  return ftpPerKg()>4 ? pct*0.4+0.6 : pct*0.3+0.7;
+// active (engaged) muscle mass in kg — exposed for display
+function activeMuscleKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*g.musc*activeFrac(); }
+
+/* ---- metabolic core (activity-aware: ACSM cycling power or ACSM running pace+grade) ---- */
+// "trained" = steeper fat→CHO transition (more fat at submax). cycling: >4 W/kg ; running: threshold faster than 7:30/mi
+function isTrained(){ return isRun() ? vThreshold()>paceToSpeed(450) : ftpPerKg()>4; }
+function rqFromFrac(frac){ if(frac>=1) return 1.0; return isTrained()?frac*0.4+0.6:frac*0.3+0.7; }
+// metrics for an intensity item: {watts} (cycling) or {speed m/min} (running), at % grade (running only)
+function imetrics(item, grade=0){
+  const kg=S.bodyLbs/2.2; let vo2, frac;
+  if(isRun()){
+    const v=item.speed||0, gr=(+grade||0)/100;
+    vo2 = (0.2*v + 0.9*v*gr + 3.5)*kg/1000;     // ACSM running VO₂ (mL/kg/min)×kg÷1000 → L/min
+    frac = vThreshold()>0 ? v/vThreshold() : 0;
+  } else {
+    const w=item.watts||0;
+    vo2 = ((1.8*w*6/kg)+7)*kg/1000;             // ACSM cycling ergometry → L/min
+    frac = S.ftp>0 ? w/S.ftp : 0;
+  }
+  const rq=rqFromFrac(frac);
+  const kcalHr=(1.2*rq+3.85)*Math.max(0,vo2)*60; // Weir caloric equivalent
+  const choKcalHr=Math.min(1,Math.max(0,(336.3*rq-235.7)/100))*kcalHr;
+  return { vo2:Math.max(0,vo2), rq, kcalHr, choKcalHr, fatKcalHr:kcalHr-choKcalHr };
 }
-function calcKcalHr(vo2,rq){ return (1.2*rq+3.85)*vo2*60; }
-function calcCHOKcalHr(totalKcalHr,rq){ const f=Math.min(1,Math.max(0,(336.3*rq-235.7)/100)); return totalKcalHr*f; }
-// full metabolic picture for a given wattage
-function zoneMetrics(watts){
-  const vo2=calcVO2(watts), rq=calcRQ(watts), kcalHr=calcKcalHr(vo2,rq);
-  const choKcalHr=calcCHOKcalHr(kcalHr,rq), fatKcalHr=kcalHr-choKcalHr;
-  return { watts, vo2, rq, kcalHr, choKcalHr, fatKcalHr };
-}
-function zoneWatts(zi){ return (ZONES[zi].pct/100)*S.ftp; }
-// the active intensity list — %FTP zones, or the athlete's custom wattage rows
+function zoneWatts(zi){ return (zones()[zi].pct/100)*S.ftp; }
+
+// the active intensity list — zone set, or the athlete's custom workload (watts) / pace rows
 function intensities(){
-  if(S.intensityMode==='workload')
+  if(S.intensityMode==='workload'){
+    if(isRun()) return S.runPaces.map((p,i)=>({label:paceFmt(p)+'/mi', pace:+p||0, speed:paceToSpeed(+p||0), cls:'z'+(i%5+1)}));
     return S.workloads.map((w,i)=>({label:(+w||0)+' W', watts:+w||0, cls:'z'+(i%5+1)}));
-  return ZONES.map((z,i)=>({label:z.label, watts:zoneWatts(i), cls:z.cls, pct:z.pct}));
+  }
+  return zones().map((z,i)=>{
+    if(isRun()){ const sp=vThreshold()*z.pct/100; return {label:z.label, pct:z.pct, speed:sp, pace:speedToPace(sp), cls:z.cls}; }
+    return {label:z.label, pct:z.pct, watts:zoneWatts(i), cls:z.cls};
+  });
 }
-function intWatts(i){ const L=intensities(); return (L[Math.min(i,L.length-1)]||{watts:0}).watts; }
-function intMetricsByIdx(i){ return zoneMetrics(intWatts(i)); }
-// hours of riding (at an intensity) before stored glycogen is exhausted with NO fuel
-function bonkHours(i){ const m=intMetricsByIdx(i); return m.choKcalHr>0 ? glycogenKcal()/m.choKcalHr : 99; }
+function intItem(i){ const L=intensities(); return L[Math.min(i,L.length-1)]||{}; }
+function intMetricsByIdx(i, grade=0){ return imetrics(intItem(i), grade); }
+// hours at an intensity (level) before stored glycogen is exhausted with NO fuel
+function bonkHours(i){ const m=intMetricsByIdx(i,0); return m.choKcalHr>0 ? glycogenKcal()/m.choKcalHr : 99; }
 // keep the chosen intensity indices valid when the list length changes (mode/row edits)
 function clampIntensityIdx(){ const n=intensities().length;
   S.eventZone=Math.max(0,Math.min(S.eventZone,n-1));
@@ -366,7 +406,8 @@ function segments(){
   for(let i=0;i<n;i++){
     const dur = Math.min(SEG_LEN, (+S.eventHours||0) - i*SEG_LEN);
     const zi  = S.segBreakdown ? (S.segZones[i]??S.eventZone) : S.eventZone;
-    out.push({idx:i, dur:Math.max(0,dur), zi});
+    const grade = isRun() ? (S.segBreakdown ? (S.segGrades[i]??S.eventGrade) : S.eventGrade) : 0;
+    out.push({idx:i, dur:Math.max(0,dur), zi, grade:+grade||0});
   }
   return out;
 }
@@ -374,7 +415,7 @@ function segments(){
 function eventTotals(){
   const segs=segments();
   let kcal=0, choKcal=0, fatKcal=0;
-  segs.forEach(s=>{ const m=intMetricsByIdx(s.zi);
+  segs.forEach(s=>{ const m=intMetricsByIdx(s.zi, s.grade);
     kcal+=m.kcalHr*s.dur; choKcal+=m.choKcalHr*s.dur; fatKcal+=m.fatKcalHr*s.dur; });
   const hrs=Math.max(0.001,+S.eventHours||0);
   const gly=glycogenKcal(), usableGly=gly*(1-S.reservePct/100);
@@ -533,18 +574,21 @@ function athleteSummary(){
   const it=(l,v)=>`<div style="display:flex;flex-direction:column;line-height:1.15">
     <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">${l}</span>
     <span style="font-weight:700;font-variant-numeric:tabular-nums">${v}</span></div>`;
+  const intens = isRun()
+    ? it('Thr pace', paceFmt(S.runThreshold)+'/mi · '+paceFmt(miToKmPace(S.runThreshold))+'/km')
+    : it('FTP', S.ftp+' W')+it('FTP/kg', fmt(ftpPerKg(),2));
   return `<div class="panel" style="margin-bottom:16px;padding:10px 16px">
     <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center">
       <span class="sub-h" style="margin:0;color:var(--accent)">Athlete</span>
+      ${it('Sport', isRun()?'Running':'Cycling')}
       ${it('Weight', fmt(S.bodyLbs,0)+' lb')}
       ${it('Gender', S.gender==='male'?'Male':'Female')}
-      ${it('FTP', S.ftp+' W')}
-      ${it('FTP/kg', fmt(ftpPerKg(),2))}
+      ${intens}
       ${it('Event', fmt(S.eventHours,1)+' hr')}
       ${it('Sweat', fmt(sr,2)+' L/hr')}
       ${it('Sweat Na⁺', fmt(S.sweatNa,0)+' mg/L')}
       ${it('Accept. loss', fmt(S.acceptLoss,0)+'%')}
-      <a onclick="active='rider';render()" style="margin-left:auto;color:var(--accent);cursor:pointer;font-size:12px">Edit on Rider Info →</a>
+      <a onclick="active='rider';render()" style="margin-left:auto;color:var(--accent);cursor:pointer;font-size:12px">Edit on Athlete →</a>
     </div></div>`;
 }
 
@@ -595,27 +639,41 @@ function sweatSodiumPanel(){
       </div>`;
 }
 
-/* ---------- TAB: RIDER INFO  (shared core profile) ---------- */
+/* ---------- TAB: ATHLETE  (shared core profile + activity) ---------- */
 function viewRider(){
+  const run=isRun();
+  // intensity-anchor input: FTP (cycling) or threshold pace mi+km twin (running)
+  const anchor = run
+    ? `<div class="sub-h">Threshold pace <span class="muted" style="text-transform:none">(pace you can hold ~1 hr)</span></div>
+       <div class="fgrid">
+         <div class="field"><label>per mile</label>
+           <input type="text" value="${paceFmt(S.runThreshold)}" id="thrMi" style="width:72px;text-align:center" title="mm:ss per mile"><span class="u">/mi</span></div>
+         <div class="field"><label>per km</label>
+           <input type="text" value="${paceFmt(miToKmPace(S.runThreshold))}" id="thrKm" style="width:72px;text-align:center" title="mm:ss per km — linked to /mi"><span class="u">/km</span></div>
+       </div>`
+    : numField('FTP','ftp','W',5);
   return `<div class="grid cols2">
     <div>
       <div class="panel">
-        <h2>Rider Profile</h2>
-        <div class="fgrid">
+        <h2>Athlete Profile</h2>
+        <div class="sub-h">Sport</div>
+        <div class="modeseg">
+          <button class="sm ${run?'ghost':''}" onclick="window._setActivity('cycling')">🚴 Cycling</button>
+          <button class="sm ${run?'':'ghost'}" onclick="window._setActivity('running')">🏃 Running</button>
+        </div>
+        <div class="fgrid" style="margin-top:10px">
           ${numField('Body weight','bodyLbs','lbs')}
           <div class="field"><label>Body Mass</label>
             <input type="number" step="0.1" value="${fmt(bodyKg(),1)}" data-kgmass title="Linked to body weight (kg = lbs ÷ 2.2)">
             <span class="u">kg</span></div>
         </div>
-        <div class="fgrid">
-          <div class="field"><label>Gender</label>
-            <select id="genderSel" style="width:86px">
-              <option value="male"${S.gender==='male'?' selected':''}>Male</option>
-              <option value="female"${S.gender==='female'?' selected':''}>Female</option>
-            </select><span class="u">&nbsp;</span></div>
-          ${numField('FTP','ftp','W',5)}
-        </div>
-        <div class="note">Body weight, gender and FTP are shared across every tab. Set <b>event duration</b> on the <b>Caloric</b> tab and your <b>sweat / sodium</b> numbers on the <b>Hydration</b> tab.</div>
+        <div class="field"><label>Gender</label>
+          <select id="genderSel" style="width:86px">
+            <option value="male"${S.gender==='male'?' selected':''}>Male</option>
+            <option value="female"${S.gender==='female'?' selected':''}>Female</option>
+          </select><span class="u">&nbsp;</span></div>
+        ${anchor}
+        <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>event duration${run?' / grade':''}</b> on the <b>Caloric</b> tab and your <b>sweat / sodium</b> numbers on the <b>Hydration</b> tab.</div>
         <div class="row-actions" style="margin-top:8px;align-items:center">
           <span class="muted" style="font-size:11px">✓ Inputs are saved in this browser and restored next visit.</span>
           <button class="sm ghost" onclick="window._resetAthlete()" style="margin-left:auto">Reset to defaults</button>
@@ -626,11 +684,15 @@ function viewRider(){
     <div>
       <div class="panel">
         <h2>Profile Readout</h2>
-        <div class="res"><span>FTP / kg</span><span class="v">${fmt(ftpPerKg(),2)} W/kg</span></div>
+        ${run
+          ? `<div class="res"><span>Threshold speed</span><span class="v">${fmt(vThreshold()/1000*60,2)} kph · ${fmt(vThreshold()/26.8224,2)} mph</span></div>
+             <div class="res"><span>Fat-ox slope</span><span class="v">${isTrained()?'Trained (≤7:30/mi thr)':'Developing'}</span></div>`
+          : `<div class="res"><span>FTP / kg</span><span class="v">${fmt(ftpPerKg(),2)} W/kg</span></div>`}
+        <div class="res"><span>Active muscle <span class="muted">(${run?'running':'cycling'})</span></span><span class="v">${fmt(activeMuscleKg(),1)} kg · ${fmt(activeFrac()*100,0)}% of SMM</span></div>
         <div class="res"><span>Predicted glycogen</span><span class="v">${fmt(glycogenKcal()/4,0)} g · ${fmt(glycogenKcal(),0)} kcal</span></div>
         <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
-        <div class="note">Derived from your weight, gender and FTP — these feed the Caloric (glycogen, time-to-bonk) and Hydration (ECF, sodium balance) models.</div>
+        <div class="note">Derived from weight, gender, sport &amp; ${run?'pace':'FTP'} — these feed the Caloric (glycogen, time-to-bonk) and Hydration (ECF, sodium balance) models. Running engages more total muscle than cycling, so its active fraction is higher.</div>
       </div>
     </div>
   </div>`;
@@ -823,33 +885,39 @@ function viewProjection(){
 /* ---------- TAB: CALORIC  (ride energy + segment breakdown) ---------- */
 const hm = h => { const t=Math.round(h*60); return Math.floor(t/60)+':'+String(t%60).padStart(2,'0'); };
 function viewCaloric(){
-  const ev=eventTotals(), ints=intensities(), wl=S.intensityMode==='workload';
+  const ev=eventTotals(), ints=intensities(), wl=S.intensityMode==='workload', run=isRun();
+  const pctLbl = run?'% Thr':'% FTP';
+  const intLbl = z => run ? paceFmt(z.pace)+'/mi' : Math.round(z.watts)+'W';
   // dropdown options for the active intensity list (avg + per-segment)
-  const intOpts = (sel)=>ints.map((z,i)=>`<option value="${i}"${i==sel?' selected':''}>${z.pct!=null?`${z.label} — ${z.pct}% · ${Math.round(z.watts)}W`:z.label}</option>`).join('');
+  const intOpts = (sel)=>ints.map((z,i)=>`<option value="${i}"${i==sel?' selected':''}>${z.pct!=null?`${z.label} — ${z.pct}% · ${intLbl(z)}`:z.label}</option>`).join('');
   // the reference table body (zone or workload mode)
   const refTable = wl
     ? `<div class="scroll" style="margin-top:8px"><table class="tc">
-        <thead><tr><th>Watts</th><th>% FTP</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
+        <thead><tr><th>${run?'Pace':'Watts'}</th><th>${pctLbl}</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
           <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th><th></th></tr></thead>
-        <tbody>${S.workloads.map((w,i)=>{const m=zoneMetrics(+w||0), b=bonkHours(i);return `<tr>
-          <td><input type="number" step="5" value="${w}" style="width:72px" onchange="window._setWorkload(${i},this.value)"></td>
-          <td>${fmt((+w||0)/S.ftp*100,0)}%</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
+        <tbody>${ints.map((it,i)=>{const m=imetrics(it,0), b=bonkHours(i);
+          const pctV = run ? (vThreshold()>0?it.speed/vThreshold()*100:0) : (S.ftp>0?it.watts/S.ftp*100:0);
+          const inCell = run
+            ? `<td><input type="text" value="${paceFmt(it.pace)}" style="width:66px;text-align:center" onchange="window._setPace(${i},this.value)" title="mm:ss per mile"> <span class="muted" style="font-size:10px">/mi</span></td>`
+            : `<td><input type="number" step="5" value="${S.workloads[i]}" style="width:72px" onchange="window._setWorkload(${i},this.value)"></td>`;
+          return `<tr>${inCell}
+          <td>${fmt(pctV,0)}%</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
           <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
           <td>${b>=12?'&gt;12':b.toFixed(1)}</td>
-          <td><button class="sm ghost" onclick="window._rmWorkload(${i})" title="remove">×</button></td></tr>`;}).join('')}
+          <td><button class="sm ghost" onclick="window.${run?'_rmPace':'_rmWorkload'}(${i})" title="remove">×</button></td></tr>`;}).join('')}
         </tbody></table></div>
-      <div class="row-actions"><button class="ghost sm" onclick="window._addWorkload()">＋ Add workload (+25W)</button></div>
-      <div class="note">Enter the steady wattages you plan to ride. Each row computes energy & substrate use just like the zones. Bonk = hours at that steady wattage before stored glycogen is exhausted with no fuel.</div>`
+      <div class="row-actions"><button class="ghost sm" onclick="window.${run?'_addPace':'_addWorkload'}()">＋ Add ${run?'pace (−15s)':'workload (+25W)'}</button></div>
+      <div class="note">Enter the steady ${run?'paces':'wattages'} you plan to ${run?'run':'ride'}. Each row computes energy & substrate use just like the zones. Bonk = hours at that steady ${run?'pace':'wattage'} before stored glycogen is exhausted with no fuel.</div>`
     : `<div class="scroll" style="margin-top:8px"><table class="tc">
-        <thead><tr><th>Zone</th><th>% FTP</th><th>Watts</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
+        <thead><tr><th>Zone</th><th>${pctLbl}</th><th>${run?'Pace':'Watts'}</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
           <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th></tr></thead>
-        <tbody>${ZONES.map((z,i)=>{const m=zoneMetrics(zoneWatts(i)), b=bonkHours(i);return `<tr>
+        <tbody>${ints.map((z,i)=>{const m=imetrics(z,0), b=bonkHours(i);return `<tr>
           <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.label}</span></td>
-          <td>${z.pct}%</td><td>${Math.round(m.watts)}</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
+          <td>${z.pct}%</td><td>${run?paceFmt(z.pace)+'/mi':Math.round(z.watts)+'W'}</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
           <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
           <td>${b>=12?'&gt;12':b.toFixed(1)}</td></tr>`;}).join('')}
         </tbody></table></div>
-      <div class="note">ACSM cycling VO₂ · Weir caloric equivalent · RQ-based substrate split. Bonk = hours at that steady zone before stored glycogen is exhausted with no fuel.</div>`;
+      <div class="note">ACSM ${run?'running (level-ground reference)':'cycling'} VO₂ · Weir caloric equivalent · RQ-based substrate split. Bonk = hours at that steady ${run?'pace':'zone'} before stored glycogen is exhausted with no fuel.</div>`;
 
   return `${athleteSummary()}
 
@@ -871,7 +939,7 @@ function viewCaloric(){
     <div class="sub-h">Hours until bonk — no fuel</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">
       ${ints.map((z,i)=>{const b=bonkHours(i);return `<div class="bonk-item ${z.cls}">
-        <span class="zn">${z.pct!=null?z.label:('WL '+(i+1))} <span style="font-weight:400;opacity:.6">${Math.round(z.watts)}W</span></span>
+        <span class="zn">${z.pct!=null?z.label:((run?'P':'WL')+' '+(i+1))} <span style="font-weight:400;opacity:.6">${intLbl(z)}</span></span>
         <span class="bv">${b>=12?'&gt; 12 hrs':b.toFixed(1)+' hrs'}</span></div>`;}).join('')}
     </div>
   </div>
@@ -879,11 +947,13 @@ function viewCaloric(){
   <!-- 2) Reference table — intensity-model toggle lives in this header -->
   <div class="panel" style="margin-top:16px">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <h2 style="margin:0">${wl?'Pre-Set Workload Reference':`Zone Reference (at your FTP ${S.ftp}W)`}</h2>
+      <h2 style="margin:0">${wl
+        ? (run?'Pre-Set Pace Reference':'Pre-Set Workload Reference')
+        : (run?`Zone Reference (threshold ${paceFmt(S.runThreshold)}/mi)`:`Zone Reference (at your FTP ${S.ftp}W)`)}</h2>
       <div class="modeseg" style="margin-left:auto">
         <span class="muted" style="font-size:11px;margin-right:2px">Intensity model</span>
         <button class="sm ${wl?'ghost':''}" onclick="window._setIntMode('zone')">Zone</button>
-        <button class="sm ${wl?'':'ghost'}" onclick="window._setIntMode('workload')">Pre-Set Workload</button>
+        <button class="sm ${wl?'':'ghost'}" onclick="window._setIntMode('workload')">${run?'Pre-Set Paces':'Pre-Set Workload'}</button>
       </div>
     </div>
     ${refTable}
@@ -895,20 +965,23 @@ function viewCaloric(){
     <div class="grid cols2">
       <div>
         ${numField('Event duration','eventHours','hr',0.5)}
-        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg intensity</label>
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg ${run?'pace':'intensity'}</label>
           <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select></div>
-        <div class="sub-h">Ride breakdown</div>
+        ${run&&!S.segBreakdown?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg grade</label>
+          <input type="number" step="0.5" value="${S.eventGrade}" style="width:72px" onchange="window._setEventGrade(this.value)"><span class="u">%</span></div>`:''}
+        <div class="sub-h">${run?'Run':'Ride'} breakdown</div>
         <div class="modeseg">
           <button class="sm ${S.segBreakdown?'ghost':''}" onclick="window._setSegMode(false)">Single average</button>
           <button class="sm ${S.segBreakdown?'':'ghost'}" onclick="window._setSegMode(true)">30-min segments</button>
         </div>
-        ${S.segBreakdown?`<div class="note">Pick the average intensity for each 30-minute block of your ${fmt(S.eventHours,1)}-hr ride — calories are summed across segments for a finer total.</div>
+        ${S.segBreakdown?`<div class="note">Pick the average ${run?'pace + grade':'intensity'} for each 30-minute block of your ${fmt(S.eventHours,1)}-hr ${run?'run':'ride'} — calories are summed across segments for a finer total.</div>
         <div class="scroll" style="max-height:240px;margin-top:8px">
-          ${ev.segs.map((s,i)=>`<div class="field" style="gap:8px">
-            <span class="u" style="width:96px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
+          ${ev.segs.map((s,i)=>`<div class="field" style="gap:6px">
+            <span class="u" style="width:${run?78:96}px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
             <select style="flex:1;min-width:0" onchange="window._setSegZone(${i}, this.value)">${intOpts(s.zi)}</select>
+            ${run?`<input type="number" step="0.5" value="${s.grade}" style="width:50px" onchange="window._setSegGrade(${i},this.value)" title="% grade"><span class="u" style="width:auto">%</span>`:''}
           </div>`).join('')}
-        </div>`:`<div class="note">One average intensity is applied to the whole ride.</div>`}
+        </div>`:`<div class="note">One average ${run?'pace &amp; grade are':'intensity is'} applied to the whole ${run?'run':'ride'}.</div>`}
       </div>
       <div>
         <div class="sub-h">Event totals (${fmt(S.eventHours,1)} hr)</div>
@@ -1116,7 +1189,7 @@ function viewSweatLog(){
    TABS / ROUTER
    ============================================================ */
 const TABS = [
-  ['rider','Rider Info',viewRider],
+  ['rider','Athlete',viewRider],
   ['cal','Caloric',viewCaloric],
   ['hydr','Hydration',viewHydration],
   ['plan','Event Plan',viewEventPlan],
@@ -1179,6 +1252,9 @@ function bind(){
   });
   // Gender select (rider profile) → drives glycogen estimate
   const gs=$('#genderSel'); if(gs) gs.onchange=()=>{ S.gender=gs.value; render(); };
+  // running threshold-pace twin inputs (mm:ss per mile ↔ per km)
+  const tMi=$('#thrMi'); if(tMi) tMi.onchange=()=>{ S.runThreshold=parsePace(tMi.value); render(); };
+  const tKm=$('#thrKm'); if(tKm) tKm.onchange=()=>{ S.runThreshold=Math.round(kmToMiPace(parsePace(tKm.value))); render(); };
   // SOLVE fields (numField passed SOLVE as obj but data-obj stayed 'S'); fix via explicit map
   document.querySelectorAll('#app input[data-k]').forEach(el=>{
     if(SOLVE.hasOwnProperty(el.dataset.k) && active==='solve'){
@@ -1282,7 +1358,16 @@ window._useSweat=(i)=>{const c=swCalc(SWEATLOG[i]);S.manualSweat=+c.lHr.toFixed(
 window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'',oz:0,na:''});render();};
 
 /* --- caloric: glycogen muscle state (rested vs carb-loaded) --- */
+/* --- athlete: activity (cycling vs running) --- */
+window._setActivity=(a)=>{ if(S.activity===a) return; S.activity=a; clampIntensityIdx(); render(); };
 window._setCarbLoaded=(on)=>{ if(S.carbLoaded===on) return; S.carbLoaded=on; render(); };
+/* --- running: pre-set pace rows --- */
+window._setPace=(i,v)=>{ S.runPaces[i]=parsePace(v); render(); };
+window._addPace=()=>{ const last=S.runPaces[S.runPaces.length-1]; S.runPaces.push(Math.max(120,(+last||435)-15)); render(); };
+window._rmPace=(i)=>{ if(S.runPaces.length<=1) return; S.runPaces.splice(i,1); clampIntensityIdx(); render(); };
+/* --- running: grade (% incline) --- */
+window._setEventGrade=(v)=>{ S.eventGrade=+v||0; render(); };
+window._setSegGrade=(i,v)=>{ S.segGrades[i]=+v||0; render(); };
 /* --- caloric: intensity model (zone vs pre-set workload) --- */
 window._setIntMode=(m)=>{ if(S.intensityMode===m) return; S.intensityMode=m; clampIntensityIdx(); render(); };
 window._setWorkload=(i,v)=>{ S.workloads[i]=+v||0; render(); };
