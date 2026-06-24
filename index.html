@@ -76,6 +76,17 @@
   table.proj td.reco{text-align:center;white-space:normal;min-width:160px;max-width:250px}
   .reco-box{display:inline-block;padding:5px 10px;border-radius:7px;font-weight:600;
     line-height:1.25;text-align:center;border:1px solid currentColor}
+  /* event-plan summary pills + zone-time chips */
+  .stat-pill{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:center}
+  .stat-pill .sp-v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+  .stat-pill .sp-l{font-size:11px;color:var(--muted);margin-top:2px}
+  .bonk-item{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:6px;margin:4px 0;font-size:13px}
+  .bonk-item .zn{font-weight:700} .bonk-item .bv{font-weight:700}
+  .z1{background:rgba(51,214,166,.16);color:#7ef0cd}
+  .z2{background:rgba(78,161,255,.16);color:#9cc8ff}
+  .z3{background:rgba(255,235,156,.14);color:#ffe08a}
+  .z4{background:rgba(255,180,84,.16);color:#ffc77f}
+  .z5{background:rgba(255,107,107,.16);color:#ff9d9d}
   button{background:var(--accent);color:#06121f;border:none;border-radius:7px;padding:7px 12px;font-weight:700;cursor:pointer;font-size:13px}
   button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
   button.sm{padding:3px 8px;font-size:11px}
@@ -95,8 +106,8 @@
 </head>
 <body>
 <header>
-  <h1>💧 Hydration & Osmolality Calculator</h1>
-  <span class="sub">Full port of the sweat-rate / bottle-osmolality workbook · single-file app</span>
+  <h1>💧 Hydration, Caloric & Fueling Calculator</h1>
+  <span class="sub">Power-based energy expenditure · bottle osmolality · sweat/sodium · event fuel plan</span>
 </header>
 <div class="tabs" id="tabs"></div>
 <div class="wrap" id="app"></div>
@@ -200,7 +211,19 @@ const S = {
   // bottle composition (grams per bottle)
   comp:{ glucose:0, sucrose:130, malto:0, fructose:0, nacl:0, citrate:4.3 },
   extraCarbs:[],                               // custom add-on carbs  {id,name,grams,mw,particles}
-  extraLytes:[]                                // custom add-on salts  {id,name,grams,mw,particles,naFrac}
+  extraLytes:[],                               // custom add-on salts  {id,name,grams,mw,particles,naFrac}
+  // --- caloric / power model (ported from the Cycling Nutrition Calculator) ---
+  gender:'male',                               // 'male' | 'female'  (glycogen store estimate)
+  ftp:250,                                     // functional threshold power (watts)
+  eventHours:2,                                // planned event duration — drives caloric + plan
+  intensityMode:'zone',                        // 'zone' (%FTP zones) | 'workload' (custom wattage rows)
+  workloads:[100,125,150,175,200],             // pre-set wattage rows (Pre-Set Workload mode)
+  eventZone:1,                                 // default avg-intensity index for the whole ride (into the active intensity list)
+  segBreakdown:false,                          // show per-30-min-segment intensity editor
+  segZones:[],                                 // chosen intensity index per 30-min segment
+  reservePct:25,                               // % glycogen to keep in reserve at event end
+  // --- event fuel plan ---
+  planItems:[]                                 // per-hour product picks: [{hour, prodId, qty}]
 };
 
 /* derived athlete numbers */
@@ -267,6 +290,102 @@ function productOsm(p){
 }
 
 /* ============================================================
+   CALORIC / POWER MODEL  (ported from the Cycling Nutrition
+   Calculator — ACSM ergometry VO₂, Weir caloric equivalent,
+   substrate-oxidation RQ model). Reads the shared rider profile in S.
+   ============================================================ */
+const GUT_MAX_CHO = 120;          // g/hr — practical upper carbohydrate-absorption limit
+const ZONES = [
+  { label:'Recovery',  pct:55,  cls:'z1' },
+  { label:'Endurance', pct:70,  cls:'z2' },
+  { label:'Tempo',     pct:85,  cls:'z3' },
+  { label:'Threshold', pct:100, cls:'z4' },
+  { label:'VO₂max',    pct:120, cls:'z5' },
+];
+function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
+// glycogen stores (kcal): 450 + (kg×lean)×muscle×6×4.18 ; male lean .8/musc .55, female .7/.6
+function glycogenKcal(){
+  const kg=S.bodyLbs/2.2, lean=S.gender==='male'?0.8:0.7, musc=S.gender==='male'?0.55:0.6;
+  return 450 + (kg*lean)*musc*6*4.18;
+}
+function calcVO2(watts){ const kg=S.bodyLbs/2.2; return ((1.8*watts*6/kg)+7)*kg/1000; }   // L/min
+function calcRQ(watts){
+  if(watts>=S.ftp) return 1.0;
+  const pct=watts/S.ftp;
+  return ftpPerKg()>4 ? pct*0.4+0.6 : pct*0.3+0.7;
+}
+function calcKcalHr(vo2,rq){ return (1.2*rq+3.85)*vo2*60; }
+function calcCHOKcalHr(totalKcalHr,rq){ const f=Math.min(1,Math.max(0,(336.3*rq-235.7)/100)); return totalKcalHr*f; }
+// full metabolic picture for a given wattage
+function zoneMetrics(watts){
+  const vo2=calcVO2(watts), rq=calcRQ(watts), kcalHr=calcKcalHr(vo2,rq);
+  const choKcalHr=calcCHOKcalHr(kcalHr,rq), fatKcalHr=kcalHr-choKcalHr;
+  return { watts, vo2, rq, kcalHr, choKcalHr, fatKcalHr };
+}
+function zoneWatts(zi){ return (ZONES[zi].pct/100)*S.ftp; }
+// the active intensity list — %FTP zones, or the athlete's custom wattage rows
+function intensities(){
+  if(S.intensityMode==='workload')
+    return S.workloads.map((w,i)=>({label:(+w||0)+' W', watts:+w||0, cls:'z'+(i%5+1)}));
+  return ZONES.map((z,i)=>({label:z.label, watts:zoneWatts(i), cls:z.cls, pct:z.pct}));
+}
+function intWatts(i){ const L=intensities(); return (L[Math.min(i,L.length-1)]||{watts:0}).watts; }
+function intMetricsByIdx(i){ return zoneMetrics(intWatts(i)); }
+// hours of riding (at an intensity) before stored glycogen is exhausted with NO fuel
+function bonkHours(i){ const m=intMetricsByIdx(i); return m.choKcalHr>0 ? glycogenKcal()/m.choKcalHr : 99; }
+// keep the chosen intensity indices valid when the list length changes (mode/row edits)
+function clampIntensityIdx(){ const n=intensities().length;
+  S.eventZone=Math.max(0,Math.min(S.eventZone,n-1));
+  S.segZones=S.segZones.map(z=>Math.max(0,Math.min(z,n-1))); }
+
+/* ---- 30-minute ride segments ---- */
+const SEG_LEN = 0.5;                                    // hours per segment
+function segCount(){ return Math.max(1, Math.ceil((+S.eventHours||0)/SEG_LEN)); }
+// list of segments: each {idx, dur(hrs), zi}  — zone is per-segment when broken down, else the event zone
+function segments(){
+  const n=segCount(), out=[];
+  for(let i=0;i<n;i++){
+    const dur = Math.min(SEG_LEN, (+S.eventHours||0) - i*SEG_LEN);
+    const zi  = S.segBreakdown ? (S.segZones[i]??S.eventZone) : S.eventZone;
+    out.push({idx:i, dur:Math.max(0,dur), zi});
+  }
+  return out;
+}
+// roll the segments up into event totals + the carbohydrate fueling target
+function eventTotals(){
+  const segs=segments();
+  let kcal=0, choKcal=0, fatKcal=0;
+  segs.forEach(s=>{ const m=intMetricsByIdx(s.zi);
+    kcal+=m.kcalHr*s.dur; choKcal+=m.choKcalHr*s.dur; fatKcal+=m.fatKcalHr*s.dur; });
+  const hrs=Math.max(0.001,+S.eventHours||0);
+  const gly=glycogenKcal(), usableGly=gly*(1-S.reservePct/100);
+  // carbohydrate that must be eaten so endogenous glycogen stays above the reserve to the finish
+  const reqSuppKcal=Math.max(0, choKcal-usableGly);
+  const targetRateG=(reqSuppKcal/4)/hrs;                // steady g/hr to hit that
+  return { segs, kcal, choKcal, fatKcal, choG:choKcal/4,
+    gly, usableGly, reqSuppKcal, reqSuppG:reqSuppKcal/4,
+    targetRateG, targetRateKcal:targetRateG*4,
+    overGut: targetRateG>GUT_MAX_CHO,
+    kcalHr:kcal/hrs, choGhr:(choKcal/4)/hrs };
+}
+
+/* ============================================================
+   FUEL PRODUCT LIBRARY  (for the Event Plan — gels/bars/chews/etc.)
+   Each item: per-serving kcal + carbohydrate grams.  Editable + extendable.
+   ============================================================ */
+let FUEL_PRODUCTS = [
+  // name, kcal/serving, carb g/serving
+  ['Energy gel',        100, 22],
+  ['Energy chew (1)',    20,  5],
+  ['Energy bar',        230, 44],
+  ['Banana (medium)',   105, 27],
+  ['Maltodextrin (30g)',114, 28],
+  ['Rice cake',         120, 24],
+  ['Fig bar',           100, 20],
+].map((p,i)=>({id:'f'+i, name:p[0], kcal:p[1], carbG:p[2]}));
+function fuelById(id){ return FUEL_PRODUCTS.find(p=>p.id===id); }
+
+/* ============================================================
    ROLES & MODERATION  (browser-local; not server-enforced)
    ------------------------------------------------------------
    - Canonical PRODUCTS (above) are editable only in Admin mode.
@@ -292,6 +411,32 @@ function loadDB(){
 let DB = loadDB();
 function saveDB(){ try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} }
 let ADMIN = sessionStorage.getItem('hydra_admin')==='1';
+
+/* ------------------------------------------------------------
+   ATHLETE PERSISTENCE  — remember the rider's last inputs across
+   sessions (weight, FTP, sweat numbers, bottle, workloads, plan,
+   custom fuel products, sweat log) in this browser's localStorage.
+   ------------------------------------------------------------ */
+const ATH_KEY = 'hydra_athlete_v1';
+let _suppressSave = false;                        // set during reset so the unload save can't re-create the key
+function saveAthlete(){
+  if(_suppressSave) return;
+  try{ localStorage.setItem(ATH_KEY, JSON.stringify({ v:1, S, fuel:FUEL_PRODUCTS, sweat:SWEATLOG })); }catch(e){}
+}
+function loadAthlete(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(ATH_KEY)); if(!raw) return;
+    if(raw.S){                                   // merge so new defaults survive old saves
+      const s=raw.S;
+      if(s.comp) Object.assign(S.comp, s.comp);  // keep all comp keys
+      delete s.comp;
+      Object.assign(S, s);
+    }
+    if(Array.isArray(raw.fuel) && raw.fuel.length) FUEL_PRODUCTS=raw.fuel;
+    if(Array.isArray(raw.sweat) && raw.sweat.length) SWEATLOG=raw.sweat;
+  }catch(e){}
+}
+function resetAthlete(){ _suppressSave=true; try{ localStorage.removeItem(ATH_KEY); }catch(e){} location.reload(); }
 
 // canonical rows (with any admin overrides applied) + user-submitted rows
 function allProducts(){
@@ -363,19 +508,41 @@ function headWithAdd(label, onclick){
     <span>${label}</span><button class="sm ghost" style="padding:1px 7px" onclick="${onclick}">＋ Add Extra</button></div>`;
 }
 
-/* ---------- TAB: CALCULATOR ---------- */
-function viewCalculator(){
+/* ---------- TAB: RIDER INFO  (shared profile for every other tab) ---------- */
+function viewRider(){
   const sr = sweatRateLhr();
   return `<div class="grid cols2">
     <div>
       <div class="panel">
-        <h2>Athlete & Session</h2>
+        <h2>Rider Profile</h2>
         <div class="fgrid">
           ${numField('Body weight','bodyLbs','lbs')}
           <div class="field"><label>Body Mass</label>
             <input type="number" step="0.1" value="${fmt(bodyKg(),1)}" data-kgmass title="Linked to body weight (kg = lbs ÷ 2.2)">
             <span class="u">kg</span></div>
         </div>
+        <div class="fgrid">
+          <div class="field"><label>Gender</label>
+            <select id="genderSel" style="width:86px">
+              <option value="male"${S.gender==='male'?' selected':''}>Male</option>
+              <option value="female"${S.gender==='female'?' selected':''}>Female</option>
+            </select><span class="u">&nbsp;</span></div>
+          ${numField('FTP','ftp','W',5)}
+        </div>
+        ${numField('Event duration','eventHours','hr',0.5)}
+        <div class="res"><span>FTP / kg</span><span class="v">${fmt(ftpPerKg(),2)} W/kg</span></div>
+        <div class="res"><span>Predicted glycogen</span><span class="v">${fmt(glycogenKcal()/4,0)} g · ${fmt(glycogenKcal(),0)} kcal</span></div>
+        <div class="note">Body weight, gender, FTP and event duration feed the <b>Caloric</b> and <b>Event Plan</b> tabs; body weight and the sweat numbers below feed the <b>Hydration</b> tab.</div>
+        <div class="row-actions" style="margin-top:8px;align-items:center">
+          <span class="muted" style="font-size:11px">✓ Inputs are saved in this browser and restored next visit.</span>
+          <button class="sm ghost" onclick="window._resetAthlete()" style="margin-left:auto">Reset to defaults</button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Sweat & Sodium</h2>
         <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
         <div class="sub-h">Sweat rate</div>
@@ -388,7 +555,7 @@ function viewCalculator(){
         ${S.sweatMethod==='prepost'?`<div class="fgrid">
           ${numField('Pre weight','pre','lbs')}
           ${numField('Post weight','post','lbs')}
-          ${numField('Duration','time','hr',0.1)}
+          ${numField('Test duration','time','hr',0.1)}
         </div>`:''}
         ${S.sweatMethod==='estimate'?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">How sweaty?</label>
           <select id="sweatGuess" style="flex:1;min-width:0">
@@ -397,7 +564,6 @@ function viewCalculator(){
         ${S.sweatMethod==='manual'?numField('Sweat rate','manualSweat','L/hr',0.01):''}
         <div class="res"><span class="muted">Sweat rate used</span><span class="v">${fmt(sr,2)} L/hr</span></div>
         <div class="note">Want a precise number? Use the detailed <a href="https://www.sweatratecalculator.com" target="_blank" rel="noopener" style="color:var(--accent)">sweatratecalculator.com</a>, then enter the result above.</div>
-        <div class="res"><span>Fluid need / hour</span><span class="v">${fmt(S.bottleOz*S.bottlesPerHour,1)} oz</span></div>
         <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg</span></div>
         <div class="sub-h">Sweat sodium</div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Concentration</label>
@@ -418,7 +584,22 @@ function viewCalculator(){
           <input type="number" step="0.5" value="${S.acceptLoss}" data-k="acceptLoss" data-obj="S"><span class="u">%</span></div>`:''}
       </div>
     </div>
+  </div>`;
+}
 
+/* ---------- TAB: HYDRATION  (bottle + osmolality + projection) ---------- */
+function viewHydration(){
+  const sr = sweatRateLhr(), ev=eventTotals();
+  return `<div class="panel" style="margin-bottom:16px;border-color:var(--accent2)">
+    <h2 style="color:var(--accent2)">Calorie target from Caloric tab</h2>
+    <div class="grid cols3">
+      <div class="res"><span>Carb fuel target</span><span class="v">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
+      <div class="res"><span>Event total burn</span><span class="v">${fmt(ev.kcal,0)} kcal</span></div>
+      <div class="res"><span>This drink supplies</span><span class="v">${fmt((effComp().glucose+effComp().sucrose+effComp().malto+effComp().fructose+extrasCarbG())*S.bottlesPerHour,0)} g/hr carb</span></div>
+    </div>
+    <div class="note">Output only — shown so you can match the bottle's carbs toward your hourly fuel need. The full breakdown lives on the <b>Event Plan</b> tab.${ev.overGut?` <b style="color:var(--warn)">Target exceeds the ${GUT_MAX_CHO} g/hr gut limit — spread carbs across drink + food.</b>`:''}</div>
+  </div>
+  <div class="grid cols2">
     <div>
       <div class="panel">
         <h2>Bottle</h2>
@@ -430,8 +611,10 @@ function viewCalculator(){
         </div>
         ${numField('Bottles / hr','bottlesPerHour','',0.25)}
       </div>
+    </div>
 
-      <div class="panel" style="margin-top:16px">
+    <div>
+      <div class="panel">
         <h2>Product</h2>
         <div class="row-actions">
           <select id="loadProd" style="flex:1;min-width:0"><option value="">— load a product —</option>
@@ -586,6 +769,145 @@ function viewProjection(){
   </div></div>`;
 }
 
+/* ---------- TAB: CALORIC  (ride energy + segment breakdown) ---------- */
+const hm = h => { const t=Math.round(h*60); return Math.floor(t/60)+':'+String(t%60).padStart(2,'0'); };
+function viewCaloric(){
+  const ev=eventTotals(), ints=intensities(), wl=S.intensityMode==='workload';
+  // dropdown options for the active intensity list (avg + per-segment)
+  const intOpts = (sel)=>ints.map((z,i)=>`<option value="${i}"${i==sel?' selected':''}>${z.pct!=null?`${z.label} — ${z.pct}% · ${Math.round(z.watts)}W`:z.label}</option>`).join('');
+  return `<div class="grid cols2">
+    <div>
+      <div class="panel">
+        <h2>Predicted Glycogen & Time to Bonk</h2>
+        <div class="grid cols2" style="gap:10px">
+          <div class="res"><span>Glycogen stored</span><span class="v">${fmt(glycogenKcal()/4,0)} g</span></div>
+          <div class="res"><span>Energy stored</span><span class="v">${fmt(glycogenKcal(),0)} kcal</span></div>
+        </div>
+        <div class="sub-h">Hours until bonk — no fuel</div>
+        ${ints.map((z,i)=>{const b=bonkHours(i);return `<div class="bonk-item ${z.cls}">
+          <span class="zn">${z.pct!=null?z.label:('Workload '+(i+1))} <span style="font-weight:400;opacity:.6">${Math.round(z.watts)}W</span></span>
+          <span class="bv">${b>=12?'&gt; 12 hrs':b.toFixed(1)+' hrs'}</span></div>`;}).join('')}
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>Event Intensity</h2>
+        <div class="field" style="justify-content:flex-start;gap:6px">
+          <label style="flex:0 0 auto;margin-right:4px">Intensity model</label>
+          <button class="sm ${wl?'ghost':''}" onclick="window._setIntMode('zone')">Zone</button>
+          <button class="sm ${wl?'':'ghost'}" onclick="window._setIntMode('workload')">Pre-Set Workload</button>
+        </div>
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg intensity</label>
+          <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select></div>
+        <div class="field" style="justify-content:flex-start;gap:8px">
+          <label style="flex:0 0 auto">Break down by ride segment</label>
+          <button class="sm ${S.segBreakdown?'':'ghost'}" onclick="window._toggleSeg()">${S.segBreakdown?'On — 30-min segments':'Off'}</button>
+        </div>
+        ${S.segBreakdown?`<div class="note">Set the average intensity for each 30-minute block of your ${fmt(S.eventHours,1)}-hr ride. Calories are summed across segments for a finer total.</div>
+        <div class="scroll" style="max-height:260px;margin-top:8px">
+          ${ev.segs.map((s,i)=>`<div class="field" style="gap:8px">
+            <span class="u" style="width:90px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
+            <select style="flex:1;min-width:0" onchange="window._setSegZone(${i}, this.value)">${intOpts(s.zi)}</select>
+          </div>`).join('')}
+        </div>`:`<div class="note">One average intensity is applied to the whole ride. Turn on the breakdown to vary it across 30-minute segments.</div>`}
+        <div class="sub-h">Event totals (${fmt(S.eventHours,1)} hr)</div>
+        <div class="res"><span>Total energy</span><span class="v">${fmt(ev.kcal,0)} kcal · ${fmt(ev.kcalHr,0)}/hr</span></div>
+        <div class="res"><span>Carbohydrate burned</span><span class="v">${fmt(ev.choG,0)} g · ${fmt(ev.choKcal,0)} kcal</span></div>
+        <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
+        <div class="res"><span>Carb fuel target <span class="muted">(keep ${S.reservePct}% reserve)</span></span>
+          <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
+        ${ev.overGut?`<div class="note" style="color:var(--warn)">Target exceeds the ${GUT_MAX_CHO} g/hr gut-absorption limit — you'll dip into reserves; spread carbs across drink + food and train your gut.</div>`:''}
+      </div>
+    </div>
+  </div>
+
+  ${wl?`<div class="panel" style="margin-top:16px"><h2>Pre-Set Workload Reference</h2>
+  <div class="scroll" style="margin-top:8px"><table class="tc">
+    <thead><tr><th>Watts</th><th>% FTP</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
+      <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th><th></th></tr></thead>
+    <tbody>${S.workloads.map((w,i)=>{const m=zoneMetrics(+w||0), b=bonkHours(i);return `<tr>
+      <td><input type="number" step="5" value="${w}" style="width:72px" onchange="window._setWorkload(${i},this.value)"></td>
+      <td>${fmt((+w||0)/S.ftp*100,0)}%</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
+      <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
+      <td>${b>=12?'&gt;12':b.toFixed(1)}</td>
+      <td><button class="sm ghost" onclick="window._rmWorkload(${i})" title="remove">×</button></td></tr>`;}).join('')}
+    </tbody></table></div>
+  <div class="row-actions"><button class="ghost sm" onclick="window._addWorkload()">＋ Add workload (+25W)</button></div>
+  <div class="note">Enter the steady wattages you plan to ride. Each row computes energy & substrate use just like the zones. Bonk = hours at that steady wattage before stored glycogen is exhausted with no fuel.</div></div>`
+  :`<div class="panel" style="margin-top:16px"><h2>Zone Reference (at your FTP ${S.ftp}W)</h2>
+  <div class="scroll" style="margin-top:8px"><table class="tc">
+    <thead><tr><th>Zone</th><th>% FTP</th><th>Watts</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
+      <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th></tr></thead>
+    <tbody>${ZONES.map((z,i)=>{const m=zoneMetrics(zoneWatts(i)), b=bonkHours(i);return `<tr>
+      <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.label}</span></td>
+      <td>${z.pct}%</td><td>${Math.round(m.watts)}</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
+      <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
+      <td>${b>=12?'&gt;12':b.toFixed(1)}</td></tr>`;}).join('')}
+    </tbody></table></div>
+  <div class="note">ACSM cycling VO₂ · Weir caloric equivalent · RQ-based substrate split. Bonk = hours at that steady zone before stored glycogen is exhausted with no fuel.</div></div>`}`;
+}
+
+/* ---------- TAB: EVENT PLAN  (deeper fuel plan: target − drink = food gap) ---------- */
+function planHours(){
+  const n=Math.max(1,Math.ceil(+S.eventHours||0)), out=[];
+  for(let h=1;h<=n;h++) out.push({h, dur:Math.min(1,(+S.eventHours||0)-(h-1))});
+  return out;
+}
+function drinkCarbGperHr(){ const c=effComp(); return (c.glucose+c.sucrose+c.malto+c.fructose+extrasCarbG())*S.bottlesPerHour; }
+function planItemsFor(h){ return S.planItems.filter(it=>it.hour===h); }
+function foodCarbFor(h){ return planItemsFor(h).reduce((s,it)=>{const p=fuelById(it.prodId);return s+(p?p.carbG*(+it.qty||0):0);},0); }
+function foodKcalFor(h){ return planItemsFor(h).reduce((s,it)=>{const p=fuelById(it.prodId);return s+(p?p.kcal*(+it.qty||0):0);},0); }
+function viewEventPlan(){
+  const ev=eventTotals(), rows=planHours(), drinkG=drinkCarbGperHr();
+  const fuelOpts=(sel)=>FUEL_PRODUCTS.map(p=>`<option value="${p.id}"${p.id===sel?' selected':''}>${p.name} (${p.carbG}g · ${p.kcal}kcal)</option>`).join('');
+  // event roll-ups
+  let totTarget=0, totDrink=0, totFood=0;
+  rows.forEach(r=>{ totTarget+=ev.targetRateG*r.dur; totDrink+=drinkG*r.dur; totFood+=foodCarbFor(r.h); });
+  return `<div class="panel"><h2>Event Fuel Plan</h2>
+  <div class="note">Target carbohydrate (from the <b>Caloric</b> tab) minus what your <b>drink</b> supplies leaves a gap you fill with food. Per hour: <b>Need</b> = ${fmt(ev.targetRateG,0)} g/hr × that hour; <b>Drink</b> = ${fmt(drinkG,0)} g/hr from ${fmt(S.bottlesPerHour,2)} bottle/hr; <b>Food</b> = what you add below. <b>Auto-fill</b> adds gels to close the gap.</div>
+  <div class="grid cols3" style="margin:10px 0">
+    <div class="stat-pill"><div class="sp-v">${fmt(totTarget,0)} g</div><div class="sp-l">Carb needed (event)</div></div>
+    <div class="stat-pill"><div class="sp-v">${fmt(totDrink,0)} g</div><div class="sp-l">From drink</div></div>
+    <div class="stat-pill"><div class="sp-v" style="color:${(totTarget-totDrink-totFood)<=1?'var(--good)':'var(--warn)'}">${fmt(Math.max(0,totTarget-totDrink-totFood),0)} g</div><div class="sp-l">Still to cover with food</div></div>
+  </div>
+  <div class="scroll" style="margin-top:6px"><table class="tc">
+    <thead><tr><th>Hr</th><th>Need (g)</th><th>Drink (g)</th><th>Food (g)</th><th>Gap (g)</th><th>Food / fuel for this hour</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const need=ev.targetRateG*r.dur, dr=drinkG*r.dur, food=foodCarbFor(r.h), gap=need-dr-food;
+      const gcls = gap<=1?'cho-positive':gap<=15?'cho-warning':'cho-negative';
+      const items=planItemsFor(r.h);
+      return `<tr>
+        <td>${r.h}${r.dur<1?`<div class="muted" style="font-size:10px">${hm(r.dur)}</div>`:''}</td>
+        <td>${fmt(need,0)}</td><td>${fmt(dr,0)}</td><td>${fmt(food,0)}</td>
+        <td class="${gcls}" style="font-weight:700">${gap>0?fmt(gap,0):'✓'}</td>
+        <td style="text-align:left">
+          ${items.map(it=>`<div class="field" style="gap:6px;margin:2px 0">
+            <select style="flex:1;min-width:0" onchange="window._setPlanItem('${it.id}','prodId',this.value)">${fuelOpts(it.prodId)}</select>
+            <input type="number" step="0.5" value="${it.qty}" style="width:54px" onchange="window._setPlanItem('${it.id}','qty',this.value)" title="servings">
+            <span class="u" style="width:auto">×</span>
+            <button class="sm ghost" onclick="window._rmPlanItem('${it.id}')" title="remove">×</button>
+          </div>`).join('')||'<span class="muted" style="font-size:11px">no food yet</span>'}
+          <div class="row-actions" style="margin-top:4px">
+            <button class="sm ghost" onclick="window._addPlanItem(${r.h})">＋ Add food</button>
+            ${gap>1?`<button class="sm" onclick="window._autoFill(${r.h})" title="add gels to close the gap">Auto-fill ${fmt(gap,0)}g</button>`:''}
+          </div>
+        </td></tr>`;}).join('')}
+    </tbody></table></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px"><h2>Fuel Product Library</h2>
+  <div class="note">Per-serving carbohydrate & calories for the foods above. Edit values to match your products; add your own.</div>
+  <div class="scroll" style="margin-top:8px"><table class="tc">
+    <thead><tr><th style="text-align:left">Product</th><th>Carb (g)</th><th>kcal</th><th></th></tr></thead>
+    <tbody>${FUEL_PRODUCTS.map(p=>`<tr>
+      <td style="text-align:left"><input type="text" value="${(p.name||'').replace(/"/g,'&quot;')}" style="width:170px" onchange="window._setFuel('${p.id}','name',this.value)"></td>
+      <td><input type="number" step="1" value="${p.carbG}" style="width:60px" onchange="window._setFuel('${p.id}','carbG',this.value)"></td>
+      <td><input type="number" step="5" value="${p.kcal}" style="width:64px" onchange="window._setFuel('${p.id}','kcal',this.value)"></td>
+      <td><button class="sm ghost" onclick="window._rmFuel('${p.id}')" title="remove">×</button></td></tr>`).join('')}
+    </tbody></table></div>
+  <div class="row-actions"><button class="ghost sm" onclick="window._addFuel()">＋ Add product</button></div></div>`;
+}
+
 /* ---------- TAB: DRINK DATABASE ---------- */
 function viewDatabase(){
   const rows=allProducts();
@@ -714,49 +1036,19 @@ function viewSweatLog(){
   </div>`;
 }
 
-/* ---------- TAB: FUEL PLAN ---------- */
-let PLAN = [
-  {hr:-2,fuel:'1x20oz Go Far',drink:'',extra:'',salt:'',kcal:0},
-  {hr:-1,fuel:'1x20oz Go Far',drink:'',extra:'',salt:'',kcal:0},
-  {hr:1,fuel:'1x20oz Go Far',drink:'',extra:'',salt:'',kcal:280},
-  {hr:2,fuel:'4x6oz Go Far in 24oz',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'4 salt caps prior',kcal:395},
-  {hr:3,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
-  {hr:4,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
-  {hr:5,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
-  {hr:6,fuel:'4x6oz Go Far in 24oz',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'4 salt caps prior',kcal:395},
-  {hr:7,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
-  {hr:8,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
-  {hr:9,fuel:'',drink:'20oz from aid',extra:'0.5 Clif Bar',salt:'',kcal:395},
-];
-function viewPlan(){
-  const total=PLAN.reduce((s,r)=>s+(+r.kcal||0),0);
-  const ride=PLAN.filter(r=>r.hr>0);
-  const avg=ride.length?total/ride.length:0;
-  return `<div class="panel"><h2>Fuel Plan</h2>
-  <div class="note">Hour-by-hour fueling grid with kcal/hour. Totals update as you edit.</div>
-  <div class="scroll" style="margin-top:10px"><table>
-    <thead><tr><th>Hr</th><th>Main fuel</th><th>Additional drink</th><th>Additional fuel</th><th>Salt</th><th>kcal/hr</th></tr></thead>
-    <tbody>${PLAN.map((r,i)=>{
-      const tf=(k,w=150)=>`<input type="text" value="${r[k]}" data-pl="${i}" data-plk="${k}" style="width:${w}px">`;
-      return `<tr><td>${r.hr}</td><td>${tf('fuel')}</td><td>${tf('drink')}</td><td>${tf('extra')}</td><td>${tf('salt')}</td>
-        <td><input type="number" value="${r.kcal}" data-pl="${i}" data-plk="kcal" style="width:64px"></td></tr>`;}).join('')}
-    </tbody>
-    <tfoot><tr><th>Total</th><td colspan="4" class="muted">${ride.length} ride hours</td><th>${fmt(total,0)} kcal</th></tr>
-    <tr><th>Avg/ride-hr</th><td colspan="4"></td><th>${fmt(avg,0)} kcal/hr</th></tr></tfoot>
-  </table></div></div>`;
-}
-
 /* ============================================================
    TABS / ROUTER
    ============================================================ */
 const TABS = [
-  ['calc','Calculator',viewCalculator],
+  ['rider','Rider Info',viewRider],
+  ['cal','Caloric',viewCaloric],
+  ['hydr','Hydration',viewHydration],
+  ['plan','Event Plan',viewEventPlan],
   ['db','Drink Database',viewDatabase],
   ['solve','Drink Solver',viewSolver],
   ['sweat','Sweat Log',viewSweatLog],
-  ['plan','Fuel Plan',viewPlan],
 ];
-let active='calc';
+let active='rider';
 // build a re-findable selector for the focused field, so live re-renders don't drop the cursor
 function elSig(el){
   if(!el || el.tagName!=='INPUT' && el.tagName!=='SELECT') return null;
@@ -779,6 +1071,7 @@ function render(){
   $('#tabs').innerHTML = TABS.map(t=>`<div class="tab ${t[0]===active?'active':''}" data-tab="${t[0]}">${t[1]}</div>`).join('');
   $('#app').innerHTML = TABS.find(t=>t[0]===active)[2]();
   bind();
+  saveAthlete();   // persist the rider's inputs after every change
   if(sig){
     const el=$('#app').querySelector(sig);
     if(el){
@@ -791,7 +1084,7 @@ function render(){
 // live-refresh ONLY the output panels (osmolality + projection) — leaves inputs untouched,
 // so the table updates as you type without dropping focus / transposing digits
 function refreshOutputs(){
-  if(active!=='calc') return;
+  if(active!=='hydr') return;
   const o=$('#osmoPanel'); if(o) o.innerHTML=osmolalityPanel();
   const p=$('#projPanel'); if(p) p.innerHTML=viewProjection();
 }
@@ -806,8 +1099,10 @@ function bind(){
       if(el.dataset.k==='bottleOz'||el.dataset.k==='maltoDE') S.loadedProduct=null; // manual change → no longer stock mix
     };
     el.onchange=()=>{ commit(); render(); };
-    if(active==='calc') el.oninput=()=>{ commit(); refreshOutputs(); }; // live table/osmolality (SOLVE handled below)
+    if(active==='hydr') el.oninput=()=>{ commit(); refreshOutputs(); }; // live table/osmolality (SOLVE handled below)
   });
+  // Gender select (rider profile) → drives glycogen estimate
+  const gs=$('#genderSel'); if(gs) gs.onchange=()=>{ S.gender=gs.value; render(); };
   // SOLVE fields (numField passed SOLVE as obj but data-obj stayed 'S'); fix via explicit map
   document.querySelectorAll('#app input[data-k]').forEach(el=>{
     if(SOLVE.hasOwnProperty(el.dataset.k) && active==='solve'){
@@ -864,10 +1159,6 @@ function bind(){
     const r=SWEATLOG[+el.dataset.sw], k=el.dataset.swk;
     r[k]=(k==='date'||k==='cond')?el.value:(el.value===''?'':+el.value); render();
   });
-  // plan edits
-  document.querySelectorAll('input[data-pl]').forEach(el=>el.onchange=()=>{
-    const r=PLAN[+el.dataset.pl], k=el.dataset.plk; r[k]=k==='kcal'?(+el.value||0):el.value; render();
-  });
 }
 /* actions */
 window._loadProd=(id)=>{
@@ -884,7 +1175,7 @@ window._loadProd=(id)=>{
   // product sodium as NaCl-equivalent (Na fraction of NaCl = 0.3934), scaled to the bottle
   S.comp.nacl = +((p.sodium/1000/0.3934) * f).toFixed(2);
   S.loadedProduct = p.name;
-  active='calc'; render();   // S.bottleOz deliberately unchanged
+  active='hydr'; render();   // S.bottleOz deliberately unchanged
 };
 window._adminToggle=()=>{
   if(ADMIN){ ADMIN=false; sessionStorage.removeItem('hydra_admin'); render(); return; }
@@ -911,9 +1202,52 @@ window._createCustom=()=>{ S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0
 window._addHours=(n)=>{ S.projHours=Math.min(36,(S.projHours||8)+n); render(); };
 window._setHours=(n)=>{ S.projHours=n; render(); };
 window._setSweatNa=(mg)=>{S.sweatNa=mg;render();};
-window._useSweat=(i)=>{const c=swCalc(SWEATLOG[i]);S.manualSweat=+c.lHr.toFixed(3);active='calc';render();};
+window._useSweat=(i)=>{const c=swCalc(SWEATLOG[i]);S.manualSweat=+c.lHr.toFixed(3);S.sweatMethod='manual';active='rider';render();};
 window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'',oz:0,na:''});render();};
 
+/* --- caloric: intensity model (zone vs pre-set workload) --- */
+window._setIntMode=(m)=>{ if(S.intensityMode===m) return; S.intensityMode=m; clampIntensityIdx(); render(); };
+window._setWorkload=(i,v)=>{ S.workloads[i]=+v||0; render(); };
+window._addWorkload=()=>{ const last=S.workloads[S.workloads.length-1]; S.workloads.push((+last||75)+25); render(); };
+window._rmWorkload=(i)=>{ if(S.workloads.length<=1) return; S.workloads.splice(i,1); clampIntensityIdx(); render(); };
+/* --- caloric: event intensity + 30-min segments --- */
+window._setEventZone=(v)=>{ S.eventZone=+v; render(); };
+window._toggleSeg=()=>{
+  S.segBreakdown=!S.segBreakdown;
+  if(S.segBreakdown){ // seed each segment from the current average zone
+    const n=segCount();
+    S.segZones = Array.from({length:n},(_,i)=> S.segZones[i]??S.eventZone);
+  }
+  render();
+};
+window._setSegZone=(i,v)=>{ S.segZones[i]=+v; render(); };
+
+/* --- event plan: per-hour food items + fuel library --- */
+window._addPlanItem=(hour)=>{ S.planItems.push({id:_xid('pi'),hour,prodId:FUEL_PRODUCTS[0].id,qty:1}); render(); };
+window._setPlanItem=(id,field,val)=>{ const it=S.planItems.find(x=>x.id===id); if(!it) return;
+  it[field]= field==='qty'?(+val||0):val; render(); };
+window._rmPlanItem=(id)=>{ S.planItems=S.planItems.filter(x=>x.id!==id); render(); };
+// fill the hour's gap with whole servings of the first library item (a gel by default)
+window._autoFill=(hour)=>{
+  const ev=eventTotals(), dur=Math.min(1,(+S.eventHours||0)-(hour-1));
+  const need=ev.targetRateG*dur, gap=need-drinkCarbGperHr()*dur-foodCarbFor(hour);
+  if(gap<=0) return;
+  const p=FUEL_PRODUCTS[0]; if(!p||!p.carbG) return;
+  const qty=Math.ceil(gap/p.carbG);
+  const existing=S.planItems.find(x=>x.hour===hour && x.prodId===p.id);
+  if(existing) existing.qty=(+existing.qty||0)+qty;
+  else S.planItems.push({id:_xid('pi'),hour,prodId:p.id,qty});
+  render();
+};
+window._setFuel=(id,field,val)=>{ const p=fuelById(id); if(!p) return;
+  p[field]= field==='name'?val:(+val||0); render(); };
+window._addFuel=()=>{ FUEL_PRODUCTS.push({id:_xid('f'),name:'New product',kcal:100,carbG:25}); render(); };
+window._rmFuel=(id)=>{ FUEL_PRODUCTS=FUEL_PRODUCTS.filter(p=>p.id!==id);
+  S.planItems=S.planItems.filter(it=>it.prodId!==id); render(); };
+window._resetAthlete=()=>{ if(confirm('Reset all saved inputs to defaults? This clears your saved athlete profile in this browser.')) resetAthlete(); };
+
+loadAthlete();                                   // restore last session's inputs (if any)
+window.addEventListener('beforeunload', saveAthlete);  // belt-and-suspenders save
 render();
 </script>
 </body>
