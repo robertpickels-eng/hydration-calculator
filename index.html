@@ -313,15 +313,17 @@ const ZONES_CYC = [
   { label:'Threshold', pct:100, cls:'z4' },
   { label:'VO₂max',    pct:120, cls:'z5' },
 ];
-// running: Daniels E/M/T/I/R as % of THRESHOLD SPEED (T = 100%)
+// running: Rob's "RP Run Zones" (Daniels) — % RANGES of THRESHOLD SPEED (Threshold tops at 100%).
+// Metrics are computed at the zone midpoint; the table shows the full range.
 const ZONES_RUN = [
-  { label:'Easy',      pct:74,  cls:'z1' },
-  { label:'Marathon',  pct:89,  cls:'z2' },
-  { label:'Threshold', pct:100, cls:'z3' },
-  { label:'Interval',  pct:107, cls:'z4' },
-  { label:'Rep',       pct:112, cls:'z5' },
+  { label:'Recovery',  lo:75,  hi:82,  cls:'z1' },
+  { label:'Aerobic',   lo:82,  hi:89,  cls:'z2' },
+  { label:'Marathon',  lo:89,  hi:95,  cls:'z3' },
+  { label:'Threshold', lo:95,  hi:100, cls:'z4' },
+  { label:'Interval',  lo:100, hi:110, cls:'z5' },
 ];
 function zones(){ return isRun()?ZONES_RUN:ZONES_CYC; }
+function zMid(z){ return z.pct!=null ? z.pct : (z.lo+z.hi)/2; }   // representative % (midpoint for ranges)
 
 /* ---- pace ↔ speed helpers (running). Threshold/paces stored as seconds per mile ---- */
 const M_PER_MI = 1609.34, MI_PER_KM = 1.60934;
@@ -384,7 +386,9 @@ function intensities(){
     return S.workloads.map((w,i)=>({label:(+w||0)+' W', watts:+w||0, cls:'z'+(i%5+1)}));
   }
   return zones().map((z,i)=>{
-    if(isRun()){ const sp=vThreshold()*z.pct/100; return {label:z.label, pct:z.pct, speed:sp, pace:speedToPace(sp), cls:z.cls}; }
+    if(isRun()){ const pct=zMid(z), sp=vThreshold()*pct/100;
+      return {label:z.label, pct, lo:z.lo, hi:z.hi, speed:sp, pace:speedToPace(sp),
+        paceLo:speedToPace(vThreshold()*z.lo/100), paceHi:speedToPace(vThreshold()*z.hi/100), cls:z.cls}; }
     return {label:z.label, pct:z.pct, watts:zoneWatts(i), cls:z.cls};
   });
 }
@@ -889,7 +893,11 @@ function viewCaloric(){
   const pctLbl = run?'% Thr':'% FTP';
   const intLbl = z => run ? paceFmt(z.pace)+'/mi' : Math.round(z.watts)+'W';
   // dropdown options for the active intensity list (avg + per-segment)
-  const intOpts = (sel)=>ints.map((z,i)=>`<option value="${i}"${i==sel?' selected':''}>${z.pct!=null?`${z.label} — ${z.pct}% · ${intLbl(z)}`:z.label}</option>`).join('');
+  const intOpts = (sel)=>ints.map((z,i)=>{
+    const lab = z.lo!=null ? `${z.label} — ${z.lo}–${z.hi}% · ~${paceFmt(z.pace)}/mi`
+              : z.pct!=null ? `${z.label} — ${z.pct}% · ${intLbl(z)}` : z.label;
+    return `<option value="${i}"${i==sel?' selected':''}>${lab}</option>`;
+  }).join('');
   // the reference table body (zone or workload mode)
   const refTable = wl
     ? `<div class="scroll" style="margin-top:8px"><table class="tc">
@@ -913,11 +921,13 @@ function viewCaloric(){
           <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th></tr></thead>
         <tbody>${ints.map((z,i)=>{const m=imetrics(z,0), b=bonkHours(i);return `<tr>
           <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.label}</span></td>
-          <td>${z.pct}%</td><td>${run?paceFmt(z.pace)+'/mi':Math.round(z.watts)+'W'}</td><td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
+          <td>${z.lo!=null?`${z.lo}–${z.hi}%`:z.pct+'%'}</td>
+          <td>${run?(z.paceLo!=null?`${paceFmt(z.paceLo)}–${paceFmt(z.paceHi)}`:paceFmt(z.pace)):Math.round(z.watts)+'W'}</td>
+          <td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
           <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
           <td>${b>=12?'&gt;12':b.toFixed(1)}</td></tr>`;}).join('')}
         </tbody></table></div>
-      <div class="note">ACSM ${run?'running (level-ground reference)':'cycling'} VO₂ · Weir caloric equivalent · RQ-based substrate split. Bonk = hours at that steady ${run?'pace':'zone'} before stored glycogen is exhausted with no fuel.</div>`;
+      <div class="note">ACSM ${run?'running (level-ground reference)':'cycling'} VO₂ · Weir caloric equivalent · RQ-based substrate split.${run?' Pace/% show the zone range; VO₂/Cal/CHO/Fat/Bonk are computed at the zone midpoint.':''} Bonk = hours at that steady ${run?'pace':'zone'} before stored glycogen is exhausted with no fuel.</div>`;
 
   return `${athleteSummary()}
 
