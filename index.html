@@ -239,8 +239,10 @@ const S = {
   segBreakdown:false,                          // show per-30-min-segment intensity editor
   segZones:[],                                 // chosen intensity index per 30-min segment
   reservePct:25,                               // % glycogen to keep in reserve at event end
+  highCarbAdapted:false,                        // gut-trained for high carb intake → cap rises 120→150 g/hr
   // --- event fuel plan ---
-  planItems:[]                                 // per-hour product picks: [{hour, prodId, qty}]
+  planItems:[],                                // per-hour product picks: [{hour, prodId, qty}]
+  planBottles:{}                               // per-hour bottle override {hour: bottles}; unset = bottles/hr × dur
 };
 
 /* derived athlete numbers */
@@ -325,6 +327,7 @@ function productOsm(p){
    substrate-oxidation RQ model). Reads the shared rider profile in S.
    ============================================================ */
 const GUT_MAX_CHO = 120;          // g/hr — practical upper carbohydrate-absorption limit
+function carbCap(){ return S.highCarbAdapted ? 150 : GUT_MAX_CHO; } // gut-absorption ceiling, raised if adapted
 function isRun(){ return S.activity==='running'; }
 // zone sets per activity
 const ZONES_CYC = [
@@ -463,7 +466,7 @@ function eventTotals(){
   return { segs, kcal, choKcal, fatKcal, choG:choKcal/4,
     gly, usableGly, reqSuppKcal, reqSuppG:reqSuppKcal/4,
     targetRateG, targetRateKcal:targetRateG*4,
-    overGut: targetRateG>GUT_MAX_CHO,
+    overGut: targetRateG>carbCap(),
     kcalHr:kcal/hrs, choGhr:(choKcal/4)/hrs };
 }
 
@@ -471,17 +474,36 @@ function eventTotals(){
    FUEL PRODUCT LIBRARY  (for the Event Plan — gels/bars/chews/etc.)
    Each item: per-serving kcal + carbohydrate grams.  Editable + extendable.
    ============================================================ */
+// brand, product, unit, kcal, sodium(mg), {glucose,fructose,sucrose,malto} g, malto DE.
+// carb total is derived from the sugar split. Values are editable per-serving ESTIMATES from
+// public labels; verify against your own products (sodium feeds the hydration balance).
 let FUEL_PRODUCTS = [
-  // name, kcal/serving, carb g/serving
-  ['Energy gel',        100, 22],
-  ['Energy chew (1)',    20,  5],
-  ['Energy bar',        230, 44],
-  ['Banana (medium)',   105, 27],
-  ['Maltodextrin (30g)',114, 28],
-  ['Rice cake',         120, 24],
-  ['Fig bar',           100, 20],
-].map((p,i)=>({id:'f'+i, name:p[0], kcal:p[1], carbG:p[2]}));
+  ['Precision Fuel & Hydration','PF 30 Gel','Each',         116, 10, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
+  ['Precision Fuel & Hydration','PF 90 Gel','Each',         348, 30, {glucose:0,  fructose:40,   sucrose:0,  malto:50  }, 15],
+  ['Maurten','Gel 100','Each',                              100, 22, {glucose:0,  fructose:14,   sucrose:0,  malto:11  }, 15],
+  ['Maurten','Gel 160','Each',                              160, 38, {glucose:0,  fructose:22,   sucrose:0,  malto:18  }, 15],
+  ['Maurten','Solid 225 Bar','Each',                        225, 30, {glucose:0,  fructose:10,   sucrose:9,  malto:25  }, 15],
+  ['SiS','Beta Fuel Gel','Each',                            156, 26, {glucose:0,  fructose:18,   sucrose:0,  malto:22  }, 15],
+  ['SiS','GO Isotonic Gel','Each',                           87, 10, {glucose:0,  fructose:0,    sucrose:0,  malto:22  }, 15],
+  ['GU','Energy Gel','Each',                                100, 60, {glucose:0,  fructose:7,    sucrose:0,  malto:15  }, 15],
+  ['GU','Roctane Gel','Each',                               100,125, {glucose:0,  fructose:7,    sucrose:0,  malto:14  }, 15],
+  ['Neversecond','C30 Gel','Each',                          120,  8, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
+  ['Honey Stinger','Energy Gel','Each',                     100, 50, {glucose:12, fructose:12,   sucrose:0,  malto:0   }, 15],
+  ['Honey Stinger','Waffle','Each',                         150, 50, {glucose:7,  fructose:0,    sucrose:14, malto:0   }, 15],
+  ['Skratch','Energy Chews','Pack',                          80, 80, {glucose:7,  fructose:0,    sucrose:12, malto:0   }, 15],
+  ['Clif','Shot Bloks','3 chews',                           100, 50, {glucose:10, fructose:0,    sucrose:14, malto:0   }, 15],
+  ['Clif','Bar','Each',                                     250,150, {glucose:20, fructose:10,   sucrose:14, malto:0   }, 15],
+  ['Gatorade','Endurance Carb Gel','Each',                   80, 90, {glucose:0,  fructose:6,    sucrose:0,  malto:14  }, 15],
+].map((p,i)=>({id:'f'+i, brand:p[0], product:p[1], unit:p[2], kcal:p[3], sodium:p[4], split:{...p[5]}, de:p[6]}));
 function fuelById(id){ return FUEL_PRODUCTS.find(p=>p.id===id); }
+function fuelCarbG(p){ const s=(p&&p.split)||{}; return (+s.glucose||0)+(+s.fructose||0)+(+s.sucrose||0)+(+s.malto||0); }
+function fuelLabel(p){ return p ? `${p.brand?p.brand+' ':''}${p.product||''}${p.unit?' ('+p.unit+')':''}`.trim() : ''; }
+// effective glucose:fructose ratio — maltodextrin counts as glucose; sucrose splits 50/50
+function fuelGF(p){ const s=(p&&p.split)||{};
+  const glu=(+s.glucose||0)+(+s.malto||0)+(+s.sucrose||0)/2, fru=(+s.fructose||0)+(+s.sucrose||0)/2;
+  if(glu+fru<=0) return '—'; if(fru<=0) return 'all glu'; if(glu<=0) return 'all fru';
+  return (glu/fru).toFixed(2).replace(/\.?0+$/,'')+':1';
+}
 
 /* ============================================================
    ROLES & MODERATION  (browser-local; not server-enforced)
@@ -530,7 +552,10 @@ function loadAthlete(){
       delete s.comp;
       Object.assign(S, s);
     }
-    if(Array.isArray(raw.fuel) && raw.fuel.length) FUEL_PRODUCTS=raw.fuel;
+    // keep a saved fuel list only if it's the new brand/split schema; legacy generic lists
+    // are dropped so the curated defaults (with sodium + sugar splits) take over
+    if(Array.isArray(raw.fuel) && raw.fuel.length && raw.fuel.every(p=>p && p.split!==undefined && p.product!==undefined))
+      FUEL_PRODUCTS=raw.fuel;
     if(Array.isArray(raw.sweat) && raw.sweat.length) SWEATLOG=raw.sweat;
   }catch(e){}
 }
@@ -748,7 +773,7 @@ function viewHydration(){
       <div class="res"><span>Event total burn</span><span class="v">${fmt(ev.kcal,0)} kcal</span></div>
       <div class="res"><span>This drink supplies</span><span class="v">${fmt((effComp().glucose+effComp().sucrose+effComp().malto+effComp().fructose+extrasCarbG())*S.bottlesPerHour,0)} g/hr carb</span></div>
     </div>
-    <div class="note">Output only — shown so you can match the bottle's carbs toward your hourly fuel need. The full breakdown lives on the <b>Event Plan</b> tab.${ev.overGut?` <b style="color:var(--warn)">Target exceeds the ${GUT_MAX_CHO} g/hr gut limit — spread carbs across drink + food.</b>`:''}</div>
+    <div class="note">Output only — shown so you can match the bottle's carbs toward your hourly fuel need. The full breakdown lives on the <b>Event Plan</b> tab.${ev.overGut?` <b style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut limit — spread carbs across drink + food.</b>`:''}</div>
   </div>
   <div class="grid cols2">
     <div>
@@ -769,8 +794,8 @@ function viewHydration(){
       <div class="panel">
         <h2>Product</h2>
         <div class="row-actions">
-          <select id="loadProd" style="flex:1;min-width:0"><option value="">— load a product —</option>
-            ${loadableProducts().map(p=>`<option value="${p._id}">${p.name}</option>`).join('')}</select>
+          <select id="loadProd" style="flex:1;min-width:0"><option value=""${S.loadedProduct?'':' selected'}>— load a product —</option>
+            ${loadableProducts().map(p=>`<option value="${p._id}"${p.name===S.loadedProduct?' selected':''}>${p.name}</option>`).join('')}</select>
           <button class="sm" onclick="window._createCustom()" title="Clear everything to a blank custom formula">Create Custom</button>
         </div>
         ${S.loadedProduct?`<div class="note" style="color:var(--accent2)">Loaded <b>${S.loadedProduct}</b> — values reflect the manufacturer's standard mix ratio, scaled to your bottle volume (${fmt(S.bottleOz,1)} oz / ${fmt(S.bottleOz/OZ_PER_L,2)} L). Edit any field to customize.</div>`:''}
@@ -794,7 +819,8 @@ function viewHydration(){
         </div>
         ${S.extraLytes.map(x=>extraRow(x,'l')).join('')}
         <div class="res" style="margin-top:6px"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
-        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}">${fmt(sodiumPerHour()-S.sweatNa*sr,0)} mg</span></div>
+        ${avgFoodNaPerHr()>0?`<div class="res"><span>Food sodium / hour <span class="muted">(avg from plan)</span></span><span class="v">${fmt(avgFoodNaPerHr(),0)} mg</span></div>`:''}
+        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}" title="Drink Na + average food Na from the Event Plan − sweat Na loss, per hour.">${fmt(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr,0)} mg</span></div>
         <div class="res"><span>Drink carb / hour</span><span class="v">${fmt(drinkCarbGperHr(),0)} g</span></div>
         <div class="res"><span>Net carb balance / hour <span class="muted">(vs burn)</span></span><span class="v" style="color:${(drinkCarbGperHr()-ev.choGhr)>=0?'var(--good)':'var(--bad)'}" title="Drink carbs/hr − carbohydrate oxidized/hr at event intensity. Negative = net glycogen drawdown.">${fmt(drinkCarbGperHr()-ev.choGhr,0)} g</span></div>
       </div>
@@ -812,6 +838,10 @@ function osmolalityPanel(){
   const mosm=oz ? (osmolesOf(c,S.maltoDE)+extrasOsmoles())*OZ_PER_L*1000/oz : 0;
   const ton=tonicity(mosm), naFromSalts=naFromSaltsMg(), carbPerHr=carbG*S.bottlesPerHour;
   const mk=Math.max(0,Math.min(100,(mosm/700)*100));
+  // high carb-rate fluid guidance: trigger on g/hr, size the advice off osmolality (target ≤330 = isotonic ceiling)
+  const ISO_TOP=330, fluidLhr=(oz*S.bottlesPerHour)/OZ_PER_L;
+  const tgtFluidLhr = mosm>0 ? fluidLhr*(mosm/ISO_TOP) : fluidLhr;
+  const extraMlHr = Math.max(0,(tgtFluidLhr-fluidLhr)*1000);
   return `<div class="panel" style="margin-top:16px">
     <h2>Bottle Osmolality</h2>
     <div class="grid cols2" style="align-items:center;gap:20px">
@@ -832,6 +862,11 @@ function osmolalityPanel(){
         <div class="res"><span>Sodium from salts in bottle</span><span class="v">${fmt(naFromSalts,0)} mg</span></div>
       </div>
     </div>
+    ${carbPerHr>90?`<div class="note" style="color:var(--warn);margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
+      ⚠️ <b>${fmt(carbPerHr,0)} g/hr</b> carbohydrate. ${mosm>ISO_TOP
+        ? `At ${fmt(mosm,0)} mOsm/L this drink is ${ton.label.toLowerCase()} — high carb rates concentrate the bottle and slow gastric emptying. Raise fluid to ≈<b>${fmt(tgtFluidLhr,2)} L/hr</b> (about +${fmt(extraMlHr,0)} mL/hr) to bring it toward isotonic (~290–330 mOsm/L), or move some carbs to solid food.`
+        : `At ${fmt(mosm,0)} mOsm/L it's ${ton.label.toLowerCase()} — fine for now, but keep fluid volume up as you push carbs higher so the mix doesn't turn hypertonic.`}
+    </div>`:''}
   </div>`;
 }
 
@@ -1010,13 +1045,21 @@ function viewCaloric(){
   ${(()=>{
     const DURS=[1,2,3,4,5,6,7,8,9,10,11,12];
     const usableGly=glycogenKcal()*(1-S.reservePct/100);
+    const cap=carbCap();
     // supplemental CHO (g/hr) so glycogen never drops below the reserve over a T-hour effort
     const suppG=(choKcalHr,T)=>Math.max(0,(choKcalHr - usableGly/T)/4);
-    const cls=g=> g<=0?'st-w' : g<=60?'st-g' : g<=90?'st-y' : g<=GUT_MAX_CHO?'st-o' : 'st-r';
-    const cell=g=> g<=0?'—':fmt(g,0);
+    const cls=g=> g<=0?'st-w' : g<=60?'st-g' : g<=90?'st-y' : g<=cap?'st-o' : 'st-r';
+    const cell=g=> g<=0?'—' : (g>cap ? '✕' : fmt(g,0));
     return `<div class="panel" style="margin-top:16px">
-      <h2 style="margin:0 0 2px">Zone × Time — carbs to hold a ${S.reservePct}% reserve</h2>
-      <div class="note" style="margin-top:4px">Recommended carbohydrate intake (<b>g/hr</b>) by ${wl?(run?'pace':'workload'):'zone'} and total ${run?'run':'ride'} duration, so predicted glycogen never falls below your ${S.reservePct}% reserve. Glycogen store ${fmt(glycogenKcal()/4,0)} g · usable ${fmt(usableGly/4,0)} g.</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <h2 style="margin:0">Zone × Time — carbs to hold a ${S.reservePct}% reserve</h2>
+        <div class="modeseg" style="margin-left:auto">
+          <span class="muted" style="font-size:11px;margin-right:2px">Gut adaptation</span>
+          <button class="sm ${S.highCarbAdapted?'ghost':''}" onclick="window._setHighCarb(false)">Standard (120)</button>
+          <button class="sm ${S.highCarbAdapted?'':'ghost'}" onclick="window._setHighCarb(true)">High-carb (150)</button>
+        </div>
+      </div>
+      <div class="note" style="margin-top:4px">Recommended carbohydrate intake (<b>g/hr</b>) by ${wl?(run?'pace':'workload'):'zone'} and total ${run?'run':'ride'} duration, so predicted glycogen never falls below your ${S.reservePct}% reserve. Capped at your gut ceiling of <b>${cap} g/hr</b>${S.highCarbAdapted?' (high-carb-adapted)':''}; an <span style="color:var(--bad);font-weight:700">✕</span> means the requirement exceeds it. Glycogen store ${fmt(glycogenKcal()/4,0)} g · usable ${fmt(usableGly/4,0)} g.</div>
       <div class="scroll" style="margin-top:8px"><table class="tc zxt">
         <thead><tr><th style="text-align:left">${wl?(run?'Pace':'Workload'):'Zone'}</th><th>CHO burn (g/hr)</th>
           ${DURS.map(d=>`<th>${d} hr</th>`).join('')}</tr></thead>
@@ -1028,9 +1071,9 @@ function viewCaloric(){
       <div class="note" style="margin-top:8px">
         <span class="st-g" style="padding:1px 6px;border-radius:4px">≤60</span> all glucose / whole foods ·
         <span class="st-y" style="padding:1px 6px;border-radius:4px">60–90</span> 2:1 glucose:fructose ·
-        <span class="st-o" style="padding:1px 6px;border-radius:4px">90–${GUT_MAX_CHO}</span> 1:1 glucose:fructose ·
-        <span class="st-r" style="padding:1px 6px;border-radius:4px">&gt;${GUT_MAX_CHO}</span> exceeds gut limit — not sustainable.
-        “—” = stored glycogen alone covers it. Recommendations capped at the ${GUT_MAX_CHO} g/hr absorption limit.
+        <span class="st-o" style="padding:1px 6px;border-radius:4px">90–${cap}</span> 1:1 glucose:fructose ·
+        <span class="st-r" style="padding:1px 6px;border-radius:4px">✕</span> above ${cap} g/hr — exceeds your gut ceiling, not sustainable.
+        “—” = stored glycogen alone covers it. Toggle <b>High-carb</b> if you've trained your gut to absorb up to 150 g/hr.
       </div>
     </div>`;
   })()}
@@ -1066,7 +1109,7 @@ function viewCaloric(){
         <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
         <div class="res"><span>Carb fuel target <span class="muted">(keep ${S.reservePct}% reserve)</span></span>
           <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
-        ${ev.overGut?`<div class="note" style="color:var(--warn)">Target exceeds the ${GUT_MAX_CHO} g/hr gut-absorption limit — you'll dip into reserves; spread carbs across drink + food and train your gut.</div>`:''}
+        ${ev.overGut?`<div class="note" style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut-absorption limit${S.highCarbAdapted?' (high-carb-adapted)':''} — you'll dip into reserves; spread carbs across drink + food and train your gut.</div>`:''}
       </div>
     </div>
   </div>`;
@@ -1078,40 +1121,54 @@ function planHours(){
   for(let h=1;h<=n;h++) out.push({h, dur:Math.min(1,(+S.eventHours||0)-(h-1))});
   return out;
 }
-function drinkCarbGperHr(){ const c=effComp(); return (c.glucose+c.sucrose+c.malto+c.fructose+extrasCarbG())*S.bottlesPerHour; }
+function carbPerBottle(){ const c=effComp(); return c.glucose+c.sucrose+c.malto+c.fructose+extrasCarbG(); }
+function drinkCarbGperHr(){ return carbPerBottle()*S.bottlesPerHour; }
+// bottles planned for an hour: explicit override, else the global rate × that hour's duration
+function planBottlesFor(h,dur){ const v=(S.planBottles||{})[h]; return (v==null||v==='')? +(((+S.bottlesPerHour||0)*dur).toFixed(2)) : (+v||0); }
+function drinkCarbFor(h,dur){ return carbPerBottle()*planBottlesFor(h,dur); }
 function planItemsFor(h){ return S.planItems.filter(it=>it.hour===h); }
-function foodCarbFor(h){ return planItemsFor(h).reduce((s,it)=>{const p=fuelById(it.prodId);return s+(p?p.carbG*(+it.qty||0):0);},0); }
-function foodKcalFor(h){ return planItemsFor(h).reduce((s,it)=>{const p=fuelById(it.prodId);return s+(p?p.kcal*(+it.qty||0):0);},0); }
+function foodCarbFor(h){ return planItemsFor(h).reduce((s,it)=>{const p=fuelById(it.prodId);return s+(p?fuelCarbG(p)*(+it.qty||0):0);},0); }
+function foodKcalFor(h){ return planItemsFor(h).reduce((s,it)=>{const p=fuelById(it.prodId);return s+(p?(+p.kcal||0)*(+it.qty||0):0);},0); }
+function foodNaFor(h){ return planItemsFor(h).reduce((s,it)=>{const p=fuelById(it.prodId);return s+(p?(+p.sodium||0)*(+it.qty||0):0);},0); }
+function eventFoodNaTotal(){ return planHours().reduce((s,r)=>s+foodNaFor(r.h),0); }
+function avgFoodNaPerHr(){ return eventFoodNaTotal()/Math.max(0.001,+S.eventHours||0); } // mg/hr averaged over the event
 function viewEventPlan(){
-  const ev=eventTotals(), rows=planHours(), drinkG=drinkCarbGperHr();
-  const fuelOpts=(sel)=>FUEL_PRODUCTS.map(p=>`<option value="${p.id}"${p.id===sel?' selected':''}>${p.name} (${p.carbG}g · ${p.kcal}kcal)</option>`).join('');
+  const ev=eventTotals(), rows=planHours();
+  const fuelOpts=(sel)=>FUEL_PRODUCTS.map(p=>`<option value="${p.id}"${p.id===sel?' selected':''}>${fuelLabel(p)} — ${fmt(fuelCarbG(p),0)}g · ${fmt(p.sodium,0)}mg Na</option>`).join('');
   // event roll-ups
-  let totTarget=0, totDrink=0, totFood=0;
-  rows.forEach(r=>{ totTarget+=ev.targetRateG*r.dur; totDrink+=drinkG*r.dur; totFood+=foodCarbFor(r.h); });
+  let totTarget=0, totDrink=0, totFood=0, totBottles=0;
+  rows.forEach(r=>{ totTarget+=ev.targetRateG*r.dur; totDrink+=drinkCarbFor(r.h,r.dur); totFood+=foodCarbFor(r.h); totBottles+=planBottlesFor(r.h,r.dur); });
   return `<div class="panel"><h2>Event Fuel Plan</h2>
-  <div class="note">Target carbohydrate (from the <b>Caloric</b> tab) minus what your <b>drink</b> supplies leaves a gap you fill with food. Per hour: <b>Need</b> = ${fmt(ev.targetRateG,0)} g/hr × that hour; <b>Drink</b> = ${fmt(drinkG,0)} g/hr from ${fmt(S.bottlesPerHour,2)} bottle/hr; <b>Food</b> = what you add below. <b>Auto-fill</b> adds gels to close the gap.</div>
+  <div class="note">Target carbohydrate (from the <b>Caloric</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap.</div>
   <div class="grid cols3" style="margin:10px 0">
     <div class="stat-pill"><div class="sp-v">${fmt(totTarget,0)} g</div><div class="sp-l">Carb needed (event)</div></div>
-    <div class="stat-pill"><div class="sp-v">${fmt(totDrink,0)} g</div><div class="sp-l">From drink</div></div>
+    <div class="stat-pill"><div class="sp-v">${fmt(totDrink,0)} g</div><div class="sp-l">From drink (${fmt(totBottles,1)} bottles)</div></div>
     <div class="stat-pill"><div class="sp-v" style="color:${(totTarget-totDrink-totFood)<=1?'var(--good)':'var(--warn)'}">${fmt(Math.max(0,totTarget-totDrink-totFood),0)} g</div><div class="sp-l">Still to cover with food</div></div>
   </div>
   <div class="scroll" style="margin-top:6px"><table class="tc">
-    <thead><tr><th>Hr</th><th>Need (g)</th><th>Drink (g)</th><th>Food (g)</th><th>Gap (g)</th><th>Food / fuel for this hour</th></tr></thead>
+    <thead><tr><th>Hr</th><th>Need (g)</th><th>Drink (g)</th><th>Food (g)</th><th>Gap (g)</th><th>Na in (mg)</th><th>Bottles &amp; food for this hour</th></tr></thead>
     <tbody>${rows.map(r=>{
-      const need=ev.targetRateG*r.dur, dr=drinkG*r.dur, food=foodCarbFor(r.h), gap=need-dr-food;
+      const need=ev.targetRateG*r.dur, dr=drinkCarbFor(r.h,r.dur), food=foodCarbFor(r.h), gap=need-dr-food;
       const gcls = gap<=1?'cho-positive':gap<=15?'cho-warning':'cho-negative';
-      const items=planItemsFor(r.h);
+      const items=planItemsFor(r.h), btl=planBottlesFor(r.h,r.dur);
+      const drinkNa=btl*naFromSaltsMg(), foodNa=foodNaFor(r.h);
       return `<tr>
         <td>${r.h}${r.dur<1?`<div class="muted" style="font-size:10px">${hm(r.dur)}</div>`:''}</td>
         <td>${fmt(need,0)}</td><td>${fmt(dr,0)}</td><td>${fmt(food,0)}</td>
         <td class="${gcls}" style="font-weight:700">${gap>0?fmt(gap,0):'✓'}</td>
+        <td>${fmt(drinkNa+foodNa,0)}<div class="muted" style="font-size:10px">${fmt(drinkNa,0)} drink · ${fmt(foodNa,0)} food</div></td>
         <td style="text-align:left">
+          <div class="field" style="gap:6px;margin:2px 0">
+            <span class="u" style="width:auto;min-width:64px;text-align:left">🍶 Drink</span>
+            <input type="number" step="0.25" min="0" value="${btl}" style="width:54px" onchange="window._setPlanBottles(${r.h},this.value)" title="bottles this hour">
+            <span class="u" style="width:auto">bottle${btl===1?'':'s'} <span class="muted">(${fmt(dr,0)}g)</span></span>
+          </div>
           ${items.map(it=>`<div class="field" style="gap:6px;margin:2px 0">
             <select style="flex:1;min-width:0" onchange="window._setPlanItem('${it.id}','prodId',this.value)">${fuelOpts(it.prodId)}</select>
             <input type="number" step="0.5" value="${it.qty}" style="width:54px" onchange="window._setPlanItem('${it.id}','qty',this.value)" title="servings">
             <span class="u" style="width:auto">×</span>
             <button class="sm ghost" onclick="window._rmPlanItem('${it.id}')" title="remove">×</button>
-          </div>`).join('')||'<span class="muted" style="font-size:11px">no food yet</span>'}
+          </div>`).join('')}
           <div class="row-actions" style="margin-top:4px">
             <button class="sm ghost" onclick="window._addPlanItem(${r.h})">＋ Add food</button>
             ${gap>1?`<button class="sm" onclick="window._autoFill(${r.h})" title="add gels to close the gap">Auto-fill ${fmt(gap,0)}g</button>`:''}
@@ -1121,14 +1178,24 @@ function viewEventPlan(){
   </div>
 
   <div class="panel" style="margin-top:16px"><h2>Fuel Product Library</h2>
-  <div class="note">Per-serving carbohydrate & calories for the foods above. Edit values to match your products; add your own.</div>
+  <div class="note">Per-serving sugar split, calories &amp; sodium for the foods above — <span class="est">editable estimates</span> from public labels. Carb total &amp; the glucose:fructose ratio (G:F — maltodextrin counts as glucose, sucrose splits 50/50) are computed from the split. Sodium feeds the Hydration tab's Net Na⁺ balance.</div>
   <div class="scroll" style="margin-top:8px"><table class="tc">
-    <thead><tr><th style="text-align:left">Product</th><th>Carb (g)</th><th>kcal</th><th></th></tr></thead>
-    <tbody>${FUEL_PRODUCTS.map(p=>`<tr>
-      <td style="text-align:left"><input type="text" value="${(p.name||'').replace(/"/g,'&quot;')}" style="width:170px" onchange="window._setFuel('${p.id}','name',this.value)"></td>
-      <td><input type="number" step="1" value="${p.carbG}" style="width:60px" onchange="window._setFuel('${p.id}','carbG',this.value)"></td>
-      <td><input type="number" step="5" value="${p.kcal}" style="width:64px" onchange="window._setFuel('${p.id}','kcal',this.value)"></td>
-      <td><button class="sm ghost" onclick="window._rmFuel('${p.id}')" title="remove">×</button></td></tr>`).join('')}
+    <thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Unit</th>
+      <th>Glu</th><th>Fru</th><th>Suc</th><th>Malto</th><th>DE</th><th>Carb (g)</th><th>G:F</th><th>kcal</th><th>Na (mg)</th><th></th></tr></thead>
+    <tbody>${FUEL_PRODUCTS.map(p=>{const esc=s=>(''+(s||'')).replace(/"/g,'&quot;');const s=p.split||{};return `<tr>
+      <td style="text-align:left"><input type="text" value="${esc(p.brand)}" style="width:140px" onchange="window._setFuel('${p.id}','brand',this.value)"></td>
+      <td style="text-align:left"><input type="text" value="${esc(p.product)}" style="width:130px" onchange="window._setFuel('${p.id}','product',this.value)"></td>
+      <td><input type="text" value="${esc(p.unit)}" style="width:64px" onchange="window._setFuel('${p.id}','unit',this.value)"></td>
+      <td><input type="number" step="0.5" value="${s.glucose||0}" style="width:48px" onchange="window._setFuel('${p.id}','glucose',this.value)"></td>
+      <td><input type="number" step="0.5" value="${s.fructose||0}" style="width:48px" onchange="window._setFuel('${p.id}','fructose',this.value)"></td>
+      <td><input type="number" step="0.5" value="${s.sucrose||0}" style="width:48px" onchange="window._setFuel('${p.id}','sucrose',this.value)"></td>
+      <td><input type="number" step="0.5" value="${s.malto||0}" style="width:48px" onchange="window._setFuel('${p.id}','malto',this.value)"></td>
+      <td><input type="number" step="1" value="${p.de}" style="width:44px" onchange="window._setFuel('${p.id}','de',this.value)"></td>
+      <td style="font-weight:700">${fmt(fuelCarbG(p),0)}</td>
+      <td style="color:var(--accent2)">${fuelGF(p)}</td>
+      <td><input type="number" step="5" value="${p.kcal}" style="width:58px" onchange="window._setFuel('${p.id}','kcal',this.value)"></td>
+      <td><input type="number" step="5" value="${p.sodium}" style="width:58px" onchange="window._setFuel('${p.id}','sodium',this.value)"></td>
+      <td><button class="sm ghost" onclick="window._rmFuel('${p.id}')" title="remove">×</button></td></tr>`;}).join('')}
     </tbody></table></div>
   <div class="row-actions"><button class="ghost sm" onclick="window._addFuel()">＋ Add product</button></div></div>`;
 }
@@ -1440,6 +1507,7 @@ window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'
 /* --- athlete: activity (cycling vs running) --- */
 window._setActivity=(a)=>{ if(S.activity===a) return; S.activity=a; clampIntensityIdx(); render(); };
 window._setCarbLoaded=(on)=>{ if(S.carbLoaded===on) return; S.carbLoaded=on; render(); };
+window._setHighCarb=(on)=>{ if(S.highCarbAdapted===on) return; S.highCarbAdapted=on; render(); };
 /* --- running: pre-set pace rows --- */
 window._setPace=(i,v)=>{ S.runPaces[i]=parsePace(v); render(); };
 window._addPace=()=>{ const last=S.runPaces[S.runPaces.length-1]; S.runPaces.push(Math.max(120,(+last||435)-15)); render(); };
@@ -1467,21 +1535,26 @@ window._addPlanItem=(hour)=>{ S.planItems.push({id:_xid('pi'),hour,prodId:FUEL_P
 window._setPlanItem=(id,field,val)=>{ const it=S.planItems.find(x=>x.id===id); if(!it) return;
   it[field]= field==='qty'?(+val||0):val; render(); };
 window._rmPlanItem=(id)=>{ S.planItems=S.planItems.filter(x=>x.id!==id); render(); };
+window._setPlanBottles=(hour,val)=>{ if(!S.planBottles) S.planBottles={};
+  if(val===''||val==null) delete S.planBottles[hour]; else S.planBottles[hour]=Math.max(0,+val||0); render(); };
 // fill the hour's gap with whole servings of the first library item (a gel by default)
 window._autoFill=(hour)=>{
   const ev=eventTotals(), dur=Math.min(1,(+S.eventHours||0)-(hour-1));
-  const need=ev.targetRateG*dur, gap=need-drinkCarbGperHr()*dur-foodCarbFor(hour);
+  const need=ev.targetRateG*dur, gap=need-drinkCarbFor(hour,dur)-foodCarbFor(hour);
   if(gap<=0) return;
-  const p=FUEL_PRODUCTS[0]; if(!p||!p.carbG) return;
-  const qty=Math.ceil(gap/p.carbG);
+  const p=FUEL_PRODUCTS[0]; if(!p||!fuelCarbG(p)) return;
+  const qty=Math.ceil(gap/fuelCarbG(p));
   const existing=S.planItems.find(x=>x.hour===hour && x.prodId===p.id);
   if(existing) existing.qty=(+existing.qty||0)+qty;
   else S.planItems.push({id:_xid('pi'),hour,prodId:p.id,qty});
   render();
 };
 window._setFuel=(id,field,val)=>{ const p=fuelById(id); if(!p) return;
-  p[field]= field==='name'?val:(+val||0); render(); };
-window._addFuel=()=>{ FUEL_PRODUCTS.push({id:_xid('f'),name:'New product',kcal:100,carbG:25}); render(); };
+  if(['brand','product','unit'].includes(field)) p[field]=val;
+  else if(['glucose','fructose','sucrose','malto'].includes(field)){ p.split=p.split||{}; p.split[field]=+val||0; }
+  else p[field]=+val||0;
+  render(); };
+window._addFuel=()=>{ FUEL_PRODUCTS.push({id:_xid('f'),brand:'',product:'New product',unit:'Each',kcal:100,sodium:0,split:{glucose:0,fructose:0,sucrose:0,malto:25},de:15}); render(); };
 window._rmFuel=(id)=>{ FUEL_PRODUCTS=FUEL_PRODUCTS.filter(p=>p.id!==id);
   S.planItems=S.planItems.filter(it=>it.prodId!==id); render(); };
 window._resetAthlete=()=>{ if(confirm('Reset all saved inputs to defaults? This clears your saved athlete profile in this browser.')) resetAthlete(); };
