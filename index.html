@@ -217,6 +217,7 @@ const S = {
   extraLytes:[],                               // custom add-on salts  {id,name,grams,mw,particles,naFrac}
   // --- caloric / power model (ported from the Cycling Nutrition Calculator) ---
   gender:'male',                               // 'male' | 'female'  (glycogen store estimate)
+  carbLoaded:false,                            // muscle-glycogen concentration: false=trained-rested, true=carb-loaded
   ftp:250,                                     // functional threshold power (watts)
   eventHours:2,                                // planned event duration — drives caloric + plan
   intensityMode:'zone',                        // 'zone' (%FTP zones) | 'workload' (custom wattage rows)
@@ -306,15 +307,26 @@ const ZONES = [
   { label:'VO₂max',    pct:120, cls:'z5' },
 ];
 function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
-// glycogen stores (kcal): 450 (liver) + skeletal-muscle mass × 6 × 4.18.
-// The ×6 is the effective g/kg that already folds in the cycling-active-muscle fraction (don't add a
-// separate one). Body comp = TRAINED CYCLIST (was gen-pop .8/.55 M, .7/.6 F):
-//   male   lean .88 (~12% fat) · skeletal-muscle .55 of FFM
-//   female lean .82 (~18% fat) · skeletal-muscle .50 of FFM (fixes the old .60 > male .55 inversion)
+// glycogen stores (kcal) = 450 (liver) + active-muscle glycogen.
+// active-muscle glycogen = skeletal-muscle mass × active fraction × concentration × 4.18 kcal/g
+//   muscle mass = body kg × LEAN (FFM frac) × MUSC (skeletal muscle / FFM)
+//   ACTIVE      = cycling-engaged fraction of total skeletal muscle (legs/glutes; rest barely deplete)
+//   CONC        = g glycogen / kg active muscle: ~24 trained-rested, ~36 carb-loaded (~220 mmol/kg ww)
+// Trained-cyclist defaults (MRI-honest):
+//   male   lean .88 (~12% fat) · musc .53 · active .27
+//   female lean .82 (~18% fat) · musc .48 · active .30  (gynoid distribution → slightly more leg muscle)
+const GLY = {
+  male:  { lean:0.88, musc:0.53, active:0.27 },
+  female:{ lean:0.82, musc:0.48, active:0.30 },
+};
 function glycogenKcal(){
-  const kg=S.bodyLbs/2.2, lean=S.gender==='male'?0.88:0.82, musc=S.gender==='male'?0.55:0.50;
-  return 450 + (kg*lean)*musc*6*4.18;
+  const kg=S.bodyLbs/2.2, g=GLY[S.gender]||GLY.male;
+  const conc = S.carbLoaded ? 36 : 24;          // g glycogen / kg active muscle
+  const activeMuscleKg = kg*g.lean*g.musc*g.active;
+  return 450 + activeMuscleKg*conc*4.18;
 }
+// active (cycling-engaged) muscle mass in kg — exposed for display
+function activeMuscleKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*g.musc*g.active; }
 function calcVO2(watts){ const kg=S.bodyLbs/2.2; return ((1.8*watts*6/kg)+7)*kg/1000; }   // L/min
 function calcRQ(watts){
   if(watts>=S.ftp) return 1.0;
@@ -843,10 +855,18 @@ function viewCaloric(){
 
   <!-- 1) Predicted glycogen + time to bonk -->
   <div class="panel">
-    <h2>Predicted Glycogen & Time to Bonk</h2>
-    <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0">Predicted Glycogen & Time to Bonk</h2>
+      <div class="modeseg" style="margin-left:auto">
+        <span class="muted" style="font-size:11px;margin-right:2px">Muscle state</span>
+        <button class="sm ${S.carbLoaded?'ghost':''}" onclick="window._setCarbLoaded(false)">Rested</button>
+        <button class="sm ${S.carbLoaded?'':'ghost'}" onclick="window._setCarbLoaded(true)">Carb-loaded</button>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:24px;margin-top:6px">
       <div class="res" style="border:none"><span>Glycogen stored&nbsp;</span><span class="v">${fmt(glycogenKcal()/4,0)} g</span></div>
       <div class="res" style="border:none"><span>Energy stored&nbsp;</span><span class="v">${fmt(glycogenKcal(),0)} kcal</span></div>
+      <div class="res" style="border:none"><span>Active muscle&nbsp;</span><span class="v">${fmt(activeMuscleKg(),1)} kg @ ${S.carbLoaded?36:24} g/kg</span></div>
     </div>
     <div class="sub-h">Hours until bonk — no fuel</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">
@@ -1261,6 +1281,8 @@ window._setSweatNa=(mg)=>{S.sweatNa=mg;render();};
 window._useSweat=(i)=>{const c=swCalc(SWEATLOG[i]);S.manualSweat=+c.lHr.toFixed(3);S.sweatMethod='manual';active='rider';render();};
 window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'',oz:0,na:''});render();};
 
+/* --- caloric: glycogen muscle state (rested vs carb-loaded) --- */
+window._setCarbLoaded=(on)=>{ if(S.carbLoaded===on) return; S.carbLoaded=on; render(); };
 /* --- caloric: intensity model (zone vs pre-set workload) --- */
 window._setIntMode=(m)=>{ if(S.intensityMode===m) return; S.intensityMode=m; clampIntensityIdx(); render(); };
 window._setWorkload=(i,v)=>{ S.workloads[i]=+v||0; render(); };
