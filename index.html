@@ -1286,7 +1286,10 @@ function viewLibrary(){
     const ed=canEditRow(p), pending=p._status==='pending', dis=ed?'':'disabled';
     const txt=(f,v,w)=> ed ? `<input type="text" value="${esc(v)}" data-id="${p._id}" data-f="${f}" style="width:${w}px">`
                            : `${esc(v)}${(f==='product'&&p.conf==='est')?' <span class="est" title="estimated split">~</span>':''}`;
-    const num=(f,v,w=50,step=0.5,sub='')=>`<input type="number" step="${step}" value="${v}" ${dis} data-id="${p._id}" data-f="${f}"${sub?` data-sub="${sub}"`:''} style="width:${w}px">`;
+    // editable input in Admin/pending; plain readable text otherwise (disabled inputs render too dim)
+    const num=(f,v,w=50,step=0.5,sub='')=> ed
+      ? `<input type="number" step="${step}" value="${v}" data-id="${p._id}" data-f="${f}"${sub?` data-sub="${sub}"`:''} style="width:${w}px">`
+      : `<span style="font-variant-numeric:tabular-nums">${v}</span>`;
     let act;
     if(pending) act = ADMIN
         ? `<button class="sm" onclick="window._approve('${p._id}')">✓</button> <button class="sm ghost" onclick="window._reject('${p._id}')">✗</button>`
