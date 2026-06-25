@@ -507,7 +507,7 @@ function eventTotals(){
 }
 
 /* ============================================================
-   FUEL PRODUCT LIBRARY  (for the Activity Plan — gels/bars/chews/etc.)
+   FUEL PRODUCT LIBRARY  (for the Fueling Plan — gels/bars/chews/etc.)
    Each item: per-serving kcal + carbohydrate grams.  Editable + extendable.
    ============================================================ */
 // brand, product, unit, kcal, sodium(mg), {glucose,fructose,sucrose,malto} g, malto DE.
@@ -693,7 +693,7 @@ function headWithAdd(label, onclick){
     <span>${label}</span><button class="sm ghost" style="padding:1px 7px" onclick="${onclick}">＋ Add Extra</button></div>`;
 }
 
-/* shared athlete-inputs summary bar (shown atop Caloric + Hydration) */
+/* shared athlete-inputs summary bar (shown atop Caloric Needs + In the Bottle) */
 function athleteSummary(){
   const sr=sweatRateLhr();
   const it=(l,v)=>`<div style="display:flex;flex-direction:column;line-height:1.15">
@@ -717,7 +717,7 @@ function athleteSummary(){
     </div></div>`;
 }
 
-/* Sweat & Sodium inputs — lives on the Hydration tab */
+/* Sweat & Sodium inputs — sweat rate lives on the In the Bottle tab */
 function sweatSodiumPanel(){
   const sr = sweatRateLhr();
   return `<div class="panel" style="margin-top:16px">
@@ -810,8 +810,8 @@ function viewRider(){
           <button class="sm ${S.gutAdapt==='adapted'?'':'ghost'}" onclick="window._setGutAdapt('adapted')">Adapted (120)</button>
           <button class="sm ${S.gutAdapt==='highcarb'?'':'ghost'}" onclick="window._setGutAdapt('highcarb')">High-carb (150)</button>
         </div>
-        <div class="note">Your trained carbohydrate-absorption ceiling — caps the fuel targets on the Caloric &amp; Activity Plan tabs.</div>
-        <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>activity duration${run?' / grade':''}</b> in <b>Activity Information</b> below, and your <b>sweat rate</b> on the <b>Hydration</b> tab.</div>
+        <div class="note">Your trained carbohydrate-absorption ceiling — caps the fuel targets on the Caloric Needs &amp; Fueling Plan tabs.</div>
+        <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>activity duration${run?' / grade':''}</b> in <b>Activity Information</b> below, and your <b>sweat rate</b> on the <b>In the Bottle</b> tab.</div>
         <div class="row-actions" style="margin-top:8px;align-items:center">
           <span class="muted" style="font-size:11px">✓ Inputs are saved in this browser and restored next visit.</span>
           <button class="sm ghost" onclick="window._resetAthlete()" style="margin-left:auto">Reset to defaults</button>
@@ -878,13 +878,13 @@ function viewHydration(){
   const sr = sweatRateLhr(), ev=eventTotals();
   return `${athleteSummary()}
   <div class="panel" style="margin-bottom:16px;border-color:var(--accent2)">
-    <h2 style="color:var(--accent2)">Calorie target from Caloric tab</h2>
+    <h2 style="color:var(--accent2)">Calorie target from Caloric Needs tab</h2>
     <div class="grid cols3">
       <div class="res"><span>Carb fuel target</span><span class="v">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
       <div class="res"><span>Activity total burn</span><span class="v">${fmt(ev.kcal,0)} kcal</span></div>
       <div class="res"><span>This drink supplies</span><span class="v">${fmt((effComp().glucose+effComp().sucrose+effComp().malto+effComp().fructose+extrasCarbG())*S.bottlesPerHour,0)} g/hr carb</span></div>
     </div>
-    <div class="note">Output only — shown so you can match the bottle's carbs toward your hourly fuel need. The full breakdown lives on the <b>Activity Plan</b> tab.${ev.overGut?` <b style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut limit — spread carbs across drink + food.</b>`:''}</div>
+    <div class="note">Output only — shown so you can match the bottle's carbs toward your hourly fuel need. The full breakdown lives on the <b>Fueling Plan</b> tab.${ev.overGut?` <b style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut limit — spread carbs across drink + food.</b>`:''}</div>
   </div>
   <div class="grid cols2">
     <div>
@@ -931,7 +931,7 @@ function viewHydration(){
         ${S.extraLytes.map(x=>extraRow(x,'l')).join('')}
         <div class="res" style="margin-top:6px"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
         ${avgFoodNaPerHr()>0?`<div class="res"><span>Food sodium / hour <span class="muted">(avg from plan)</span></span><span class="v">${fmt(avgFoodNaPerHr(),0)} mg</span></div>`:''}
-        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}" title="Drink Na + average food Na from the Activity Plan − sweat Na loss, per hour.">${fmt(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr,0)} mg</span></div>
+        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}" title="Drink Na + average food Na from the Fueling Plan − sweat Na loss, per hour.">${fmt(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr,0)} mg</span></div>
         <div class="res"><span>Drink carb / hour</span><span class="v">${fmt(drinkCarbGperHr(),0)} g</span></div>
         <div class="res"><span>Net carb balance / hour <span class="muted">(vs burn)</span></span><span class="v" style="color:${(drinkCarbGperHr()-ev.choGhr)>=0?'var(--good)':'var(--bad)'}" title="Drink carbs/hr − carbohydrate oxidized/hr at event intensity. Negative = net glycogen drawdown.">${fmt(drinkCarbGperHr()-ev.choGhr,0)} g</span></div>
       </div>
@@ -1259,7 +1259,7 @@ function viewEventPlan(){
     <h2 style="margin:0">Activity Fuel Plan</h2>
     <button class="sm" style="margin-left:auto" onclick="window._printFuelCard()" title="Print a small cut-out fuel card">🖨 Print fuel card</button>
   </div>
-  <div class="note">Target carbohydrate (from the <b>Caloric</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap.</div>
+  <div class="note">Target carbohydrate (from the <b>Caloric Needs</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap.</div>
   <div class="grid cols3" style="margin:10px 0">
     <div class="stat-pill"><div class="sp-v">${fmt(totTarget,0)} g</div><div class="sp-l">Carb needed (event)</div></div>
     <div class="stat-pill"><div class="sp-v">${fmt(totDrink,0)} g</div><div class="sp-l">From drink (${fmt(totBottles,1)} bottles)</div></div>
@@ -1446,9 +1446,9 @@ function viewSweatLog(){
    ============================================================ */
 const TABS = [
   ['rider','Athlete & Activity',viewRider],
-  ['cal','Caloric',viewCaloric],
-  ['hydr','Hydration',viewHydration],
-  ['plan','Activity Plan',viewEventPlan],
+  ['cal','Caloric Needs',viewCaloric],
+  ['hydr','In the Bottle',viewHydration],
+  ['plan','Fueling Plan',viewEventPlan],
   ['db','Fuel Library',viewLibrary],
   ['sweat','Sweat Log',viewSweatLog],
 ];
