@@ -249,7 +249,7 @@ const S = {
   segBreakdown:false,                          // show per-30-min-segment intensity editor
   segZones:[],                                 // chosen intensity index per 30-min segment
   reservePct:25,                               // % glycogen to keep in reserve at event end
-  highCarbAdapted:false,                        // gut-trained for high carb intake → cap rises 120→150 g/hr
+  gutAdapt:'adapted',                           // gut training level → carb cap: unadapted 90 · adapted 120 · highcarb 150 g/hr
   // --- event fuel plan ---
   planItems:[],                                // per-hour product picks: [{hour, prodId, qty}]
   planBottles:{}                               // per-hour bottle override {hour: bottles}; unset = bottles/hr × dur
@@ -361,8 +361,9 @@ function productOsm(p){
    Calculator — ACSM ergometry VO₂, Weir caloric equivalent,
    substrate-oxidation RQ model). Reads the shared rider profile in S.
    ============================================================ */
-const GUT_MAX_CHO = 120;          // g/hr — practical upper carbohydrate-absorption limit
-function carbCap(){ return S.highCarbAdapted ? 150 : GUT_MAX_CHO; } // gut-absorption ceiling, raised if adapted
+const GUT_LEVELS = { unadapted:90, adapted:120, highcarb:150 };   // g/hr carb-absorption ceiling by gut-training level
+function carbCap(){ return GUT_LEVELS[S.gutAdapt] || 120; }        // gut-absorption ceiling for the selected level
+function gutAdaptLabel(){ return {unadapted:'unadapted',adapted:'adapted',highcarb:'high-carb-adapted'}[S.gutAdapt] || ''; }
 function isRun(){ return S.activity==='running'; }
 // zone sets per activity
 const ZONES_CYC = [
@@ -601,6 +602,8 @@ function loadAthlete(){
       const s=raw.S;
       if(s.comp) Object.assign(S.comp, s.comp);  // keep all comp keys
       delete s.comp;
+      if(s.gutAdapt===undefined && s.highCarbAdapted!==undefined) s.gutAdapt = s.highCarbAdapted ? 'highcarb' : 'adapted'; // migrate old boolean
+      delete s.highCarbAdapted;
       Object.assign(S, s);
     }
     // keep a saved fuel list only if it's the new brand/split schema; legacy generic lists
@@ -740,16 +743,8 @@ function sweatSodiumPanel(){
         ${S.sweatMethod==='manual'?numField('Sweat rate','manualSweat','L/hr',0.01):''}
         <div class="res"><span class="muted">Sweat rate used</span><span class="v">${fmt(sr,2)} L/hr</span></div>
         <div class="note">Want a precise number? Use the detailed <a href="https://www.sweatratecalculator.com" target="_blank" rel="noopener" style="color:var(--accent)">sweatratecalculator.com</a>, then enter the result above.</div>
-        <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg</span></div>
-        <div class="sub-h">Sweat sodium</div>
-        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Concentration</label>
-          <select id="sweatNaSel" style="flex:1;min-width:0">
-            ${SWEAT_NA_REF.map(([mM,mg,desc])=>`<option value="${mg}"${S.sweatNaMode!=='manual'&&S.sweatNa==mg?' selected':''}>${desc} — ${mg} mg/L · ${mM} mM</option>`).join('')}
-            <option value="manual"${S.sweatNaMode==='manual'?' selected':''}>Manual entry…</option>
-          </select></div>
-        ${S.sweatNaMode==='manual'?`<div class="field"><label class="muted">↳ manual value</label>
-          <input type="number" step="10" value="${S.sweatNa}" data-k="sweatNa" data-obj="S"><span class="u">mg/L</span></div>`:''}
-        <div class="note">With heat acclimatization, sweat [Na⁺] concentration <b>drops</b> — you lose less sodium per liter of sweat (sweat gets less salty).</div>
+        <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg <span class="muted">@ ${fmt(S.sweatNa,0)} mg/L</span></span></div>
+        <div class="note">Set <b>sweat sodium concentration</b> on the <b>Athlete</b> tab. With heat acclimatization sweat [Na⁺] <b>drops</b> — you lose less sodium per liter.</div>
         <div class="sub-h">Targets</div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Accept. loss</label>
           <select id="acceptLossSel" style="flex:1;min-width:0">
@@ -801,7 +796,22 @@ function viewRider(){
             <option value="female"${S.gender==='female'?' selected':''}>Female</option>
           </select><span class="u">&nbsp;</span></div>
         ${anchor}
-        <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>activity duration${run?' / grade':''}</b> in <b>Activity Information</b> below, and your <b>sweat / sodium</b> numbers on the <b>Hydration</b> tab.</div>
+        <div class="sub-h">Sweat sodium</div>
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Concentration</label>
+          <select id="sweatNaSel" style="flex:1;min-width:0">
+            ${SWEAT_NA_REF.map(([mM,mg,desc])=>`<option value="${mg}"${S.sweatNaMode!=='manual'&&S.sweatNa==mg?' selected':''}>${desc} — ${mg} mg/L · ${mM} mM</option>`).join('')}
+            <option value="manual"${S.sweatNaMode==='manual'?' selected':''}>Manual entry…</option>
+          </select></div>
+        ${S.sweatNaMode==='manual'?`<div class="field"><label class="muted">↳ manual value</label>
+          <input type="number" step="10" value="${S.sweatNa}" data-k="sweatNa" data-obj="S"><span class="u">mg/L</span></div>`:''}
+        <div class="sub-h">Gut adaptation <span class="muted" style="text-transform:none">(carb ceiling)</span></div>
+        <div class="modeseg">
+          <button class="sm ${S.gutAdapt==='unadapted'?'':'ghost'}" onclick="window._setGutAdapt('unadapted')">Unadapted (90)</button>
+          <button class="sm ${S.gutAdapt==='adapted'?'':'ghost'}" onclick="window._setGutAdapt('adapted')">Adapted (120)</button>
+          <button class="sm ${S.gutAdapt==='highcarb'?'':'ghost'}" onclick="window._setGutAdapt('highcarb')">High-carb (150)</button>
+        </div>
+        <div class="note">Your trained carbohydrate-absorption ceiling — caps the fuel targets on the Caloric &amp; Activity Plan tabs.</div>
+        <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>activity duration${run?' / grade':''}</b> in <b>Activity Information</b> below, and your <b>sweat rate</b> on the <b>Hydration</b> tab.</div>
         <div class="row-actions" style="margin-top:8px;align-items:center">
           <span class="muted" style="font-size:11px">✓ Inputs are saved in this browser and restored next visit.</span>
           <button class="sm ghost" onclick="window._resetAthlete()" style="margin-left:auto">Reset to defaults</button>
@@ -857,7 +867,7 @@ function viewRider(){
         <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
         <div class="res"><span>Carb fuel target <span class="muted">(keep ${S.reservePct}% reserve)</span></span>
           <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
-        ${ev.overGut?`<div class="note" style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut-absorption limit${S.highCarbAdapted?' (high-carb-adapted)':''} — you'll dip into reserves; spread carbs across drink + food and train your gut.</div>`:''}
+        ${ev.overGut?`<div class="note" style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut-absorption limit (${gutAdaptLabel()}) — you'll dip into reserves; spread carbs across drink + food and train your gut.</div>`:''}
       </div>
     </div>
   </div>`;
@@ -1175,13 +1185,9 @@ function viewCaloric(){
     return `<div class="panel" style="margin-top:16px">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <h2 style="margin:0">Zone × Time — carbs to hold a ${S.reservePct}% reserve</h2>
-        <div class="modeseg" style="margin-left:auto">
-          <span class="muted" style="font-size:11px;margin-right:2px">Gut adaptation</span>
-          <button class="sm ${S.highCarbAdapted?'ghost':''}" onclick="window._setHighCarb(false)">Standard (120)</button>
-          <button class="sm ${S.highCarbAdapted?'':'ghost'}" onclick="window._setHighCarb(true)">High-carb (150)</button>
-        </div>
+        <span class="muted" style="font-size:11px;margin-left:auto">Gut ceiling <b style="color:var(--accent)">${cap} g/hr</b> (${gutAdaptLabel()}) — set on Athlete tab</span>
       </div>
-      <div class="note" style="margin-top:4px">Recommended carbohydrate intake (<b>g/hr</b>) by ${wl?(run?'pace':'workload'):'zone'} and total ${run?'run':'ride'} duration, so predicted glycogen never falls below your ${S.reservePct}% reserve. Capped at your gut ceiling of <b>${cap} g/hr</b>${S.highCarbAdapted?' (high-carb-adapted)':''}; an <span style="color:var(--bad);font-weight:700">✕</span> means the requirement exceeds it. Glycogen store ${fmt(glycogenKcal()/4,0)} g · usable ${fmt(usableGly/4,0)} g.</div>
+      <div class="note" style="margin-top:4px">Recommended carbohydrate intake (<b>g/hr</b>) by ${wl?(run?'pace':'workload'):'zone'} and total ${run?'run':'ride'} duration, so predicted glycogen never falls below your ${S.reservePct}% reserve. Capped at your gut ceiling of <b>${cap} g/hr</b> (${gutAdaptLabel()}); an <span style="color:var(--bad);font-weight:700">✕</span> means the requirement exceeds it. Glycogen store ${fmt(glycogenKcal()/4,0)} g · usable ${fmt(usableGly/4,0)} g.</div>
       <div class="scroll" style="margin-top:8px"><table class="tc zxt">
         <thead><tr><th style="text-align:left">${wl?(run?'Pace':'Workload'):'Zone'}</th><th>CHO burn (g/hr)</th>
           ${DURS.map(d=>`<th>${d} hr</th>`).join('')}</tr></thead>
@@ -1195,7 +1201,7 @@ function viewCaloric(){
         <span class="st-y" style="padding:1px 6px;border-radius:4px">60–90</span> 2:1 glucose:fructose ·
         <span class="st-o" style="padding:1px 6px;border-radius:4px">90–${cap}</span> 1:1 glucose:fructose ·
         <span class="st-r" style="padding:1px 6px;border-radius:4px">✕</span> above ${cap} g/hr — exceeds your gut ceiling, not sustainable.
-        “—” = stored glycogen alone covers it. Toggle <b>High-carb</b> if you've trained your gut to absorb up to 150 g/hr.
+        “—” = stored glycogen alone covers it. Set your <b>Gut adaptation</b> level on the Athlete tab (unadapted 90 · adapted 120 · high-carb 150 g/hr).
       </div>
     </div>`;
   })()}`;
@@ -1226,6 +1232,17 @@ function foodKcalFor(h){ return planItemsFor(h).reduce((s,it)=>{const p=planProd
 function foodNaFor(h){ return planItemsFor(h).reduce((s,it)=>{const p=planProd(it.prodId);return s+(p?p.sodium*(+it.qty||0):0);},0); }
 function eventFoodNaTotal(){ return planHours().reduce((s,r)=>s+foodNaFor(r.h),0); }
 function avgFoodNaPerHr(){ return eventFoodNaTotal()/Math.max(0.001,+S.eventHours||0); } // mg/hr averaged over the event
+// name shown for the drink bottle: the loaded product, else a generic label
+function bottleName(){ return S.loadedProduct || 'bottle'; }
+const qtyStr = n => { const r=Math.round((+n||0)*100)/100; return Number.isInteger(r)?String(r):String(r); };
+// consolidated "X of Product" list for one hour: bottle first, then each food/electrolyte
+function planSummaryFor(h,dur){
+  const out=[];
+  const btl=planBottlesFor(h,dur);
+  if(btl>0) out.push({qty:btl, label:bottleName()});
+  planItemsFor(h).forEach(it=>{ const p=planProd(it.prodId), q=+it.qty||0; if(p&&q>0) out.push({qty:q, label:p.label}); });
+  return out;
+}
 function viewEventPlan(){
   const ev=eventTotals(), rows=planHours();
   const fuelOpts=(sel)=>{
@@ -1237,7 +1254,11 @@ function viewEventPlan(){
   // event roll-ups
   let totTarget=0, totDrink=0, totFood=0, totBottles=0;
   rows.forEach(r=>{ totTarget+=ev.targetRateG*r.dur; totDrink+=drinkCarbFor(r.h,r.dur); totFood+=foodCarbFor(r.h); totBottles+=planBottlesFor(r.h,r.dur); });
-  return `<div class="panel"><h2>Activity Fuel Plan</h2>
+  return `<div class="panel">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0">Activity Fuel Plan</h2>
+    <button class="sm" style="margin-left:auto" onclick="window._printFuelCard()" title="Print a small cut-out fuel card">🖨 Print fuel card</button>
+  </div>
   <div class="note">Target carbohydrate (from the <b>Caloric</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap.</div>
   <div class="grid cols3" style="margin:10px 0">
     <div class="stat-pill"><div class="sp-v">${fmt(totTarget,0)} g</div><div class="sp-l">Carb needed (event)</div></div>
@@ -1245,7 +1266,7 @@ function viewEventPlan(){
     <div class="stat-pill"><div class="sp-v" style="color:${(totTarget-totDrink-totFood)<=1?'var(--good)':'var(--warn)'}">${fmt(Math.max(0,totTarget-totDrink-totFood),0)} g</div><div class="sp-l">Still to cover with food</div></div>
   </div>
   <div class="scroll" style="margin-top:6px"><table class="tc">
-    <thead><tr><th>Hr</th><th>Need (g)</th><th>Drink (g)</th><th>Food (g)</th><th>Gap (g)</th><th>Na in (mg)</th><th>Bottles &amp; food for this hour</th></tr></thead>
+    <thead><tr><th>Hr</th><th>CHO Need</th><th>from Drink</th><th>from Food</th><th>Gap (g)</th><th>Na in (mg)</th><th>Bottles &amp; food for this hour</th></tr></thead>
     <tbody>${rows.map(r=>{
       const need=ev.targetRateG*r.dur, dr=drinkCarbFor(r.h,r.dur), food=foodCarbFor(r.h), gap=need-dr-food;
       const gcls = gap<=1?'cho-positive':gap<=15?'cho-warning':'cho-negative';
@@ -1260,7 +1281,7 @@ function viewEventPlan(){
           <div class="field" style="gap:6px;margin:2px 0">
             <span class="u" style="width:auto;min-width:64px;text-align:left">🍶 Drink</span>
             <input type="number" step="0.25" min="0" value="${btl}" style="width:54px" onchange="window._setPlanBottles(${r.h},this.value)" title="bottles this hour">
-            <span class="u" style="width:auto">bottle${btl===1?'':'s'} <span class="muted">(${fmt(dr,0)}g)</span></span>
+            <span class="u" style="width:auto">× ${bottleName()} <span class="muted">(${fmt(dr,0)}g)</span></span>
           </div>
           ${items.map(it=>`<div class="field" style="gap:6px;margin:2px 0">
             <select style="flex:1;min-width:0" onchange="window._setPlanItem('${it.id}','prodId',this.value)">${fuelOpts(it.prodId)}</select>
@@ -1272,6 +1293,7 @@ function viewEventPlan(){
             <button class="sm ghost" onclick="window._addPlanItem(${r.h})">＋ Add fuel</button>
             ${gap>1?`<button class="sm" onclick="window._autoFill(${r.h})" title="add gels to close the gap">Auto-fill ${fmt(gap,0)}g</button>`:''}
           </div>
+          ${(()=>{const sum=planSummaryFor(r.h,r.dur);return sum.length?`<div class="muted" style="font-size:11px;margin-top:4px">→ ${sum.map(s=>`${qtyStr(s.qty)} of ${s.label}`).join(' + ')}</div>`:'';})()}
         </td></tr>`;}).join('')}
     </tbody></table></div>
   </div>
@@ -1391,55 +1413,9 @@ function viewLibrary(){
   </div>`;
 }
 
-/* ---------- TAB: DRINK SOLVER (port of "Solve drink contents") ---------- */
-const SOLVE = { bodyLbs:130, lossLbs:1, time:0.4, bottlesPerHour:1, bottleOz:30,
-  acceptLoss:4, suppNaPerBottle:0, drinkNaPerOz:0, sweatNa:244 };
-function viewSolver(){
-  const C3=SOLVE.bodyLbs, C4=C3/2.2, C7=C4*0.25;
-  const sweat=(SOLVE.lossLbs/2.2/SOLVE.time);           // L/hr from weight loss
-  const K8=140*C7, K9=K8*23/1000;                       // body Na mmol / g
-  const K6=SOLVE.sweatNa/23;                            // sweat mM
-  const rows=[];
-  for(let h=1;h<=20;h++){
-    const B=h*sweat, C=h*SOLVE.bottlesPerHour, F=C*SOLVE.bottleOz, E=F/33.814, D=E*2.2;
-    const G=(B-E)*2.2, H=1-(C3-G)/C3, I=C7-B+E;
-    const J=((SOLVE.sweatNa*B)-((F*SOLVE.drinkNaPerOz)+SOLVE.suppNaPerBottle))/1000;
-    const K=K9-J, L=K/23*1000, M=L/I;
-    rows.push({h,B,C,Foz:F,lossLbs:G,lossPct:H*100,ecf:I,naLostG:J,bodyNaG:K,mM:M});
-  }
-  return `<div class="grid cols2">
-    <div class="panel"><h2>Drink Solver — inputs</h2>
-      ${numField('Body weight','bodyLbs','lbs',1,SOLVE)}
-      ${numField('Weight loss','lossLbs','lbs',0.1,SOLVE)}
-      ${numField('Time','time','hr',0.1,SOLVE)}
-      ${numField('Bottles per hour','bottlesPerHour','',0.25,SOLVE)}
-      ${numField('Bottle size','bottleOz','oz',1,SOLVE)}
-      ${numField('Acceptable weight loss','acceptLoss','%',0.5,SOLVE)}
-      ${numField('Supplemental Na⁺ / bottle','suppNaPerBottle','mg',10,SOLVE)}
-      ${numField('Drink sodium','drinkNaPerOz','mg/oz',1,SOLVE)}
-      ${numField('Sweat Na⁺ concentration','sweatNa','mg/L',10,SOLVE)}
-      <div class="res"><span>Sweat rate (from loss)</span><span class="v">${fmt(sweat,2)} L/hr</span></div>
-      <div class="res"><span>Sweat Na⁺</span><span class="v">${fmt(K6,1)} mM</span></div>
-      <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(K8,0)} mmol · ${fmt(K9,1)} g</span></div>
-    </div>
-    <div class="panel"><h2>Projection</h2>
-      <div class="scroll"><table>
-        <thead><tr><th>Hr</th><th>Lost (L)</th><th>Repl oz</th><th>Loss %</th><th>New ECF</th><th>Body Na⁺ (g)</th><th>Na⁺ (mM)</th></tr></thead>
-        <tbody>${rows.map(x=>`<tr><td>${x.h}</td><td>${fmt(x.B,1)}</td><td>${fmt(x.Foz,0)}</td>
-          <td style="color:${x.lossPct>SOLVE.acceptLoss?'var(--bad)':'var(--good)'}">${fmt(x.lossPct,2)}%</td>
-          <td>${fmt(x.ecf,1)}</td><td>${fmt(x.bodyNaG,1)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td></tr>`).join('')}
-        </tbody></table></div>
-    </div></div>`;
-}
-
 /* ---------- TAB: SWEAT LOG ---------- */
 let SWEATLOG = [
-  {date:'2017-06-08',hrs:3,cond:'Sunny',temp:70,pre:162.2,post:161.4,oz:75,na:''},
-  {date:'2017-06-10',hrs:4.25,cond:'sunny',temp:100,pre:163.6,post:157,oz:120,na:''},
-  {date:'2017-07-02',hrs:3,cond:'Sunny',temp:90,pre:163,post:158,oz:90,na:''},
-  {date:'2021-04-03',hrs:4.75,cond:'sunny',temp:80,pre:172,post:162,oz:100,na:''},
-  {date:'2021-04-10',hrs:6.7,cond:'Sunny',temp:50,pre:170,post:164,oz:81,na:''},
-  {date:'2025-05-04',hrs:2,cond:'Sunny',temp:76,pre:168,post:164.3,oz:22.5,na:46},
+  {date:'',hrs:1,cond:'',temp:'',pre:'',post:'',oz:0,na:''},
 ];
 function swCalc(r){
   const lossOz=(r.pre-r.post)*16 + (+r.oz||0);
@@ -1474,7 +1450,6 @@ const TABS = [
   ['hydr','Hydration',viewHydration],
   ['plan','Activity Plan',viewEventPlan],
   ['db','Fuel Library',viewLibrary],
-  ['solve','Drink Solver',viewSolver],
   ['sweat','Sweat Log',viewSweatLog],
 ];
 let active='rider';
@@ -1519,7 +1494,7 @@ function refreshOutputs(){
 }
 function bind(){
   document.querySelectorAll('[data-tab]').forEach(el=>el.onclick=()=>{active=el.dataset.tab;render();});
-  // generic numeric/text inputs bound to S or SOLVE — commit on blur (onchange) so the
+  // generic numeric/text inputs bound to S — commit on blur (onchange) so the
   // page doesn't re-render mid-keystroke (which would drop focus / transpose digits)
   document.querySelectorAll('input[data-k]').forEach(el=>{
     const obj = el.dataset.obj==='comp'?S.comp:S;
@@ -1539,12 +1514,6 @@ function bind(){
   // running threshold-pace twin inputs (mm:ss per mile ↔ per km)
   const tMi=$('#thrMi'); if(tMi) tMi.onchange=()=>{ S.runThreshold=parsePace(tMi.value); render(); };
   const tKm=$('#thrKm'); if(tKm) tKm.onchange=()=>{ S.runThreshold=Math.round(kmToMiPace(parsePace(tKm.value))); render(); };
-  // SOLVE fields (numField passed SOLVE as obj but data-obj stayed 'S'); fix via explicit map
-  document.querySelectorAll('#app input[data-k]').forEach(el=>{
-    if(SOLVE.hasOwnProperty(el.dataset.k) && active==='solve'){
-      el.onchange=()=>{SOLVE[el.dataset.k]=el.value===''?'':+el.value;render();};
-    }
-  });
   document.querySelectorAll('input[data-comp]').forEach(el=>{
     const commit=()=>{ S.comp[el.dataset.comp]=+el.value||0; S.loadedProduct=null; };
     el.onchange=()=>{ commit(); render(); };
@@ -1646,7 +1615,7 @@ window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'
 /* --- athlete: activity (cycling vs running) --- */
 window._setActivity=(a)=>{ if(S.activity===a) return; S.activity=a; clampIntensityIdx(); render(); };
 window._setCarbLoaded=(on)=>{ if(S.carbLoaded===on) return; S.carbLoaded=on; render(); };
-window._setHighCarb=(on)=>{ if(S.highCarbAdapted===on) return; S.highCarbAdapted=on; render(); };
+window._setGutAdapt=(level)=>{ if(S.gutAdapt===level) return; S.gutAdapt=level; render(); };
 /* --- running: pre-set pace rows --- */
 window._setPace=(i,v)=>{ S.runPaces[i]=parsePace(v); render(); };
 window._addPace=()=>{ const last=S.runPaces[S.runPaces.length-1]; S.runPaces.push(Math.max(120,(+last||435)-15)); render(); };
@@ -1687,6 +1656,45 @@ window._autoFill=(hour)=>{
   if(existing) existing.qty=(+existing.qty||0)+qty;
   else S.planItems.push({id:_xid('pi'),hour,prodId:p.id,qty});
   render();
+};
+// Print a compact, cut-out fuel card: one line per hour with the products to take.
+window._printFuelCard=()=>{
+  const rows=planHours(), run=isRun();
+  const esc=s=>(''+(s==null?'':s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const body=rows.map(r=>{
+    const sum=planSummaryFor(r.h,r.dur);
+    const time = r.dur<1 ? `${hm(r.h-1)}–${hm(r.h-1+r.dur)}` : `${hm(r.h-1)}–${hm(r.h)}`;
+    const items = sum.length ? sum.map(s=>`${qtyStr(s.qty)} of ${esc(s.label)}`).join(' + ') : '—';
+    return `<tr><td class="hr">${r.h}<span class="t">${time}</span></td><td class="it">${items}</td></tr>`;
+  }).join('');
+  const title=`${fmt(S.eventHours,1)} hr ${run?'run':'ride'} — fuel card`;
+  const doc=`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#000;background:#fff;padding:10px}
+    .card{width:2.6in;border:1.5px solid #000;border-radius:6px;padding:8px 8px 6px}
+    .card h1{font-size:11px;font-weight:700;letter-spacing:.2px;margin-bottom:2px;text-transform:uppercase}
+    .card .sub{font-size:8.5px;color:#444;margin-bottom:6px}
+    table{width:100%;border-collapse:collapse}
+    td{vertical-align:top;padding:3px 0;border-top:.75px solid #bbb;font-size:10px;line-height:1.25}
+    tr:first-child td{border-top:none}
+    td.hr{width:42px;font-weight:700;white-space:nowrap}
+    td.hr .t{display:block;font-weight:400;font-size:7.5px;color:#555}
+    td.it{padding-left:6px}
+    .foot{margin-top:6px;font-size:7.5px;color:#666;text-align:center}
+    @media print{ body{padding:0} .card{border-color:#000} @page{margin:.4in} }
+  </style></head><body>
+  <div class="card">
+    <h1>Fuel Plan</h1>
+    <div class="sub">${esc(title)} · target ${fmt(eventTotals().targetRateG,0)} g/hr carb</div>
+    <table><tbody>${body}</tbody></table>
+    <div class="foot">✂ cut out &amp; tape on</div>
+  </div>
+  <script>window.onload=function(){setTimeout(function(){window.print();},120);};<\/script>
+  </body></html>`;
+  const w=window.open('','_blank','width=420,height=620');
+  if(!w){ alert('Pop-up blocked — allow pop-ups to print the fuel card.'); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
 };
 window._setFuel=(id,field,val)=>{ const p=fuelById(id); if(!p) return;
   if(['brand','product','unit'].includes(field)) p[field]=val;
