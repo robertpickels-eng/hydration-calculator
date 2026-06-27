@@ -14,40 +14,84 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>Hydration & Osmolality Calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+  /* ===========================================================
+     ExtraPickels restyle — brand token values mapped onto the
+     calculator's existing variable names so all inline references
+     (var(--accent), var(--good), …) pick up the brand automatically.
+     Light theme: crisp cool grey paper + one muted brine-green accent,
+     slate as the quiet supporting accent. Hairline borders, sharp radii.
+     =========================================================== */
   :root{
-    --bg:#0e1726; --panel:#16213a; --panel2:#1d2b4a; --line:#2a3a5e;
-    --txt:#e8eef7; --muted:#9bb0d0; --accent:#4ea1ff; --accent2:#33d6a6;
-    --warn:#ffb454; --bad:#ff6b6b; --good:#33d6a6;
-    --shadow:0 4px 18px rgba(0,0,0,.35);
+    /* surfaces */
+    --bg:#f1f2f3;        /* ink-25 — warm-cool paper */
+    --panel:#ffffff;     /* ink-0  — card surface */
+    --panel2:#e9ebed;    /* ink-50 — sunken: inputs, wells, hover */
+    --line:#d0d3d6;      /* ink-200 — hairline borders */
+    --txt:#181a1c;       /* ink-900 — strong text */
+    --muted:#66696e;     /* ink-500 — meta / labels */
+    /* accents */
+    --accent:#4d5d3d;    /* brine-600 — the single star */
+    --accent-700:#3e4b32;
+    --accent2:#49536d;   /* voltage-600 — quiet supporting (slate) */
+    /* semantic */
+    --warn:#9c7a2e;      /* darkened gold — legible as text on paper */
+    --bad:#a14b45;       /* brick — danger */
+    --good:#4d5d3d;      /* brine — success (== accent) */
+    --paper:#f1f2f3;     /* text on dark accents */
+    --shadow:0 1px 2px rgba(15,16,18,.05);
+    /* fonts */
+    --font-display:'Schibsted Grotesk',system-ui,sans-serif;
+    --font-body:'Hanken Grotesk',system-ui,-apple-system,sans-serif;
+    --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    color-scheme:light;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
-    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+    font:15px/1.55 var(--font-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+
+  /* ---- Header: ExtraPickels wordmark + mono eyebrow tool name ---- */
+  header{display:flex;align-items:center;gap:16px;padding:14px 24px;background:var(--panel);
+    border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20;flex-wrap:wrap}
+  .wordmark{font-family:var(--font-display);font-size:20px;letter-spacing:-.01em;color:var(--txt);
+    white-space:nowrap;line-height:1}
+  .wordmark .x{font-weight:400}
+  .wordmark .p{font-weight:700}
+  .hrule{width:1px;align-self:stretch;background:var(--line)}
+  .toolname{font-family:var(--font-mono);font-size:11px;font-weight:500;text-transform:uppercase;
+    letter-spacing:.16em;color:var(--accent);line-height:1.3}
+  header .sub{color:var(--muted);font-size:12px;font-family:var(--font-body)}
   h1{font-size:20px;margin:0}
-  h2{font-size:14px;margin:0 0 6px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
-  header{display:flex;align-items:center;gap:14px;padding:14px 20px;background:var(--panel);
-    border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
-  header .sub{color:var(--muted);font-size:12px}
-  .tabs{display:flex;gap:4px;flex-wrap:wrap;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--line);
+  h2{font-family:var(--font-mono);font-size:11px;font-weight:500;margin:0 0 8px;color:var(--accent);
+    text-transform:uppercase;letter-spacing:.16em}
+
+  .tabs{display:flex;gap:2px;flex-wrap:wrap;padding:0 20px;background:var(--panel);border-bottom:1px solid var(--line);
     position:sticky;top:53px;z-index:19}
-  .tab{padding:10px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;font-weight:600;font-size:13px}
-  .tab.active{color:var(--txt);border-bottom-color:var(--accent)}
-  .wrap{max-width:1180px;margin:0 auto;padding:18px}
-  footer.legal{max-width:1180px;margin:8px auto 28px;padding:14px 18px;border-top:1px solid var(--line);
-    color:var(--muted);font-size:11.5px;line-height:1.45;display:flex;flex-direction:column;gap:5px}
-  footer.legal strong{color:var(--txt)}
+  .tab{padding:11px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;
+    font-weight:500;font-size:13px;transition:color var(--dur,.18s) ease,border-color .18s ease}
+  .tab:hover{color:var(--txt)}
+  .tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px}
+  footer.legal{max-width:1180px;margin:8px auto 28px;padding:16px 24px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:11.5px;line-height:1.5;display:flex;flex-direction:column;gap:5px}
+  footer.legal strong{color:var(--txt);font-weight:600}
   .grid{display:grid;gap:16px}
   .cols2{grid-template-columns:1fr 1fr}
   .cols3{grid-template-columns:repeat(3,1fr)}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px;box-shadow:var(--shadow)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:var(--shadow)}
   .field{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:3px 0}
   .field label{color:var(--muted);font-size:13px;flex:1}
-  .field .u{color:var(--muted);font-size:11px;width:42px;text-align:left}
+  .field .u{color:var(--muted);font-size:11px;width:42px;text-align:left;font-family:var(--font-mono)}
   input[type=number],input[type=text],select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
-    border-radius:6px;padding:4px 7px;width:86px;font-size:13px;text-align:right}
-  input[type=text],select{text-align:left;width:160px}
-  input:focus,select:focus{outline:none;border-color:var(--accent)}
+    border-radius:6px;padding:5px 8px;width:86px;font-size:13px;text-align:right;font-family:var(--font-mono);
+    transition:border-color .16s ease,box-shadow .16s ease}
+  input[type=text],select{text-align:left;width:160px;font-family:var(--font-body)}
+  input:hover,select:hover{border-color:var(--line)}
+  input:focus,select:focus{outline:2px solid var(--accent2);outline-offset:1px;border-color:var(--accent2);
+    box-shadow:0 0 0 4px rgba(73,83,109,.16)}
   input:disabled{opacity:.5;cursor:not-allowed;background:var(--panel)}
   /* two-up field rows to keep inputs compact so the table stays in view */
   .fgrid{display:grid;grid-template-columns:1fr 1fr;column-gap:14px}
@@ -56,25 +100,28 @@
   .fgrid input[type=number]{width:72px}
   .fgrid .u{width:28px;font-size:10px}
   @media(max-width:560px){.fgrid{grid-template-columns:1fr}}
-  .res{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed var(--line)}
+  .res{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)}
   .res:last-child{border-bottom:none}
-  .res .v{font-weight:700;font-variant-numeric:tabular-nums}
-  .big{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
-  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700}
+  .res .v{font-weight:600;font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
+  .big{font-family:var(--font-display);font-size:34px;font-weight:600;font-variant-numeric:tabular-nums;
+    line-height:1;letter-spacing:-.02em}
+  .pill{display:inline-block;padding:3px 11px;border-radius:999px;font-size:11px;font-weight:600;
+    font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em}
   .muted{color:var(--muted)}
-  .note{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.3}
-  table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
-  th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  .note{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.45}
+  table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
+  th,td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
   th:first-child,td:first-child{text-align:left}
   table.tc th,table.tc td{text-align:center}
   table.tc input{text-align:center}
-  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+  th{color:var(--muted);font-weight:500;position:sticky;top:0;background:var(--panel);
+    font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;font-size:10.5px}
   tr:hover td{background:var(--panel2)}
-  .scroll{overflow:auto;max-height:560px;border-radius:10px}
+  .scroll{overflow:auto;max-height:560px;border-radius:8px;border:1px solid var(--line)}
   /* projection table: tighter columns so the Recommendation column fits in view */
   table.proj th,table.proj td{padding:5px 6px;font-size:12px}
   table.proj td.reco{text-align:center;white-space:normal;min-width:160px;max-width:250px}
-  .reco-box{display:inline-block;padding:5px 10px;border-radius:7px;font-weight:600;
+  .reco-box{display:inline-block;padding:5px 10px;border-radius:6px;font-weight:600;
     line-height:1.25;text-align:center;border:1px solid currentColor}
   /* box drawn around the projection row where the planned event ends */
   tr.proj-evrow td{border-top:2px solid var(--accent2);border-bottom:2px solid var(--accent2)}
@@ -83,46 +130,59 @@
   /* event-plan summary pills + zone-time chips */
   /* segmented two-state toggle (intensity model, ride breakdown) */
   .modeseg{display:inline-flex;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:4px}
-  .modeseg button.sm{padding:4px 12px}
-  .stat-pill{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:center}
-  .stat-pill .sp-v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
-  .stat-pill .sp-l{font-size:11px;color:var(--muted);margin-top:2px}
-  .bonk-item{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:6px;margin:4px 0;font-size:13px}
-  .bonk-item .zn{font-weight:700} .bonk-item .bv{font-weight:700}
-  .z1{background:rgba(51,214,166,.16);color:#7ef0cd}
-  .z2{background:rgba(78,161,255,.16);color:#9cc8ff}
-  .z3{background:rgba(255,235,156,.14);color:#ffe08a}
-  .z4{background:rgba(255,180,84,.16);color:#ffc77f}
-  .z5{background:rgba(255,107,107,.16);color:#ff9d9d}
-  .z6{background:rgba(186,130,255,.18);color:#d3b8ff}
-  /* Zone × Time supplementation matrix cells (feasibility of CHO/hr) */
-  table.zxt td.sc{font-variant-numeric:tabular-nums;font-weight:700;text-align:center}
+  .modeseg button.sm{padding:5px 12px}
+  .stat-pill{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px;text-align:center}
+  .stat-pill .sp-v{font-family:var(--font-display);font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .stat-pill .sp-l{font-size:11px;color:var(--muted);margin-top:3px}
+  .bonk-item{display:flex;justify-content:space-between;align-items:center;padding:7px 11px;border-radius:6px;margin:4px 0;font-size:13px}
+  .bonk-item .zn{font-weight:600} .bonk-item .bv{font-weight:600;font-family:var(--font-mono)}
+  /* Training-zone chips — muted categorical palette derived from brand hues
+     (brine · slate · gold · clay · rose · plum), soft tints w/ readable ink */
+  .z1{background:#e4eadd;color:#3e4b32}   /* brine green */
+  .z2{background:#e2e7f0;color:#3c4459}   /* voltage slate */
+  .z3{background:#f1e8d2;color:#6f561f}   /* gold */
+  .z4{background:#ecdfd2;color:#6a4d39}   /* ember clay */
+  .z5{background:#f1ddda;color:#86413b}   /* rose */
+  .z6{background:#e7dde8;color:#5d4a66}   /* muted plum */
+  /* Zone × Time supplementation matrix cells (sequential feasibility scale) */
+  table.zxt td.sc{font-variant-numeric:tabular-nums;font-weight:600;text-align:center}
   td.st-w{background:transparent;color:var(--muted)}
-  td.st-g{background:rgba(51,214,166,.16);color:#7ef0cd}
-  td.st-y{background:rgba(255,235,156,.16);color:#ffe08a}
-  td.st-o{background:rgba(255,180,84,.18);color:#ffc77f}
-  td.st-r{background:rgba(255,107,107,.20);color:#ff9d9d}
-  button{background:var(--accent);color:#06121f;border:none;border-radius:7px;padding:7px 12px;font-weight:700;cursor:pointer;font-size:13px}
-  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
-  button.sm{padding:3px 8px;font-size:11px}
-  .gauge{height:10px;border-radius:6px;background:linear-gradient(90deg,#2e6bd6 0%,#33d6a6 32%,#ffb454 55%,#ff6b6b 100%);position:relative;margin:8px 0 4px}
-  .gauge .mk{position:absolute;top:-4px;width:3px;height:18px;background:#fff;border-radius:2px;box-shadow:0 0 4px #000}
+  td.st-g{background:#e4eadd;color:#3e4b32}
+  td.st-y{background:#f1e8d2;color:#6f561f}
+  td.st-o{background:#ecdfd2;color:#6a4d39}
+  td.st-r{background:#f1ddda;color:#86413b}
+  button{background:var(--accent);color:var(--paper);border:1px solid var(--accent);border-radius:6px;
+    padding:7px 13px;font-weight:600;cursor:pointer;font-size:13px;font-family:var(--font-body);
+    transition:background .16s ease,transform .12s ease,box-shadow .16s ease}
+  button:hover{background:var(--accent-700);border-color:var(--accent-700);box-shadow:0 2px 8px rgba(15,16,18,.10)}
+  button:active{transform:scale(.97)}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--line)}
+  button.ghost:hover{background:transparent;border-color:var(--accent);color:var(--accent);box-shadow:none}
+  button.sm{padding:4px 9px;font-size:11px}
+  button:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+  .gauge{height:10px;border-radius:999px;
+    background:linear-gradient(90deg,#49536d 0%,#4d5d3d 32%,#c0974a 55%,#a14b45 100%);position:relative;margin:8px 0 4px}
+  .gauge .mk{position:absolute;top:-4px;width:3px;height:18px;background:#0f1012;border-radius:2px;box-shadow:0 0 0 2px rgba(255,255,255,.9)}
   .hint{cursor:help;border-bottom:1px dotted var(--muted)}
-  .row-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-  .sub-h{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent2);margin:8px 0 2px}
+  .row-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .sub-h{font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent2);margin:10px 0 3px}
   details.refbox{margin:2px 0}
   summary.sub-h{cursor:pointer;list-style:none}
   summary.sub-h::-webkit-details-marker{display:none}
   summary.sub-h::before{content:"▸ ";font-size:9px}
   details[open] summary.sub-h::before{content:"▾ "}
   .est{color:var(--warn);font-size:11px}
+  a{color:var(--accent2)}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
   @media(max-width:880px){.cols2,.cols3{grid-template-columns:1fr}.tabs{top:51px}}
 </style>
 </head>
 <body>
 <header>
-  <h1>💧 Hydration, Caloric & Fueling Calculator</h1>
-  <span class="sub">Power-based energy expenditure · bottle osmolality · sweat/sodium · event fuel plan</span>
+  <span class="wordmark"><span class="x">Extra</span><span class="p">Pickels</span></span>
+  <span class="hrule"></span>
+  <span class="toolname">Hydration · Fueling Calculator</span>
+  <span class="sub">Power-based energy expenditure · bottle osmolality · sweat &amp; sodium · event fuel plan</span>
 </header>
 <div class="tabs" id="tabs"></div>
 <div class="wrap" id="app"></div>
@@ -197,9 +257,9 @@ function tonicity(mosm){
 
 /* Conditional-format colors — copied from the workbook's rules */
 const CF = {
-  green:{bg:'#C6EFCE',fg:'#006100'},   // in range
-  amber:{bg:'#FFEB9C',fg:'#9C6500'},   // low
-  red:  {bg:'#FFC7CE',fg:'#9C0006'},   // high / out of band
+  green:{bg:'#e4eadd',fg:'#3e4b32'},   // in range — brine
+  amber:{bg:'#f1e8d2',fg:'#6f561f'},   // low — gold
+  red:  {bg:'#f1ddda',fg:'#86413b'},   // high / out of band — rose
 };
 const cfStyle = c => c ? `style="background:${c.bg};color:${c.fg};font-weight:700;border-radius:4px"` : '';
 // Body Na+ (mM): green 135–146, amber <135, red >146   (sheet column P)
@@ -818,8 +878,8 @@ function viewRider(){
         <h2>Athlete Profile</h2>
         <div class="sub-h">Sport</div>
         <div class="modeseg">
-          <button class="sm ${run?'ghost':''}" onclick="window._setActivity('cycling')">🚴 Cycling</button>
-          <button class="sm ${run?'':'ghost'}" onclick="window._setActivity('running')">🏃 Running</button>
+          <button class="sm ${run?'ghost':''}" onclick="window._setActivity('cycling')">Cycling</button>
+          <button class="sm ${run?'':'ghost'}" onclick="window._setActivity('running')">Running</button>
         </div>
         <div class="fgrid" style="margin-top:10px">
           ${numField('Body weight','bodyLbs','lbs')}
@@ -996,7 +1056,7 @@ function osmolalityPanel(){
       <div>
         <div style="display:flex;align-items:baseline;gap:12px">
           <span class="big">${fmt(mosm,0)}</span><span class="muted">mOsm/L</span>
-          <span class="pill" style="background:var(--${ton.cls});color:#06121f;margin-left:auto">${ton.label}</span>
+          <span class="pill" style="background:var(--${ton.cls});color:var(--paper);margin-left:auto">${ton.label}</span>
         </div>
         <div class="gauge"><div class="mk" style="left:calc(${mk}% - 1px)"></div></div>
         <div class="muted" style="font-size:12px">Hypo&nbsp;·&nbsp;Iso(~290)&nbsp;·&nbsp;Hyper&nbsp;→ ${ton.desc}</div>
@@ -1011,7 +1071,7 @@ function osmolalityPanel(){
       </div>
     </div>
     ${carbPerHr>90?`<div class="note" style="color:var(--warn);margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
-      ⚠️ <b>${fmt(carbPerHr,0)} g/hr</b> carbohydrate. ${mosm>ISO_TOP
+      <b>${fmt(carbPerHr,0)} g/hr</b> carbohydrate. ${mosm>ISO_TOP
         ? `At ${fmt(mosm,0)} mOsm/L this drink is ${ton.label.toLowerCase()} — high carb rates concentrate the bottle and slow gastric emptying. Raise fluid to ≈<b>${fmt(tgtFluidLhr,2)} L/hr</b> (about +${fmt(extraMlHr,0)} mL/hr) to bring it toward isotonic (~290–330 mOsm/L), or move some carbs to solid food.`
         : `At ${fmt(mosm,0)} mOsm/L it's ${ton.label.toLowerCase()} — fine for now, but keep fluid volume up as you push carbs higher so the mix doesn't turn hypertonic.`}
     </div>`:''}
@@ -1057,26 +1117,26 @@ function recoFor(x){
   if(x.lossPct > S.acceptLoss){                              // drying out → drink more, up to the floor
     ecfAdj = totalECF() - acceptableLbs/2.2;                 // ECF held at the acceptable-loss floor
     const oz = lbsToOz(x.lossLbs - acceptableLbs)/x.h;       // extra oz PER HOUR
-    parts.push(`💧 Add ≈ <b>${fmt(oz,0)} oz/hr</b> fluid`);
+    parts.push(`Add ≈ <b>${fmt(oz,0)} oz/hr</b> fluid`);
     cls='bad';
   } else if(x.wt > S.bodyLbs){                               // gaining weight → ease back to start weight
     ecfAdj = totalECF();
     const oz = lbsToOz(x.wt - S.bodyLbs)/x.h;
-    parts.push(`💧 Cut ≈ <b>${fmt(oz,0)} oz/hr</b> fluid`);
+    parts.push(`Cut ≈ <b>${fmt(oz,0)} oz/hr</b> fluid`);
     if(cls==='good') cls='warn';
   }
   // --- 2) Sodium: judged at the CORRECTED ECF so the volume + Na⁺ move together (mM green 135–146) ---
   const mMadj = ecfAdj ? x.Ommol/ecfAdj : x.mM;             // body Na⁺ concentration once the fluid fix lands
   if(mMadj < 135){                                           // too dilute → add sodium
     const mg = (135 - mMadj)*ecfAdj*23/x.h;                  // extra mg Na⁺ PER HOUR
-    parts.push(`🧂 Add ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺ (~${fmt(naToSaltG(mg),1)} g salt)`);
+    parts.push(`Add ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺ (~${fmt(naToSaltG(mg),1)} g salt)`);
     if(cls!=='bad') cls='warn';
   } else if(mMadj > 146){                                    // too concentrated → ease off salt
     const mg = (mMadj - 146)*ecfAdj*23/x.h;
-    parts.push(`🧂 Cut ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺`);
+    parts.push(`Cut ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺`);
     cls='bad';
   }
-  if(!parts.length) return {cls:'good', html:'✓ Good to go'};
+  if(!parts.length) return {cls:'good', html:'Good to go'};
   return {cls, html:parts.join('<br>')};
 }
 // colored box (bg + text) for the recommendation cell — sits on the blue table background
@@ -1308,7 +1368,7 @@ function viewEventPlan(){
   return `<div class="panel">
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <h2 style="margin:0">Activity Fuel Plan</h2>
-    <button class="sm" style="margin-left:auto" onclick="window._printFuelCard()" title="Print a small cut-out fuel card">🖨 Print fuel card</button>
+    <button class="sm" style="margin-left:auto" onclick="window._printFuelCard()" title="Print a small cut-out fuel card">Print fuel card</button>
   </div>
   <div class="note">Target carbohydrate (from the <b>Caloric Needs</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap.</div>
   <div class="grid cols3" style="margin:10px 0">
@@ -1332,7 +1392,7 @@ function viewEventPlan(){
           ${(()=>{
             const mix=hourMix(r.h);
             const head=`<div class="field" style="gap:6px;margin:2px 0">
-              <span class="u" style="width:auto;min-width:64px;text-align:left">🍶 Drink</span>
+              <span class="u" style="width:auto;min-width:64px;text-align:left">Drink</span>
               <input type="number" step="0.25" min="0" value="${btl}" style="width:54px" onchange="window._setPlanBottles(${r.h},this.value)" title="bottles this hour">
               <span class="u" style="width:auto">× ${mix?mixSummary(r.h):bottleName()} <span class="muted">(${fmt(dr,0)}g${mix?` · ${fmt(mixOsm(r.h),0)} mOsm/L`:''})</span></span>
               ${mix
@@ -1391,7 +1451,7 @@ function viewLibrary(){
     let act;
     if(pending) act = ADMIN
         ? `<button class="sm" onclick="window._approve('${p._id}')">✓</button> <button class="sm ghost" onclick="window._reject('${p._id}')">✗</button>`
-        : `<span class="pill" style="background:var(--warn);color:#06121f">⏳ Pending</span>`;
+        : `<span class="pill" style="background:var(--warn);color:var(--paper)">Pending</span>`;
     else act = `<button class="sm" onclick="window._loadProd('${p._id}')">Load</button>`
         + (ADMIN && p._kind==='user' ? ` <button class="sm ghost" onclick="window._reject('${p._id}')">Del</button>` : '')
         + (ADMIN && p._edited ? ` <button class="sm ghost" onclick="window._resetRow('${p._id}')" title="revert admin edits">Reset</button>` : '');
@@ -1421,7 +1481,7 @@ function viewLibrary(){
     const num=(f,v,w=54)=> ed ? `<input type="number" step="1" value="${v||0}" data-id="${p._id}" data-f="${f}" style="width:${w}px">`
                               : `<span style="font-variant-numeric:tabular-nums">${v||0}</span>`;
     let act;
-    if(pending) act = ADMIN ? `<button class="sm" onclick="window._approve('${p._id}')">✓</button> <button class="sm ghost" onclick="window._reject('${p._id}')">✗</button>` : `<span class="pill" style="background:var(--warn);color:#06121f">⏳ Pending</span>`;
+    if(pending) act = ADMIN ? `<button class="sm" onclick="window._approve('${p._id}')">✓</button> <button class="sm ghost" onclick="window._reject('${p._id}')">✗</button>` : `<span class="pill" style="background:var(--warn);color:var(--paper)">Pending</span>`;
     else act = (p.oz>0?`<button class="sm" onclick="window._loadProd('${p._id}')">Load</button>`:'')
         + (ADMIN && p._kind==='user' ? ` <button class="sm ghost" onclick="window._reject('${p._id}')">Del</button>` : '')
         + (ADMIN && p._edited ? ` <button class="sm ghost" onclick="window._resetRow('${p._id}')" title="revert admin edits">Reset</button>` : '');
@@ -1454,9 +1514,9 @@ function viewLibrary(){
   return `<div class="panel">
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
     <h2 style="margin:0">Fuel Library</h2>
-    <span class="pill" style="background:${ADMIN?'var(--accent2)':'var(--panel2)'};color:${ADMIN?'#06121f':'var(--muted)'}">${ADMIN?'🔓 Admin':'👁 Viewer'}</span>
+    <span class="pill" style="background:${ADMIN?'var(--accent2)':'var(--panel2)'};color:${ADMIN?'var(--paper)':'var(--muted)'}">${ADMIN?'Admin':'Viewer'}</span>
     <button class="sm ghost" onclick="window._adminToggle()">${ADMIN?'Exit admin':'Admin login'}</button>
-    ${pend?`<span class="pill" style="background:var(--warn);color:#06121f">⏳ ${pend} pending review</span>`:''}
+    ${pend?`<span class="pill" style="background:var(--warn);color:var(--paper)">${pend} pending review</span>`:''}
     <span style="display:flex;align-items:center;gap:6px;margin-left:auto">
       <span class="muted" style="font-size:11px">Brand</span>
       <select onchange="window._setLibBrand(this.value)" style="width:auto">
