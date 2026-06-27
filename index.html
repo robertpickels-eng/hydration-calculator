@@ -585,11 +585,14 @@ function eventTotals(){
   const gly=glycogenKcal(), usableGly=gly*(1-S.reservePct/100);
   // carbohydrate that must be eaten so endogenous glycogen stays above the reserve to the finish
   const reqSuppKcal=Math.max(0, choKcal-usableGly);
-  const targetRateG=(reqSuppKcal/4)/hrs;                // steady g/hr to hit that
+  const targetRateGRaw=(reqSuppKcal/4)/hrs;             // steady g/hr to FULLY hold the reserve (uncapped)
+  const cap=carbCap();                                  // gut-absorption ceiling for the selected level
+  const targetRateG=Math.min(targetRateGRaw, cap);      // plan target — capped at what the gut can absorb
   return { segs, kcal, choKcal, fatKcal, choG:choKcal/4,
     gly, usableGly, reqSuppKcal, reqSuppG:reqSuppKcal/4,
+    targetRateGRaw, targetRateGCap:cap,
     targetRateG, targetRateKcal:targetRateG*4,
-    overGut: targetRateG>carbCap(),
+    overGut: targetRateGRaw>cap,                         // true requirement exceeds the gut ceiling
     kcalHr:kcal/hrs, choGhr:(choKcal/4)/hrs };
 }
 
@@ -964,7 +967,7 @@ function viewRider(){
         <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
         <div class="res"><span>Carb fuel target <span class="muted">(keep ${S.reservePct}% reserve)</span></span>
           <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
-        ${ev.overGut?`<div class="note" style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut-absorption limit (${gutAdaptLabel()}) — you'll dip into reserves; spread carbs across drink + food and train your gut.</div>`:''}
+        ${ev.overGut?`<div class="note" style="color:var(--warn)">Capped at the ${carbCap()} g/hr gut-absorption limit (${gutAdaptLabel()}) — fully holding your reserve would take ~${fmt(ev.targetRateGRaw,0)} g/hr, so you'll dip into reserves. Spread carbs across drink + food and train your gut.</div>`:''}
       </div>
     </div>
   </div>`;
@@ -981,7 +984,7 @@ function viewHydration(){
       <div class="res"><span>Activity total burn</span><span class="v">${fmt(ev.kcal,0)} kcal</span></div>
       <div class="res"><span>This drink supplies</span><span class="v">${fmt((effComp().glucose+effComp().sucrose+effComp().malto+effComp().fructose+extrasCarbG())*S.bottlesPerHour,0)} g/hr carb</span></div>
     </div>
-    <div class="note">Output only — shown so you can match the bottle's carbs toward your hourly fuel need. The full breakdown lives on the <b>Fueling Plan</b> tab.${ev.overGut?` <b style="color:var(--warn)">Target exceeds the ${carbCap()} g/hr gut limit — spread carbs across drink + food.</b>`:''}</div>
+    <div class="note">Output only — shown so you can match the bottle's carbs toward your hourly fuel need. The full breakdown lives on the <b>Fueling Plan</b> tab.${ev.overGut?` <b style="color:var(--warn)">Capped at the ${carbCap()} g/hr gut limit (true need ~${fmt(ev.targetRateGRaw,0)} g/hr) — spread carbs across drink + food.</b>`:''}</div>
   </div>
   <div class="grid cols2">
     <div>
@@ -1226,9 +1229,10 @@ function viewCaloric(){
       <div class="res"><span>Total energy</span><span class="v">${fmt(ev.kcal,0)} kcal · ${fmt(ev.kcalHr,0)}/hr</span></div>
       <div class="res"><span>Carbohydrate burned</span><span class="v">${fmt(ev.choG,0)} g · ${fmt(ev.choKcal,0)} kcal</span></div>
       <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
-      <div class="res"><span>Carb fuel target <span class="muted">(${S.reservePct}% reserve)</span></span>
+      <div class="res"><span>Carb fuel target <span class="muted">(${S.reservePct}% reserve${ev.overGut?` · capped at ${ev.targetRateGCap} g/hr`:''})</span></span>
         <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
     </div>
+    ${ev.overGut?`<div class="note" style="color:var(--warn)">Fully holding your ${S.reservePct}% reserve would take <b>~${fmt(ev.targetRateGRaw,0)} g/hr</b> — above the ${ev.targetRateGCap} g/hr gut-absorption ceiling (${gutAdaptLabel()}), so the plan is capped at <b>${ev.targetRateGCap} g/hr</b>. Expect a glycogen deficit: pace conservatively, spread carbs across drink + food, and train your gut to raise the ceiling (Athlete &amp; Activity tab).</div>`:''}
     <div class="note">Read-only reference — set activity duration &amp; intensity on the <b>Athlete &amp; Activity</b> tab.</div>
   </div>
 
@@ -1370,7 +1374,7 @@ function viewEventPlan(){
     <h2 style="margin:0">Activity Fuel Plan</h2>
     <button class="sm" style="margin-left:auto" onclick="window._printFuelCard()" title="Print a small cut-out fuel card">Print fuel card</button>
   </div>
-  <div class="note">Target carbohydrate (from the <b>Caloric Needs</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap.</div>
+  <div class="note">Target carbohydrate (from the <b>Caloric Needs</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap.${ev.overGut?` <b style="color:var(--warn)">CHO Need is capped at the ${ev.targetRateGCap} g/hr gut ceiling — true demand is ~${fmt(ev.targetRateGRaw,0)} g/hr, so you'll run a glycogen deficit even if every gap is closed.</b>`:''}</div>
   <div class="grid cols3" style="margin:10px 0">
     <div class="stat-pill"><div class="sp-v">${fmt(totTarget,0)} g</div><div class="sp-l">Carb needed (event)</div></div>
     <div class="stat-pill"><div class="sp-v">${fmt(totDrink,0)} g</div><div class="sp-l">From drink (${fmt(totBottles,1)} bottles)</div></div>
