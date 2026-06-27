@@ -252,7 +252,8 @@ const S = {
   gutAdapt:'adapted',                           // gut training level → carb cap: unadapted 90 · adapted 120 · highcarb 150 g/hr
   // --- event fuel plan ---
   planItems:[],                                // per-hour product picks: [{hour, prodId, qty}]
-  planBottles:{}                               // per-hour bottle override {hour: bottles}; unset = bottles/hr × dur
+  planBottles:{},                              // per-hour bottle override {hour: bottles}; unset = bottles/hr × dur
+  planDrink:{}                                 // per-hour custom drink mix {hour:[{id,prodId,qty}]}; key present (even []) = plain-water base + these supplements; unset = use the global bottle
 };
 
 /* derived athlete numbers */
@@ -275,14 +276,35 @@ function bodyKg(){ return S.bodyLbs/2.2; }
 function totalECF(){ return bodyKg()*0.25; }            // L
 function bodyNaContentG(){ return (bodyNaContentMmol()*23)/1000; }
 function bodyNaContentMmol(){ return S.bodyNaConc*totalECF(); }
-// sodium delivered by the actual salts in the bottle (mg)
-function naFromSaltsMg(){
-  const c=S.comp;
-  return ((c.nacl||0)*NA_MW/MW.nacl + (c.citrate||0)*3*NA_MW/MW.citrate)*1000 + extrasNaMg();
+// ---- per-hour drink mix --------------------------------------------------
+// An hour can override the global bottle with a custom mix: plain-water base
+// + any number of supplement products from the DB. mixCompList sums those
+// products (carb split + sodium) into a single per-bottle composition, with
+// sodium expressed as NaCl-equivalent grams (same convention as _loadProd).
+function hourMix(h){ return (h!=null && S.planDrink && S.planDrink[h]!==undefined) ? S.planDrink[h] : null; }
+function mixCompList(list){
+  const c={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};
+  let naMg=0;
+  (list||[]).forEach(e=>{
+    const p=allProducts().find(x=>x._id===e.prodId), q=+e.qty||0;
+    if(!p||q<=0) return;
+    c.glucose+=(p.split.glucose||0)*q; c.sucrose+=(p.split.sucrose||0)*q;
+    c.malto  +=(p.split.malto  ||0)*q; c.fructose+=(p.split.fructose||0)*q;
+    naMg += (p.sodium||0)*q;
+  });
+  c.nacl = (naMg/1000)/(NA_MW/MW.nacl);   // mg Na → g NaCl-equivalent
+  return c;
+}
+// effective per-bottle composition for hour h (null/undefined h → the global bottle)
+function effComp(h){ const m=hourMix(h); return m ? mixCompList(m) : Object.assign({}, S.comp); }
+// sodium delivered by the actual salts in the bottle (mg). h-aware: custom-mix
+// hours bake their own salts in, so the global add-on electrolytes don't apply.
+function naFromSaltsMg(h){
+  const c=effComp(h);
+  return ((c.nacl||0)*NA_MW/MW.nacl + (c.citrate||0)*3*NA_MW/MW.citrate)*1000 + (hourMix(h)?0:extrasNaMg());
 }
 function calcDrinkNaPerOz(){ return S.bottleOz ? naFromSaltsMg()/S.bottleOz : 0; } // mg/oz (computed)
 function sodiumPerHour(){ return naFromSaltsMg()*S.bottlesPerHour; }              // mg/hr
-function effComp(){ return Object.assign({}, S.comp); }
 // Changing bottle volume holds CONCENTRATION constant (mg/oz, %carb, mOsm/L) rather than diluting:
 // the DB stores each product per its manufacturer-recommended oz, so grams scale with volume.
 function applyBottleVolume(newOz){
@@ -317,7 +339,10 @@ let PRODUCTS = [
   ['Infinit Nutrition','Go Far','2 scoops','drink',20,379,280,{glucose:10,sucrose:0,malto:55,fructose:5},15,'est'],
   ['Maurten','Drink Mix 320','1 sachet','drink',17,245,320,{glucose:14,sucrose:0,malto:30,fructose:36},15,'est'],
   ['Maurten','Drink Mix 160','1 sachet','drink',17,123,160,{glucose:7,sucrose:0,malto:15,fructose:18},15,'est'],
-  ['Styrkr','MIX90','1 sachet','drink',16,80,360,{glucose:0,sucrose:0,malto:60,fructose:30},15,'est'],
+  ['Styrkr','MIX90','1 sachet','drink',16.9,200,372,{glucose:0,sucrose:0,malto:50,fructose:40},15,'lbl'],
+  ['Styrkr','MIX90 Caffeine','1 sachet','drink',16.9,200,372,{glucose:0,sucrose:0,malto:50,fructose:40},15,'lbl'],
+  ['Styrkr','MIX60','1 sachet','drink',16.9,140,256,{glucose:0,sucrose:0,malto:33,fructose:27},15,'lbl'],
+  ['Styrkr','MIX+ Carb & Electrolyte','1 scoop','drink',16.9,900,160,{glucose:0,sucrose:0,malto:17,fructose:13},15,'lbl'],
   ['Flow Formulas','Endurance','1 scoop','drink',16,390,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
   ['Flow Formulas','Endurance (High Sodium)','1 scoop','drink',16,780,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
   ['NeverSecond','C30 Drink Mix','1 sachet','drink',17,20,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
@@ -329,6 +354,8 @@ let PRODUCTS = [
   ['Precision Fuel & Hydration','PF 90 Drink Mix','1 sachet','drink',17,750,348,{glucose:0,sucrose:0,malto:50,fructose:40},15,'est'],
   // --- electrolyte solutions (low / no carb) --- trailing K, Mg, Ca (mg) are informative only; only Na feeds the math
   ['LMNT','Recharge','per stick (16 oz)','lyte',16,1000,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',200,60,0],
+  ['Styrkr','SLT07 Hydration Tablet (1000mg)','per tablet (500 mL)','lyte',16.9,1000,11,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',100,25,15],
+  ['Styrkr','SLT07 Hydration Tablet (500mg)','per tablet (500 mL)','lyte',16.9,500,11,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',50,12,7],
   ['Precision Fuel & Hydration','PH 1000','per 500 mL','lyte',17,500,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',0,0,0],
   ['Precision Fuel & Hydration','PH 1500','per 500 mL','lyte',17,750,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',0,0,0],
   ['Nuun','Sport','per tablet (16 oz)','lyte',16,300,15,{glucose:4,sucrose:0,malto:0,fructose:0},100,'est',150,25,13],
@@ -524,6 +551,10 @@ let FUEL_PRODUCTS = [
   ['GU','Energy Gel','Each',                                100, 60, {glucose:0,  fructose:7,    sucrose:0,  malto:15  }, 15],
   ['GU','Roctane Gel','Each',                               100,125, {glucose:0,  fructose:7,    sucrose:0,  malto:14  }, 15],
   ['Neversecond','C30 Gel','Each',                          120,  8, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
+  ['Styrkr','GEL30 Dual-Carb Gel','Each',                   128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
+  ['Styrkr','GEL30 Caffeine Gel','Each',                    128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
+  ['Styrkr','BAR50 Rice Energy Bar','Each',                 260,603, {glucose:0,  fructose:0,    sucrose:10, malto:40  }, 20],
+  ['Styrkr','BAR30 Rice Energy Bar','Each',                 170,190, {glucose:0,  fructose:0,    sucrose:7,  malto:23  }, 20],
   ['Honey Stinger','Energy Gel','Each',                     100, 50, {glucose:12, fructose:12,   sucrose:0,  malto:0   }, 15],
   ['Honey Stinger','Waffle','Each',                         150, 50, {glucose:7,  fructose:0,    sucrose:14, malto:0   }, 15],
   ['Skratch','Energy Chews','Pack',                          80, 80, {glucose:7,  fructose:0,    sucrose:12, malto:0   }, 15],
@@ -544,6 +575,9 @@ let FUEL_PRODUCTS = [
   ['Whole Food','Pretzels','1 oz',                          110,350, {glucose:0,  fructose:0,    sucrose:1,  malto:22  }, 20],
   ['Whole Food','Orange (medium)','Each',                    62,  0, {glucose:6,  fructose:6,    sucrose:3,  malto:0   }, 100],
 ].map((p,i)=>({id:'f'+i, brand:p[0], product:p[1], unit:p[2], kcal:p[3], sodium:p[4], split:{...p[5]}, de:p[6]}));
+// keep the food library alphabetical by manufacturer (ids are stored on each object, so reordering is lookup-safe)
+function sortFuel(){ FUEL_PRODUCTS.sort(byBrand); }
+sortFuel();
 // snapshot of factory foods so new default products can be merged into a user's saved list
 const FUEL_DEFAULTS = FUEL_PRODUCTS.map(p=>({...p, split:{...p.split}}));
 function fuelById(id){ return FUEL_PRODUCTS.find(p=>p.id===id); }
@@ -612,6 +646,7 @@ function loadAthlete(){
       FUEL_PRODUCTS=raw.fuel;
       // bring in any factory foods added since this profile was saved (matched by brand+product)
       FUEL_DEFAULTS.forEach(d=>{ if(!FUEL_PRODUCTS.some(p=>p.brand===d.brand && p.product===d.product)) FUEL_PRODUCTS.push({...d, split:{...d.split}}); });
+      sortFuel();
     }
     if(Array.isArray(raw.sweat) && raw.sweat.length) SWEATLOG=raw.sweat;
   }catch(e){}
@@ -626,8 +661,10 @@ function allProducts(){
     return {...merged, _id:'c:'+p.name, _kind:'canonical', _status:'approved', _edited:!!ov};
   });
   const user = DB.userItems.map(u=>({...u, _id:u.id, _kind:'user', _status:u.status||'pending'}));
-  return canon.concat(user);
+  return canon.concat(user).sort(byBrand);
 }
+// sort products/foods alphabetically by manufacturer (brand), then product name — case-insensitive
+function byBrand(a,b){ return (a.brand||'').localeCompare(b.brand||'',undefined,{sensitivity:'base'}) || (a.product||'').localeCompare(b.product||'',undefined,{sensitivity:'base'}); }
 function loadableProducts(){ return allProducts().filter(p=>p._status==='approved'); }
 function pendingCount(){ return DB.userItems.filter(u=>(u.status||'pending')==='pending').length; }
 function canEditRow(p){ return p._kind==='canonical' ? ADMIN : (p._status==='pending' || ADMIN); }
@@ -855,8 +892,8 @@ function viewRider(){
         <div class="scroll" style="max-height:240px;margin-top:8px">
           ${ev.segs.map((s,i)=>`<div class="field" style="gap:6px">
             <span class="u" style="width:${run?78:96}px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
-            <select style="flex:1;min-width:0" onchange="window._setSegZone(${i}, this.value)">${intOpts(s.zi)}</select>
-            ${run?`<input type="number" step="0.5" value="${s.grade}" style="width:50px" onchange="window._setSegGrade(${i},this.value)" title="% grade"><span class="u" style="width:auto">%</span>`:''}
+            <select data-seg="z${i}" style="flex:1;min-width:0" onchange="window._setSegZone(${i}, this.value)">${intOpts(s.zi)}</select>
+            ${run?`<input type="number" data-seg="g${i}" step="0.5" value="${s.grade}" style="width:50px" onchange="window._setSegGrade(${i},this.value)" title="% grade"><span class="u" style="width:auto">%</span>`:''}
           </div>`).join('')}
         </div>`:`<div class="note">One average ${run?'pace &amp; grade are':'intensity is'} applied to the whole ${run?'run':'ride'}.</div>`}
       </div>
@@ -931,7 +968,7 @@ function viewHydration(){
         ${S.extraLytes.map(x=>extraRow(x,'l')).join('')}
         <div class="res" style="margin-top:6px"><span>Drink sodium / hour</span><span class="v">${fmt(sodiumPerHour(),0)} mg</span></div>
         ${avgFoodNaPerHr()>0?`<div class="res"><span>Food sodium / hour <span class="muted">(avg from plan)</span></span><span class="v">${fmt(avgFoodNaPerHr(),0)} mg</span></div>`:''}
-        <div class="res"><span>Net Na⁺ balance / hour</span><span class="v" style="color:${(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}" title="Drink Na + average food Na from the Fueling Plan − sweat Na loss, per hour.">${fmt(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr,0)} mg</span></div>
+        <div class="res"><span>Net Na⁺ balance / hour <span class="muted">(mass)</span></span><span class="v" style="color:${(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}" title="Total-sodium MASS balance: drink Na + average food Na from the Fueling Plan − sweat Na loss, per hour. This is a mass deficit/surplus, NOT a concentration — if you under-drink, the Hour-by-Hour Projection's Na⁺ (mM) can still rise (dehydration concentrates the sodium that remains) even when this is negative.">${fmt(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr,0)} mg</span></div>
         <div class="res"><span>Drink carb / hour</span><span class="v">${fmt(drinkCarbGperHr(),0)} g</span></div>
         <div class="res"><span>Net carb balance / hour <span class="muted">(vs burn)</span></span><span class="v" style="color:${(drinkCarbGperHr()-ev.choGhr)>=0?'var(--good)':'var(--bad)'}" title="Drink carbs/hr − carbohydrate oxidized/hr at event intensity. Negative = net glycogen drawdown.">${fmt(drinkCarbGperHr()-ev.choGhr,0)} g</span></div>
       </div>
@@ -1050,7 +1087,7 @@ function viewProjection(){
   const hrs=Math.min(36,Math.max(S.projHours||8, evHour+2)); // always show ≥2 hours past the event
   const r=projectionRows(hrs);
   return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
-  <div class="note">Projects <b>your plan</b>: Bottles = hours × your Bottles/hr, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146. The <b>Recommendation</b> column reads those flags for each hour: green = good to go, otherwise it estimates how much fluid and sodium to add (or cut) per hour to get back in band — solved together, so the sodium amount accounts for how the corrected fluid volume dilutes or concentrates your Na⁺. The <b style="color:var(--accent2)">boxed</b> row marks the hour your ${fmt(S.eventHours,1)}-hr activity ends (set on Athlete &amp; Activity); the table runs a couple hours past it.</div>
+  <div class="note">Projects <b>your plan</b>: Bottles = hours × your Bottles/hr, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146. <b>Note:</b> <b>Body Na⁺ (g)</b> is total sodium <i>mass</i> while <b>Na⁺ (mM)</b> is <i>concentration</i> (mass ÷ fluid). They can move opposite ways: if you under-drink, mM can <i>climb</i> (dehydration concentrates sodium) even while total Na⁺ falls and the bottle tab shows a <i>negative</i> hourly Na⁺ balance — that balance is a mass deficit, not a concentration. The <b>Recommendation</b> column reads those flags for each hour: green = good to go, otherwise it estimates how much fluid and sodium to add (or cut) per hour to get back in band — solved together, so the sodium amount accounts for how the corrected fluid volume dilutes or concentrates your Na⁺. The <b style="color:var(--accent2)">boxed</b> row marks the hour your ${fmt(S.eventHours,1)}-hr activity ends (set on Athlete &amp; Activity); the table runs a couple hours past it.</div>
   <div class="scroll" style="margin-top:10px"><table class="tc proj">
     <thead><tr><th>Hr</th><th>Water lost (L)</th><th>Replaced (oz)</th>
       <th>Wt loss (lbs)</th><th>Wt loss (%)</th><th>Body wt (lbs)</th>
@@ -1213,11 +1250,18 @@ function planHours(){
   for(let h=1;h<=n;h++) out.push({h, dur:Math.min(1,(+S.eventHours||0)-(h-1))});
   return out;
 }
-function carbPerBottle(){ const c=effComp(); return c.glucose+c.sucrose+c.malto+c.fructose+extrasCarbG(); }
+function carbPerBottle(h){ const c=effComp(h); return c.glucose+c.sucrose+c.malto+c.fructose + (hourMix(h)?0:extrasCarbG()); }
 function drinkCarbGperHr(){ return carbPerBottle()*S.bottlesPerHour; }
 // bottles planned for an hour: explicit override, else the global rate × that hour's duration
 function planBottlesFor(h,dur){ const v=(S.planBottles||{})[h]; return (v==null||v==='')? +(((+S.bottlesPerHour||0)*dur).toFixed(2)) : (+v||0); }
-function drinkCarbFor(h,dur){ return carbPerBottle()*planBottlesFor(h,dur); }
+function drinkCarbFor(h,dur){ return carbPerBottle(h)*planBottlesFor(h,dur); }
+// per-bottle osmolality for an hour's mix (mOsm/L) — uses the global malto DE, like the rest of the app
+function mixOsm(h){ const c=effComp(h), oz=S.bottleOz; return oz ? osmolesOf(c,S.maltoDE)*OZ_PER_L*1000/oz : 0; }
+// short human label for an hour's custom mix
+function mixSummary(h){
+  const parts=((S.planDrink||{})[h]||[]).map(e=>{ const p=allProducts().find(x=>x._id===e.prodId); return p?`${qtyStr(e.qty)}× ${p.name}`:null; }).filter(Boolean);
+  return parts.length ? 'water + '+parts.join(' + ') : 'plain water';
+}
 function planItemsFor(h){ return S.planItems.filter(it=>it.hour===h); }
 // a plan item can be a food (FUEL_PRODUCTS) OR an electrolyte product (drink DB, cat='lyte')
 function planProd(id){
@@ -1239,7 +1283,7 @@ const qtyStr = n => { const r=Math.round((+n||0)*100)/100; return Number.isInteg
 function planSummaryFor(h,dur){
   const out=[];
   const btl=planBottlesFor(h,dur);
-  if(btl>0) out.push({qty:btl, label:bottleName()});
+  if(btl>0) out.push({qty:btl, label: hourMix(h)?mixSummary(h):bottleName()});
   planItemsFor(h).forEach(it=>{ const p=planProd(it.prodId), q=+it.qty||0; if(p&&q>0) out.push({qty:q, label:p.label}); });
   return out;
 }
@@ -1250,6 +1294,13 @@ function viewEventPlan(){
     const foods=FUEL_PRODUCTS.map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium)).join('');
     const lytes=allProducts().filter(p=>p.cat==='lyte').map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
     return `<optgroup label="Foods">${foods}</optgroup><optgroup label="Electrolytes">${lytes}</optgroup>`;
+  };
+  // dropdown for a per-hour drink-mix supplement: every DB drink + electrolyte, per-serving carb & Na
+  const mixOpts=(sel)=>{
+    const opt=(id,label,carb,na)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
+    const drinks=allProducts().filter(p=>p.cat==='drink').map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    const lytes =allProducts().filter(p=>p.cat==='lyte').map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    return `<option value=""${sel?'':' selected'}>— pick a product —</option><optgroup label="Carb drinks">${drinks}</optgroup><optgroup label="Electrolytes">${lytes}</optgroup>`;
   };
   // event roll-ups
   let totTarget=0, totDrink=0, totFood=0, totBottles=0;
@@ -1271,18 +1322,35 @@ function viewEventPlan(){
       const need=ev.targetRateG*r.dur, dr=drinkCarbFor(r.h,r.dur), food=foodCarbFor(r.h), gap=need-dr-food;
       const gcls = gap<=1?'cho-positive':gap<=15?'cho-warning':'cho-negative';
       const items=planItemsFor(r.h), btl=planBottlesFor(r.h,r.dur);
-      const drinkNa=btl*naFromSaltsMg(), foodNa=foodNaFor(r.h);
+      const drinkNa=btl*naFromSaltsMg(r.h), foodNa=foodNaFor(r.h);
       return `<tr>
         <td>${r.h}${r.dur<1?`<div class="muted" style="font-size:10px">${hm(r.dur)}</div>`:''}</td>
         <td>${fmt(need,0)}</td><td>${fmt(dr,0)}</td><td>${fmt(food,0)}</td>
         <td class="${gcls}" style="font-weight:700">${gap>0?fmt(gap,0):'✓'}</td>
         <td>${fmt(drinkNa+foodNa,0)}<div class="muted" style="font-size:10px">${fmt(drinkNa,0)} drink · ${fmt(foodNa,0)} food</div></td>
         <td style="text-align:left">
-          <div class="field" style="gap:6px;margin:2px 0">
-            <span class="u" style="width:auto;min-width:64px;text-align:left">🍶 Drink</span>
-            <input type="number" step="0.25" min="0" value="${btl}" style="width:54px" onchange="window._setPlanBottles(${r.h},this.value)" title="bottles this hour">
-            <span class="u" style="width:auto">× ${bottleName()} <span class="muted">(${fmt(dr,0)}g)</span></span>
-          </div>
+          ${(()=>{
+            const mix=hourMix(r.h);
+            const head=`<div class="field" style="gap:6px;margin:2px 0">
+              <span class="u" style="width:auto;min-width:64px;text-align:left">🍶 Drink</span>
+              <input type="number" step="0.25" min="0" value="${btl}" style="width:54px" onchange="window._setPlanBottles(${r.h},this.value)" title="bottles this hour">
+              <span class="u" style="width:auto">× ${mix?mixSummary(r.h):bottleName()} <span class="muted">(${fmt(dr,0)}g${mix?` · ${fmt(mixOsm(r.h),0)} mOsm/L`:''})</span></span>
+              ${mix
+                ? `<button class="sm ghost" onclick="window._disableMix(${r.h})" title="revert this hour to the default bottle">↩ default</button>`
+                : `<button class="sm ghost" onclick="window._enableMix(${r.h})" title="build a custom plain-water + supplements mix for this hour">⚗ Custom mix</button>`}
+            </div>`;
+            if(!mix) return head;
+            const mrows=mix.map(e=>`<div class="field" style="gap:6px;margin:2px 0 2px 18px">
+              <span class="muted" style="font-size:11px">+</span>
+              <select style="flex:1;min-width:0" onchange="window._setMixItem(${r.h},'${e.id}','prodId',this.value)">${mixOpts(e.prodId)}</select>
+              <input type="number" step="0.25" min="0" value="${e.qty}" style="width:54px" onchange="window._setMixItem(${r.h},'${e.id}','qty',this.value)" title="servings per bottle">
+              <span class="u" style="width:auto">×</span>
+              <button class="sm ghost" onclick="window._rmMixItem(${r.h},'${e.id}')" title="remove">×</button>
+            </div>`).join('');
+            return head + mrows
+              + `<div class="row-actions" style="margin:2px 0 4px 18px"><button class="sm ghost" onclick="window._addMixItem(${r.h})">＋ Add to mix</button>
+                 <span class="muted" style="font-size:11px">Base = plain water (0 carb / 0 Na); add supplements above.</span></div>`;
+          })()}
           ${items.map(it=>`<div class="field" style="gap:6px;margin:2px 0">
             <select style="flex:1;min-width:0" onchange="window._setPlanItem('${it.id}','prodId',this.value)">${fuelOpts(it.prodId)}</select>
             <input type="number" step="0.5" value="${it.qty}" style="width:54px" onchange="window._setPlanItem('${it.id}','qty',this.value)" title="servings">
@@ -1457,12 +1525,13 @@ let active='rider';
 function elSig(el){
   if(!el || el.tagName!=='INPUT' && el.tagName!=='SELECT') return null;
   if(el.id) return '#'+el.id;
-  const attrs=['data-k','data-obj','data-comp','data-lvol','data-kgmass','data-id','data-f','data-sub','data-xc','data-xl','data-xf','data-sw','data-swk','data-pl','data-plk'];
+  const attrs=['data-k','data-obj','data-comp','data-lvol','data-kgmass','data-id','data-f','data-sub','data-xc','data-xl','data-xf','data-sw','data-swk','data-pl','data-plk','data-seg'];
   let sel=el.tagName.toLowerCase(), has=false;
   attrs.forEach(a=>{ if(el.hasAttribute(a)){ sel+=`[${a}="${el.getAttribute(a)}"]`; has=true; } });
   return has?sel:null;
 }
 function render(){
+  const sx=window.pageXOffset, sy=window.pageYOffset;   // preserve scroll position across the rebuild
   const ae=document.activeElement;
   const sig = (ae && $('#app').contains(ae)) ? elSig(ae) : null;
   let caret=null, isNum=false;
@@ -1479,11 +1548,12 @@ function render(){
   if(sig){
     const el=$('#app').querySelector(sig);
     if(el){
-      el.focus();
+      el.focus({preventScroll:true});   // don't let focus() yank the viewport to the field
       // restore caret for text fields; number inputs commit on blur so this rarely fires mid-edit
       if(caret!=null && el.type!=='number'){ try{ el.setSelectionRange(caret,caret); }catch(e){} }
     }
   }
+  window.scrollTo(sx,sy);   // re-rendering #app can reset scroll to top — put the reader back where they were
 }
 // live-refresh ONLY the output panels (osmolality + projection) — leaves inputs untouched,
 // so the table updates as you type without dropping focus / transposing digits
@@ -1645,6 +1715,13 @@ window._setPlanItem=(id,field,val)=>{ const it=S.planItems.find(x=>x.id===id); i
 window._rmPlanItem=(id)=>{ S.planItems=S.planItems.filter(x=>x.id!==id); render(); };
 window._setPlanBottles=(hour,val)=>{ if(!S.planBottles) S.planBottles={};
   if(val===''||val==null) delete S.planBottles[hour]; else S.planBottles[hour]=Math.max(0,+val||0); render(); };
+// per-hour custom drink mix (plain-water base + supplement products)
+window._enableMix=(hour)=>{ if(!S.planDrink) S.planDrink={}; if(S.planDrink[hour]===undefined) S.planDrink[hour]=[]; render(); };
+window._disableMix=(hour)=>{ if(S.planDrink) delete S.planDrink[hour]; render(); };
+window._addMixItem=(hour)=>{ if(!S.planDrink) S.planDrink={}; (S.planDrink[hour]=S.planDrink[hour]||[]).push({id:_xid('dm'),prodId:'',qty:1}); render(); };
+window._setMixItem=(hour,id,field,val)=>{ const it=((S.planDrink||{})[hour]||[]).find(x=>x.id===id); if(!it) return;
+  it[field]= field==='qty'?Math.max(0,+val||0):val; render(); };
+window._rmMixItem=(hour,id)=>{ const list=(S.planDrink||{})[hour]; if(list) S.planDrink[hour]=list.filter(x=>x.id!==id); render(); };
 // fill the hour's gap with whole servings of the first library item (a gel by default)
 window._autoFill=(hour)=>{
   const ev=eventTotals(), dur=Math.min(1,(+S.eventHours||0)-(hour-1));
