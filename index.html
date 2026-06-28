@@ -624,6 +624,16 @@ function eventTotals(){
     overGut: targetRateGRaw>cap,                         // true requirement exceeds the gut ceiling
     kcalHr:kcal/hrs, choGhr:(choKcal/4)/hrs };
 }
+// over-fueling check: is carb intake ≥20% above the gut-absorption ceiling (the rate the gut can
+// actually take up)? Carb beyond that is malabsorbed → GI distress. Measuring against the gut
+// ceiling (not the glycogen-holding target, which can be ~0 on easy efforts) avoids false flags.
+// returns {pct, over} when excessive, else null.  (-1e-9 so an exact 20% clears the float edge.)
+const CHO_EXCESS_FRAC = 0.20;
+function choExcess(intakeG, ceilingG){
+  if(intakeG<=0 || ceilingG<=0) return null;
+  const pct=intakeG/ceilingG-1;
+  return pct>=CHO_EXCESS_FRAC-1e-9 ? { pct, over:intakeG-ceilingG } : null;
+}
 
 /* ============================================================
    FUEL PRODUCT LIBRARY  (for the Fueling Plan — gels/bars/chews/etc.)
@@ -1065,6 +1075,7 @@ function viewHydration(){
         <div class="res"><span>Net Na⁺ balance / hour <span class="muted">(mass)</span></span><span class="v" style="color:${(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr)>=0?'var(--good)':'var(--bad)'}" title="Total-sodium MASS balance: drink Na + average food Na from the Fueling Plan − sweat Na loss, per hour. This is a mass deficit/surplus, NOT a concentration — if you under-drink, the Hour-by-Hour Projection's Na⁺ (mM) can still rise (dehydration concentrates the sodium that remains) even when this is negative.">${fmt(sodiumPerHour()+avgFoodNaPerHr()-S.sweatNa*sr,0)} mg</span></div>
         <div class="res"><span>Drink carb / hour</span><span class="v">${fmt(drinkCarbGperHr(),0)} g</span></div>
         <div class="res"><span>Net carb balance / hour <span class="muted">(vs burn)</span></span><span class="v" style="color:${(drinkCarbGperHr()-ev.choGhr)>=0?'var(--good)':'var(--bad)'}" title="Drink carbs/hr − carbohydrate oxidized/hr at event intensity. Negative = net glycogen drawdown.">${fmt(drinkCarbGperHr()-ev.choGhr,0)} g</span></div>
+        ${(()=>{ const x=choExcess(drinkCarbGperHr(), carbCap()); return x?`<div class="note" style="color:var(--warn)">⚠ Excess carbohydrate: this bottle delivers <b>${fmt(drinkCarbGperHr(),0)} g/hr</b> — <b>${fmt(x.pct*100,0)}% over</b> your ${fmt(carbCap(),0)} g/hr gut-absorption ceiling (${gutAdaptLabel()}, +${fmt(x.over,0)} g/hr). Carbohydrate beyond what the gut absorbs sits there and causes GI distress — dilute the mix, drop a scoop, or shift carbs to food.</div>`:''; })()}
       </div>
     </div>
   </div>
@@ -1414,6 +1425,7 @@ function viewEventPlan(){
     <div class="stat-pill"><div class="sp-v">${fmt(totDrink,0)} g</div><div class="sp-l">From drink (${fmt(totBottles,1)} bottles)</div></div>
     <div class="stat-pill"><div class="sp-v" style="color:${(totTarget-totDrink-totFood)<=1?'var(--good)':'var(--warn)'}">${fmt(Math.max(0,totTarget-totDrink-totFood),0)} g</div><div class="sp-l">Still to cover with food</div></div>
   </div>
+  ${(()=>{ const ceil=carbCap()*Math.max(0.001,+S.eventHours||0); const x=choExcess(totDrink+totFood, ceil); return x?`<div class="note" style="color:var(--warn);margin-bottom:4px">⚠ Excess carbohydrate: your plan supplies <b>${fmt(totDrink+totFood,0)} g</b> vs a <b>${fmt(ceil,0)} g</b> gut-absorption ceiling over the event (<b>${fmt(x.pct*100,0)}% over</b>, +${fmt(x.over,0)} g). Hours flagged <span style="color:var(--warn)">⚠ +g</span> exceed the ${fmt(carbCap(),0)} g/hr gut limit by ≥20% — overshooting offers no extra benefit and raises GI-distress risk.</div>`:''; })()}
   <div class="scroll" style="margin-top:6px"><table class="tc fuelplan">
     <thead>
       <tr class="grp">
@@ -1447,10 +1459,14 @@ function viewEventPlan(){
       const gapColor=gap<=1?'var(--good)':gap<=15?'var(--warn)':'var(--bad)';
       const fluidGapColor=fluidGap<=tolFluid?'var(--good)':fluidGap<=tolFluid*2?'var(--warn)':'var(--bad)';
       const naGapColor=naGap<=tolNa?'var(--good)':naGap<=tolNa*2?'var(--warn)':'var(--bad)';
+      const choX=choExcess(dr+food, carbCap()*r.dur);   // ≥20% over the gut ceiling this hour → over-fuel flag
+      const choCell = gap>1 ? `<span style="color:${gapColor}">${fmt(gap,0)}</span>`
+        : choX ? `<span style="color:var(--warn)" title="${fmt(choX.pct*100,0)}% over the ${fmt(carbCap(),0)} g/hr gut ceiling — trim drink or food this hour">⚠ +${fmt(choX.over,0)}</span>`
+        : `<span style="color:var(--good)">✓</span>`;
       return `<tr>
         <td>${r.h}${r.dur<1?`<div class="muted" style="font-size:10px">${hm(r.dur)}</div>`:''}</td>
         <td class="grpsep">${fmt(need,0)}</td><td>${fmt(dr,0)}</td><td>${fmt(food,0)}</td>
-        <td style="font-weight:700;color:${gapColor}">${gap>0?fmt(gap,0):'✓'}</td>
+        <td style="font-weight:700">${choCell}</td>
         <td class="grpsep">${fmt(fluidNeed,0)}</td>
         <td>${fmt(fluidIn,0)}</td>
         <td style="font-weight:700;color:${fluidGapColor}" title="Tolerable shortfall this hour ≈ ${fmt(tolFluid,0)} mL (within your ${fmt(S.acceptLoss,0)}% body-mass-loss budget)">${fluidGap>tolFluid?fmt(fluidGap,0):'✓'}</td>
