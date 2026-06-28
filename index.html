@@ -1405,7 +1405,8 @@ function viewEventPlan(){
   return `<div class="panel">
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <h2 style="margin:0">Activity Fuel Plan</h2>
-    <button class="sm" style="margin-left:auto" onclick="window._printFuelCard()" title="Print a small cut-out fuel card">Print fuel card</button>
+    <button class="sm ghost" style="margin-left:auto" onclick="window._resetPlanToBottle()" title="Rebuild every hour from the default bottle on the In the Bottle tab — clears custom hour-mixes and per-hour bottle counts (added foods stay)">↺ Reset to bottle</button>
+    <button class="sm" onclick="window._printFuelCard()" title="Print a small cut-out fuel card">Print fuel card</button>
   </div>
   <div class="note">Target carbohydrate (from the <b>Caloric Needs</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap.${ev.overGut?` <b style="color:var(--warn)">CHO Need is capped at the ${ev.targetRateGCap} g/hr gut ceiling — true demand is ~${fmt(ev.targetRateGRaw,0)} g/hr, so you'll run a glycogen deficit even if every gap is closed.</b>`:''}</div>
   <div class="grid cols3" style="margin:10px 0">
@@ -1879,6 +1880,12 @@ window._rmPlanItem=(id)=>{ S.planItems=S.planItems.filter(x=>x.id!==id); render(
 window._setPlanBottles=(hour,val)=>{ if(!S.planBottles) S.planBottles={};
   if(val===''||val==null) delete S.planBottles[hour]; else S.planBottles[hour]=Math.max(0,+val||0); render(); };
 // per-hour custom drink mix (plain-water base + supplement products)
+// snap every hour back to the default bottle from the In the Bottle tab:
+// drop all custom hour-mixes and per-hour bottle-count overrides (added foods are left alone)
+window._resetPlanToBottle=()=>{
+  if(!confirm('Reset every hour to the default bottle from the “In the Bottle” tab?\n\nThis clears any custom hour-mixes and per-hour bottle-count overrides. Foods you’ve added stay.')) return;
+  S.planDrink={}; S.planBottles={}; render();
+};
 window._enableMix=(hour)=>{ if(!S.planDrink) S.planDrink={}; if(S.planDrink[hour]===undefined) S.planDrink[hour]=[]; render(); };
 window._disableMix=(hour)=>{ if(S.planDrink) delete S.planDrink[hour]; render(); };
 window._addMixItem=(hour)=>{ if(!S.planDrink) S.planDrink={}; (S.planDrink[hour]=S.planDrink[hour]||[]).push({id:_xid('dm'),prodId:'',qty:1}); render(); };
