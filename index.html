@@ -208,6 +208,7 @@
   <div>© 2026 Robert Pickels. Custom-built Hydration &amp; Osmolality Calculator. All rights reserved.</div>
   <div>Free for personal use. This calculator and its code may not be copied, redistributed, modified for redistribution, or used commercially without the owner's prior written permission.</div>
   <div><strong>Not medical advice.</strong> Provided for informational and educational use only. Hydration, sodium, and fueling needs vary by individual, and several inputs (notably product carbohydrate-source splits) are estimates. Consult a qualified medical or sports-nutrition professional before acting on these numbers. Use at your own risk.</div>
+  <div><strong>Privacy.</strong> This tool uses GoatCounter, a privacy-friendly, cookieless analytics service, to count usage. No cookies are set and no personal information is collected, sold, or shared.</div>
 </footer>
 
 <script>
@@ -1750,7 +1751,18 @@ function elSig(el){
   attrs.forEach(a=>{ if(el.hasAttribute(a)){ sel+=`[${a}="${el.getAttribute(a)}"]`; has=true; } });
   return has?sel:null;
 }
+// GoatCounter: count one "calculation run" event per visit — fired the first time the
+// user triggers a re-render after initial boot (avoids inflating on every keystroke)
+let _booted=false, _calcCounted=false;
+function trackCalcUse(){
+  if(_calcCounted || !_booted) return;
+  if(window.goatcounter && typeof goatcounter.count==='function'){
+    goatcounter.count({path:'calc-run', title:'Calculation run', event:true});
+    _calcCounted=true;
+  }
+}
 function render(){
+  trackCalcUse();
   const sx=window.pageXOffset, sy=window.pageYOffset;   // preserve scroll position across the rebuild
   const ae=document.activeElement;
   const sig = (ae && $('#app').contains(ae)) ? elSig(ae) : null;
@@ -2012,6 +2024,9 @@ window._resetAthlete=()=>{ if(confirm('Reset all saved inputs to defaults? This 
 loadAthlete();                                   // restore last session's inputs (if any)
 window.addEventListener('beforeunload', saveAthlete);  // belt-and-suspenders save
 render();
+_booted=true;                                    // initial render done — count real usage from here on
 </script>
+<!-- GoatCounter analytics (privacy-friendly, cookieless) -->
+<script data-goatcounter="https://extrapickels.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </body>
 </html>
