@@ -314,7 +314,7 @@ const S = {
   // --- caloric / power model (ported from the Cycling Nutrition Calculator) ---
   gender:'male',                               // 'male' | 'female'  (glycogen store estimate)
   activity:'cycling',                          // 'cycling' | 'running'  — drives intensity units + active muscle
-  carbLoaded:false,                            // muscle-glycogen concentration: false=trained-rested, true=carb-loaded
+  glyState:'rested',                           // muscle-glycogen concentration: 'training' | 'rested' (tapered) | 'loaded'
   ftp:250,                                     // functional threshold power (watts) — cycling
   runThreshold:420,                            // running threshold pace, seconds per mile (7:00/mi)
   runPaces:[600,540,480,450,420],              // pre-set pace rows (sec/mi): 10:00,9:00,8:00,7:30,7:00
@@ -508,7 +508,10 @@ function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
 // active-muscle glycogen = muscle mass (kg×LEAN×MUSC) × ACTIVE fraction × CONC (g/kg) × 4.18 kcal/g.
 // LEAN/MUSC are body comp (gender); ACTIVE (engaged fraction of total skeletal muscle) is ACTIVITY×gender:
 //   cycling legs/glutes ~.27 M / .30 F ; running is more whole-body ~.40 M / .43 F.
-// CONC = g glycogen / kg active muscle: ~24 trained-rested, ~36 carb-loaded (~220 mmol/kg ww).
+// CONC = g glycogen / kg active muscle (wet weight; 1 mmol/kg ww = 0.162 g/kg):
+//   ~18 typical training (~110 mmol/kg), ~24 tapered & rested (~150), ~36 carb-loaded (~220).
+const GLY_CONC = { training:18, rested:24, loaded:36 };
+function glyConc(){ return GLY_CONC[S.glyState] ?? 24; }
 const GLY = { male:{ lean:0.88, musc:0.53 }, female:{ lean:0.82, musc:0.48 } };
 const ACTIVE = {
   cycling:{ male:0.27, female:0.30 },
@@ -516,7 +519,7 @@ const ACTIVE = {
 };
 function activeFrac(){ return (ACTIVE[S.activity]||ACTIVE.cycling)[S.gender] ?? 0.27; }
 function glycogenKcal(){
-  const kg=S.bodyLbs/2.2, g=GLY[S.gender]||GLY.male, conc=S.carbLoaded?36:24;
+  const kg=S.bodyLbs/2.2, g=GLY[S.gender]||GLY.male, conc=glyConc();
   return 450 + (kg*g.lean*g.musc*activeFrac())*conc*4.18;
 }
 // active (engaged) muscle mass in kg — exposed for display
@@ -719,6 +722,8 @@ function loadAthlete(){
       delete s.comp;
       if(s.gutAdapt===undefined && s.highCarbAdapted!==undefined) s.gutAdapt = s.highCarbAdapted ? 'highcarb' : 'adapted'; // migrate old boolean
       delete s.highCarbAdapted;
+      if(s.glyState===undefined && s.carbLoaded!==undefined) s.glyState = s.carbLoaded ? 'loaded' : 'rested'; // migrate old boolean
+      delete s.carbLoaded;
       Object.assign(S, s);
     }
     // keep a saved fuel list only if it's the new brand/split schema; legacy generic lists
@@ -1260,15 +1265,17 @@ function viewCaloric(){
       <h2 style="margin:0">Predicted Glycogen & Time to Bonk</h2>
       <div class="modeseg" style="margin-left:auto">
         <span class="muted" style="font-size:11px;margin-right:2px">Muscle state</span>
-        <button class="sm ${S.carbLoaded?'ghost':''}" onclick="window._setCarbLoaded(false)">Rested</button>
-        <button class="sm ${S.carbLoaded?'':'ghost'}" onclick="window._setCarbLoaded(true)">Carb-loaded</button>
+        <button class="sm ${S.glyState==='training'?'':'ghost'}" onclick="window._setGlyState('training')">Typical training</button>
+        <button class="sm ${S.glyState==='rested'?'':'ghost'}" onclick="window._setGlyState('rested')">Tapered &amp; rested</button>
+        <button class="sm ${S.glyState==='loaded'?'':'ghost'}" onclick="window._setGlyState('loaded')">Carb-loaded</button>
       </div>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:24px;margin-top:6px">
       <div class="res" style="border:none"><span>Glycogen stored&nbsp;</span><span class="v">${fmt(glycogenKcal()/4,0)} g</span></div>
       <div class="res" style="border:none"><span>Energy stored&nbsp;</span><span class="v">${fmt(glycogenKcal(),0)} kcal</span></div>
-      <div class="res" style="border:none"><span>Active muscle&nbsp;</span><span class="v">${fmt(activeMuscleKg(),1)} kg @ ${S.carbLoaded?36:24} g/kg</span></div>
+      <div class="res" style="border:none"><span>Active muscle&nbsp;</span><span class="v">${fmt(activeMuscleKg(),1)} kg @ ${glyConc()} g/kg</span></div>
     </div>
+    <div class="note" style="margin-top:4px">Muscle-glycogen concentration in engaged muscle (wet weight): <b>Typical training ${GLY_CONC.training} g/kg</b> (~110 mmol/kg — a normal training day, not fully topped off) · <b>Tapered &amp; rested ${GLY_CONC.rested} g/kg</b> (~150 mmol/kg — fully recovered and carb-replete after a taper) · <b>Carb-loaded ${GLY_CONC.loaded} g/kg</b> (~220 mmol/kg — supercompensated). Liver adds a fixed 450 kcal.</div>
     <div class="sub-h">Hours until bonk — no fuel</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">
       ${ints.map((z,i)=>{const b=bonkHours(i);return `<div class="bonk-item ${z.cls}">
@@ -1790,7 +1797,7 @@ window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'
 /* --- caloric: glycogen muscle state (rested vs carb-loaded) --- */
 /* --- athlete: activity (cycling vs running) --- */
 window._setActivity=(a)=>{ if(S.activity===a) return; S.activity=a; clampIntensityIdx(); render(); };
-window._setCarbLoaded=(on)=>{ if(S.carbLoaded===on) return; S.carbLoaded=on; render(); };
+window._setGlyState=(v)=>{ if(S.glyState===v||!GLY_CONC[v]) return; S.glyState=v; render(); };
 window._setGutAdapt=(level)=>{ if(S.gutAdapt===level) return; S.gutAdapt=level; render(); };
 /* --- running: pre-set pace rows --- */
 window._setPace=(i,v)=>{ S.runPaces[i]=parsePace(v); render(); };
