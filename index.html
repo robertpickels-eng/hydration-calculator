@@ -114,9 +114,27 @@
   th:first-child,td:first-child{text-align:left}
   table.tc th,table.tc td{text-align:center}
   table.tc input{text-align:center}
+  /* compact table inputs: drop the number spinners so tight columns (e.g. DE) don't clip */
+  table.tc input[type=number]{-moz-appearance:textfield}
+  table.tc input[type=number]::-webkit-outer-spin-button,
+  table.tc input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  /* foods table: render like clean text (matches drinks/electrolytes viewer rows), editable on hover/focus */
+  table.foods input{background:transparent;border-color:transparent;padding:5px 4px}
+  table.foods input:hover{background:var(--panel2);border-color:var(--line)}
+  table.foods input:focus{background:var(--panel2)}
   th{color:var(--muted);font-weight:500;position:sticky;top:0;background:var(--panel);
     font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;font-size:10.5px}
   tr:hover td{background:var(--panel2)}
+  /* fuel-plan: grouped two-row header + vertical group separators */
+  table.fuelplan thead tr.grp th{border-bottom:2px solid var(--line);color:var(--accent2);
+    font-size:10px;letter-spacing:.1em;padding-bottom:4px}
+  table.fuelplan thead tr.sub th{top:25px}
+  table.fuelplan th.grpsep,table.fuelplan td.grpsep{border-left:1px solid var(--line)}
+  table.fuelplan thead tr.grp th.grpsep{border-left:1px solid var(--line)}
+  /* fuel-plan editor cell: pack rows to the left so labels/inputs/buttons line up */
+  table.fuelplan .pf-row{display:flex;align-items:center;gap:8px;margin:3px 0;justify-content:flex-start}
+  table.fuelplan .pf-row .lbl{min-width:48px;color:var(--muted);font-size:11px;
+    font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.06em}
   .scroll{overflow:auto;max-height:560px;border-radius:8px;border:1px solid var(--line)}
   /* projection table: tighter columns so the Recommendation column fits in view */
   table.proj th,table.proj td{padding:5px 6px;font-size:12px}
@@ -1380,23 +1398,44 @@ function viewEventPlan(){
     <div class="stat-pill"><div class="sp-v">${fmt(totDrink,0)} g</div><div class="sp-l">From drink (${fmt(totBottles,1)} bottles)</div></div>
     <div class="stat-pill"><div class="sp-v" style="color:${(totTarget-totDrink-totFood)<=1?'var(--good)':'var(--warn)'}">${fmt(Math.max(0,totTarget-totDrink-totFood),0)} g</div><div class="sp-l">Still to cover with food</div></div>
   </div>
-  <div class="scroll" style="margin-top:6px"><table class="tc">
-    <thead><tr><th>Hr</th><th>CHO Need</th><th>from Drink</th><th>from Food</th><th>Gap (g)</th><th>Na in (mg)</th><th>Bottles &amp; food for this hour</th></tr></thead>
+  <div class="scroll" style="margin-top:6px"><table class="tc fuelplan">
+    <thead>
+      <tr class="grp">
+        <th rowspan="2">Hr</th>
+        <th colspan="4" class="grpsep">Carbohydrate (g)</th>
+        <th colspan="2" class="grpsep">Fluid (mL)</th>
+        <th colspan="2" class="grpsep">Sodium (mg)</th>
+        <th rowspan="2" class="grpsep" style="text-align:left">Bottles &amp; food for this hour</th>
+      </tr>
+      <tr class="sub">
+        <th class="grpsep">Need</th><th>Drink</th><th>Food</th><th>Gap</th>
+        <th class="grpsep">Need</th><th>In</th>
+        <th class="grpsep">Need</th><th>In</th>
+      </tr>
+    </thead>
     <tbody>${rows.map(r=>{
+      const sr=sweatRateLhr();
       const need=ev.targetRateG*r.dur, dr=drinkCarbFor(r.h,r.dur), food=foodCarbFor(r.h), gap=need-dr-food;
-      const gcls = gap<=1?'cho-positive':gap<=15?'cho-warning':'cho-negative';
       const items=planItemsFor(r.h), btl=planBottlesFor(r.h,r.dur);
-      const drinkNa=btl*naFromSaltsMg(r.h), foodNa=foodNaFor(r.h);
+      const drinkNa=btl*naFromSaltsMg(r.h), foodNa=foodNaFor(r.h), naIn=drinkNa+foodNa;
+      const fluidNeed=sr*r.dur*1000, fluidIn=btl*S.bottleOz*ML_PER_OZ;   // mL/hr replacement vs bottle volume
+      const naNeed=S.sweatNa*sr*r.dur;                                    // sweat Na loss this hour
+      const gapColor=gap<=1?'var(--good)':gap<=15?'var(--warn)':'var(--bad)';
+      const fluidColor=fluidIn>=fluidNeed-1?'var(--good)':'var(--warn)';
+      const naColor=naIn>=naNeed-1?'var(--good)':'var(--warn)';
       return `<tr>
         <td>${r.h}${r.dur<1?`<div class="muted" style="font-size:10px">${hm(r.dur)}</div>`:''}</td>
-        <td>${fmt(need,0)}</td><td>${fmt(dr,0)}</td><td>${fmt(food,0)}</td>
-        <td class="${gcls}" style="font-weight:700">${gap>0?fmt(gap,0):'✓'}</td>
-        <td>${fmt(drinkNa+foodNa,0)}<div class="muted" style="font-size:10px">${fmt(drinkNa,0)} drink · ${fmt(foodNa,0)} food</div></td>
-        <td style="text-align:left">
+        <td class="grpsep">${fmt(need,0)}</td><td>${fmt(dr,0)}</td><td>${fmt(food,0)}</td>
+        <td style="font-weight:700;color:${gapColor}">${gap>0?fmt(gap,0):'✓'}</td>
+        <td class="grpsep">${fmt(fluidNeed,0)}</td>
+        <td style="font-weight:700;color:${fluidColor}">${fmt(fluidIn,0)}</td>
+        <td class="grpsep">${fmt(naNeed,0)}</td>
+        <td style="font-weight:700;color:${naColor}">${fmt(naIn,0)}<div class="muted" style="font-size:10px">${fmt(drinkNa,0)} drink · ${fmt(foodNa,0)} food</div></td>
+        <td class="grpsep" style="text-align:left">
           ${(()=>{
             const mix=hourMix(r.h);
-            const head=`<div class="field" style="gap:6px;margin:2px 0">
-              <span class="u" style="width:auto;min-width:64px;text-align:left">Drink</span>
+            const head=`<div class="pf-row">
+              <span class="lbl">Drink</span>
               <input type="number" step="0.25" min="0" value="${btl}" style="width:54px" onchange="window._setPlanBottles(${r.h},this.value)" title="bottles this hour">
               <span class="u" style="width:auto">× ${mix?mixSummary(r.h):bottleName()} <span class="muted">(${fmt(dr,0)}g${mix?` · ${fmt(mixOsm(r.h),0)} mOsm/L`:''})</span></span>
               ${mix
@@ -1404,7 +1443,7 @@ function viewEventPlan(){
                 : `<button class="sm ghost" onclick="window._enableMix(${r.h})" title="build a custom plain-water + supplements mix for this hour">⚗ Custom mix</button>`}
             </div>`;
             if(!mix) return head;
-            const mrows=mix.map(e=>`<div class="field" style="gap:6px;margin:2px 0 2px 18px">
+            const mrows=mix.map(e=>`<div class="pf-row" style="margin-left:18px">
               <span class="muted" style="font-size:11px">+</span>
               <select style="flex:1;min-width:0" onchange="window._setMixItem(${r.h},'${e.id}','prodId',this.value)">${mixOpts(e.prodId)}</select>
               <input type="number" step="0.25" min="0" value="${e.qty}" style="width:54px" onchange="window._setMixItem(${r.h},'${e.id}','qty',this.value)" title="servings per bottle">
@@ -1415,7 +1454,7 @@ function viewEventPlan(){
               + `<div class="row-actions" style="margin:2px 0 4px 18px"><button class="sm ghost" onclick="window._addMixItem(${r.h})">＋ Add to mix</button>
                  <span class="muted" style="font-size:11px">Base = plain water (0 carb / 0 Na); add supplements above.</span></div>`;
           })()}
-          ${items.map(it=>`<div class="field" style="gap:6px;margin:2px 0">
+          ${items.map(it=>`<div class="pf-row">
             <select style="flex:1;min-width:0" onchange="window._setPlanItem('${it.id}','prodId',this.value)">${fuelOpts(it.prodId)}</select>
             <input type="number" step="0.5" value="${it.qty}" style="width:54px" onchange="window._setPlanItem('${it.id}','qty',this.value)" title="servings">
             <span class="u" style="width:auto">×</span>
@@ -1540,7 +1579,7 @@ function viewLibrary(){
   <div class="row-actions"><button class="sm" onclick="window._addDrink('lyte')">＋ Add electrolyte</button></div>
 
   <div class="sub-h" style="margin-top:18px">Foods <span class="muted" style="text-transform:none">— gels / chews / bars / whole food</span></div>
-  <div class="scroll" style="margin-top:6px"><table class="tc">${foodHead}<tbody>${foods.map(foodRow).join('')}</tbody></table></div>
+  <div class="scroll" style="margin-top:6px"><table class="tc foods">${foodHead}<tbody>${foods.map(foodRow).join('')}</tbody></table></div>
   <div class="row-actions"><button class="ghost sm" onclick="window._addFuel()">＋ Add food</button></div>
   </div>`;
 }
