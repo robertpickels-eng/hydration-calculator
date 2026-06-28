@@ -516,9 +516,11 @@ const GLY = { male:{ lean:0.88, musc:0.53 }, female:{ lean:0.82, musc:0.48 } };
 // liver glycogen also scales with state AND body size/gender: liver mass ≈ 2.5% of lean mass
 // (so gender flows through LEAN), × concentration g/kg liver ww (~5.5–7.8%) × 4.18 kcal/g.
 const LIVER_CONC = { training:55, rested:71, loaded:78 };
+const LIVER_MAX_G = 150;   // physiological ceiling on liver glycogen (g), caps large/loaded athletes
 function liverMassKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*0.025; }
 function liverGlyConc(){ return LIVER_CONC[S.glyState] ?? 71; }
-function liverKcal(){ return liverMassKg()*liverGlyConc()*4.18; }
+function liverGlyG(){ return Math.min(LIVER_MAX_G, liverMassKg()*liverGlyConc()); }
+function liverKcal(){ return liverGlyG()*4.18; }
 const ACTIVE = {
   cycling:{ male:0.27, female:0.30 },
   running:{ male:0.40, female:0.43 },
