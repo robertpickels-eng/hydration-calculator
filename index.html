@@ -1408,7 +1408,7 @@ function viewEventPlan(){
     <button class="sm ghost" style="margin-left:auto" onclick="window._resetPlanToBottle()" title="Rebuild every hour from the default bottle on the In the Bottle tab — clears custom hour-mixes and per-hour bottle counts (added foods stay)">↺ Reset to bottle</button>
     <button class="sm" onclick="window._printFuelCard()" title="Print a small cut-out fuel card">Print fuel card</button>
   </div>
-  <div class="note">Target carbohydrate (from the <b>Caloric Needs</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap.${ev.overGut?` <b style="color:var(--warn)">CHO Need is capped at the ${ev.targetRateGCap} g/hr gut ceiling — true demand is ~${fmt(ev.targetRateGRaw,0)} g/hr, so you'll run a glycogen deficit even if every gap is closed.</b>`:''}</div>
+  <div class="note">Target carbohydrate (from the <b>Caloric Needs</b> tab) minus what your <b>drink</b> and <b>food</b> supply leaves the gap. Set the <b>bottles</b> for each hour (defaults to ${fmt(S.bottlesPerHour,2)} bottle/hr at ${fmt(carbPerBottle(),0)} g carb/bottle) and add any number of foods. <b>Auto-fill</b> adds gels to close the gap. <b>Fluid</b> &amp; <b>Sodium</b> Gaps don't need 1:1 replacement — they clear (✓) while the shortfall stays within your <b>${fmt(S.acceptLoss,0)}% acceptable body-mass loss</b> (set on Athlete &amp; Activity), and only flag once you're on pace to exceed it.${ev.overGut?` <b style="color:var(--warn)">CHO Need is capped at the ${ev.targetRateGCap} g/hr gut ceiling — true demand is ~${fmt(ev.targetRateGRaw,0)} g/hr, so you'll run a glycogen deficit even if every gap is closed.</b>`:''}</div>
   <div class="grid cols3" style="margin:10px 0">
     <div class="stat-pill"><div class="sp-v">${fmt(totTarget,0)} g</div><div class="sp-l">Carb needed (event)</div></div>
     <div class="stat-pill"><div class="sp-v">${fmt(totDrink,0)} g</div><div class="sp-l">From drink (${fmt(totBottles,1)} bottles)</div></div>
@@ -1437,19 +1437,26 @@ function viewEventPlan(){
       const fluidNeed=sr*r.dur*1000, fluidIn=btl*S.bottleOz*ML_PER_OZ;   // mL/hr replacement vs bottle volume
       const naNeed=S.sweatNa*sr*r.dur;                                    // sweat Na loss this hour
       const fluidGap=fluidNeed-fluidIn, naGap=naNeed-naIn;
+      // fluid/sodium don't need 1:1 replacement — a shortfall is OK while it keeps you within your
+      // acceptable body-mass-loss budget (acceptLoss%) spread over the event. Sodium budget = the Na
+      // carried in that tolerable sweat volume (sweatNa × tolerable fluid deficit).
+      const accFluidL=(S.acceptLoss/100)*bodyKg();                                  // total tolerable fluid deficit (L)
+      const hrShare=r.dur/Math.max(0.001,+S.eventHours||0);                          // this hour's share of the event
+      const tolFluid=accFluidL*1000*hrShare;                                        // tolerable fluid shortfall this hour (mL)
+      const tolNa=S.sweatNa*accFluidL*hrShare;                                       // tolerable Na shortfall this hour (mg)
       const gapColor=gap<=1?'var(--good)':gap<=15?'var(--warn)':'var(--bad)';
-      const fluidGapColor=fluidGap<=1?'var(--good)':fluidGap<=300?'var(--warn)':'var(--bad)';
-      const naGapColor=naGap<=1?'var(--good)':naGap<=300?'var(--warn)':'var(--bad)';
+      const fluidGapColor=fluidGap<=tolFluid?'var(--good)':fluidGap<=tolFluid*2?'var(--warn)':'var(--bad)';
+      const naGapColor=naGap<=tolNa?'var(--good)':naGap<=tolNa*2?'var(--warn)':'var(--bad)';
       return `<tr>
         <td>${r.h}${r.dur<1?`<div class="muted" style="font-size:10px">${hm(r.dur)}</div>`:''}</td>
         <td class="grpsep">${fmt(need,0)}</td><td>${fmt(dr,0)}</td><td>${fmt(food,0)}</td>
         <td style="font-weight:700;color:${gapColor}">${gap>0?fmt(gap,0):'✓'}</td>
         <td class="grpsep">${fmt(fluidNeed,0)}</td>
         <td>${fmt(fluidIn,0)}</td>
-        <td style="font-weight:700;color:${fluidGapColor}">${fluidGap>0?fmt(fluidGap,0):'✓'}</td>
+        <td style="font-weight:700;color:${fluidGapColor}" title="Tolerable shortfall this hour ≈ ${fmt(tolFluid,0)} mL (within your ${fmt(S.acceptLoss,0)}% body-mass-loss budget)">${fluidGap>tolFluid?fmt(fluidGap,0):'✓'}</td>
         <td class="grpsep">${fmt(naNeed,0)}</td>
         <td>${fmt(naIn,0)}<div class="muted" style="font-size:10px">${fmt(drinkNa,0)} drink · ${fmt(foodNa,0)} food</div></td>
-        <td style="font-weight:700;color:${naGapColor}">${naGap>0?fmt(naGap,0):'✓'}</td>
+        <td style="font-weight:700;color:${naGapColor}" title="Tolerable shortfall this hour ≈ ${fmt(tolNa,0)} mg (Na in the sweat you're allowed to not replace)">${naGap>tolNa?fmt(naGap,0):'✓'}</td>
         <td class="grpsep" style="text-align:left">
           ${(()=>{
             const mix=hourMix(r.h);
