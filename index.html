@@ -1622,6 +1622,47 @@ function viewSweatLog(){
   </div>`;
 }
 
+/* ---------- TAB: SOURCES (published bases for the models) ---------- */
+function viewSources(){
+  const ref=(a,y,t,w)=>`<li style="margin:0 0 9px;line-height:1.5"><span>${a} (${y}). <span style="font-style:italic">${t}</span> ${w}</span></li>`;
+  const sec=(title,note,items)=>`<div class="sub-h" style="margin-top:18px">${title}</div>
+    ${note?`<div class="note" style="margin:2px 0 8px">${note}</div>`:''}
+    <ul style="margin:0;padding-left:18px;font-size:13px">${items}</ul>`;
+  return `<div class="panel">
+  <h2>Sources &amp; Methods</h2>
+  <div class="note">The calculations in this tool are built on established exercise-physiology and sports-nutrition methods; the works below are the published bases for each model. Per-product nutrition values are <span class="est">estimates</span> read from public labels and vary by batch and region. <b>For education and planning only — not medical or dietary advice.</b></div>
+
+  ${sec('Energy expenditure &amp; substrate use',
+    'Power (cycling) or pace and grade (running) → oxygen cost → calories, split into fat vs carbohydrate by respiratory quotient.',
+    ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — metabolic equations for cycling power and running speed/grade.')
+    + ref('Weir JB de V','1949','New methods for calculating metabolic rate with special reference to protein metabolism.','The Journal of Physiology, 109(1–2), 1–9.')
+    + ref('Péronnet F, Massicotte D','1991','Table of nonprotein respiratory quotient: an update.','Canadian Journal of Sport Sciences, 16(1), 23–29.')
+    + ref('Frayn KN','1983','Calculation of substrate oxidation rates in vivo from gaseous exchange.','Journal of Applied Physiology, 55(2), 628–634.'))}
+
+  ${sec('Glycogen stores &amp; depletion',
+    'Muscle-glycogen concentration per kg of engaged muscle (×4.18 kcal/g) plus a liver contribution; time-to-bonk = stored glycogen ÷ carbohydrate burn rate.',
+    ref('Bergström J, Hermansen L, Hultman E, Saltin B','1967','Diet, muscle glycogen and physical performance.','Acta Physiologica Scandinavica, 71(2–3), 140–150. — trained-rested vs carbohydrate-loaded muscle glycogen.')
+    + ref('Nilsson LH, Hultman E','1973','Liver glycogen in man — the effect of total starvation or a carbohydrate-poor diet followed by carbohydrate refeeding.','Scandinavian Journal of Clinical and Laboratory Investigation, 32(4), 325–330. — liver glycogen content and its sensitivity to feeding/fasting.')
+    + ref('Acheson KJ, Schutz Y, Bessard T, et al.','1988','Glycogen storage capacity and de novo lipogenesis during massive carbohydrate overfeeding in man.','American Journal of Clinical Nutrition, 48(2), 240–247.'))}
+
+  ${sec('Carbohydrate intake &amp; gut absorption',
+    'Hourly carbohydrate targets and the gut-absorption ceiling: ≈ 60 g/hr from single-transportable (glucose-only) vs ≈ 90 g/hr from multiple-transportable (glucose + fructose) carbohydrate.',
+    ref('Jeukendrup AE','2014','A step towards personalized sports nutrition: carbohydrate intake during exercise.','Sports Medicine, 44(Suppl 1), S25–S33.')
+    + ref('Jentjens RLPG, Moseley L, Waring RH, Harding LK, Jeukendrup AE','2004','Oxidation of combined ingestion of glucose and fructose during exercise.','Journal of Applied Physiology, 96(4), 1277–1284.'))}
+
+  ${sec('Hydration, sweat &amp; sodium',
+    'Sweat-rate fluid replacement, sodium-balance targets, and extracellular-fluid sizing.',
+    ref('Sawka MN, Burke LM, Eichner ER, Maughan RJ, Montain SJ, Stachenfeld NS','2007','American College of Sports Medicine position stand: Exercise and fluid replacement.','Medicine &amp; Science in Sports &amp; Exercise, 39(2), 377–390.')
+    + ref('Baker LB','2017','Sweating rate and sweat sodium concentration in athletes: a review of methodology and intra/interindividual variability.','Sports Medicine, 47(Suppl 1), 111–128.'))}
+
+  ${sec('Drink osmolality &amp; gastric emptying',
+    'Bottle osmolality from carbohydrate + electrolyte particles and its effect on gastric emptying; maltodextrin osmolality estimated from its dextrose equivalent (number-average MW ≈ 18016 ÷ DE).',
+    ref('Vist GE, Maughan RJ','1995','The effect of osmolality and carbohydrate content on the rate of gastric emptying of liquids in man.','The Journal of Physiology, 486(2), 523–531.'))}
+
+  <div class="note" style="margin-top:18px">Citations are provided so the methods can be checked against the primary literature. Where a model uses a representative constant (e.g. liver glycogen, active-muscle fraction), that value is an approximation chosen to sit within the ranges reported in these works; individual physiology varies.</div>
+  </div>`;
+}
+
 /* ============================================================
    TABS / ROUTER
    ============================================================ */
@@ -1632,6 +1673,7 @@ const TABS = [
   ['plan','Fueling Plan',viewEventPlan],
   ['db','Fuel Library',viewLibrary],
   ['sweat','Sweat Log',viewSweatLog],
+  ['sources','Sources',viewSources],
 ];
 let active='rider';
 // build a re-findable selector for the focused field, so live re-renders don't drop the cursor
