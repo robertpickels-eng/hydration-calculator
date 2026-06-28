@@ -504,7 +504,7 @@ function kmToMiPace(secKm){ return secKm*MI_PER_KM; }
 
 function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
 
-// glycogen stores (kcal) = 450 (liver) + active-muscle glycogen.
+// glycogen stores (kcal) = liver glycogen + active-muscle glycogen.
 // active-muscle glycogen = muscle mass (kg×LEAN×MUSC) × ACTIVE fraction × CONC (g/kg) × 4.18 kcal/g.
 // LEAN/MUSC are body comp (gender); ACTIVE (engaged fraction of total skeletal muscle) is ACTIVITY×gender:
 //   cycling legs/glutes ~.27 M / .30 F ; running is more whole-body ~.40 M / .43 F.
@@ -513,6 +513,12 @@ function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
 const GLY_CONC = { training:18, rested:24, loaded:36 };
 function glyConc(){ return GLY_CONC[S.glyState] ?? 24; }
 const GLY = { male:{ lean:0.88, musc:0.53 }, female:{ lean:0.82, musc:0.48 } };
+// liver glycogen also scales with state AND body size/gender: liver mass ≈ 2.5% of lean mass
+// (so gender flows through LEAN), × concentration g/kg liver ww (~5.5–7.8%) × 4.18 kcal/g.
+const LIVER_CONC = { training:55, rested:71, loaded:78 };
+function liverMassKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*0.025; }
+function liverGlyConc(){ return LIVER_CONC[S.glyState] ?? 71; }
+function liverKcal(){ return liverMassKg()*liverGlyConc()*4.18; }
 const ACTIVE = {
   cycling:{ male:0.27, female:0.30 },
   running:{ male:0.40, female:0.43 },
@@ -520,7 +526,7 @@ const ACTIVE = {
 function activeFrac(){ return (ACTIVE[S.activity]||ACTIVE.cycling)[S.gender] ?? 0.27; }
 function glycogenKcal(){
   const kg=S.bodyLbs/2.2, g=GLY[S.gender]||GLY.male, conc=glyConc();
-  return 450 + (kg*g.lean*g.musc*activeFrac())*conc*4.18;
+  return liverKcal() + (kg*g.lean*g.musc*activeFrac())*conc*4.18;
 }
 // active (engaged) muscle mass in kg — exposed for display
 function activeMuscleKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*g.musc*activeFrac(); }
@@ -1275,7 +1281,7 @@ function viewCaloric(){
       <div class="res" style="border:none"><span>Energy stored&nbsp;</span><span class="v">${fmt(glycogenKcal(),0)} kcal</span></div>
       <div class="res" style="border:none"><span>Active muscle&nbsp;</span><span class="v">${fmt(activeMuscleKg(),1)} kg @ ${glyConc()} g/kg</span></div>
     </div>
-    <div class="note" style="margin-top:4px">Muscle-glycogen concentration in engaged muscle (wet weight): <b>Typical training ${GLY_CONC.training} g/kg</b> (~110 mmol/kg — a normal training day, not fully topped off) · <b>Tapered &amp; rested ${GLY_CONC.rested} g/kg</b> (~150 mmol/kg — fully recovered and carb-replete after a taper) · <b>Carb-loaded ${GLY_CONC.loaded} g/kg</b> (~220 mmol/kg — supercompensated). Liver adds a fixed 450 kcal.</div>
+    <div class="note" style="margin-top:4px">Muscle-glycogen concentration in engaged muscle (wet weight): <b>Typical training ${GLY_CONC.training} g/kg</b> (~110 mmol/kg — a normal training day, not fully topped off) · <b>Tapered &amp; rested ${GLY_CONC.rested} g/kg</b> (~150 mmol/kg — fully recovered and carb-replete after a taper) · <b>Carb-loaded ${GLY_CONC.loaded} g/kg</b> (~220 mmol/kg — supercompensated). Liver adds <b>${fmt(liverKcal(),0)} kcal</b> (~${fmt(liverKcal()/4,0)} g), scaled by the same state plus your lean body mass — well-fed; an overnight-fasted start would be lower.</div>
     <div class="sub-h">Hours until bonk — no fuel</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">
       ${ints.map((z,i)=>{const b=bonkHours(i);return `<div class="bonk-item ${z.cls}">
