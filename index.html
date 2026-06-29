@@ -331,6 +331,7 @@ const S = {
   gutAdapt:'adapted',                           // gut training level → carb cap: unadapted 90 · adapted 120 · highcarb 150 g/hr
   // --- GPS course (uploaded track) ---
   course:null,                                 // parsed track: {name, distM, gainM, lossM, avgGrade, maxGrade, profile:[[d_m,ele_m],…]}
+  pacingStrategy:'even',                        // performance-predictor pacing: even|climb5|climb10|climb15|neg|fade (off the selected average)
   bikeLbs:18,                                  // bike weight (lbs) — cycling course-time model (total mass = body + bike)
   cda:0.32,                                    // aerodynamic drag area CdA (m²) — road hoods default
   crr:0.005,                                   // rolling-resistance coefficient — good road tires
@@ -711,40 +712,75 @@ function cycSpeedMS(P, grade){
   for(let k=0;k<60;k++){ const mid=(lo+hi)/2; if(f(mid)>0) hi=mid; else lo=mid; }
   return Math.max(1.0, Math.min(35,(lo+hi)/2));           // floor ~3.6 km/h (walk the bike)
 }
-// speed (m/s) at a grade holding a given workload (intensity index zi; defaults to S.eventZone)
-function courseSolveSpeed(grade, zi){
-  const it=intItem(zi==null?S.eventZone:zi);
+// speed (m/s) at a grade for a base intensity item, scaled by a pacing multiplier m (m=1 → hold).
+// cycling scales watts; running scales the flat-equivalent speed then solves iso-effort at grade.
+function solveSpeedScaled(grade, m, it){
   if(isRun()){
-    const v0=it.speed||0;                                  // flat speed (m/min)
-    if(v0<=0) return 0;
+    const base=it.speed||0; if(base<=0) return 0;          // base flat speed (m/min)
+    const v0=base*m;                                       // scaled flat-equivalent speed
     let den=0.2 + 0.9*Math.max(-0.30,Math.min(0.30,grade)); // ACSM VO₂, iso-effort solve for speed
     if(den<0.05) den=0.05;                                 // guard steep descents (model breaks down)
     const v=(0.2*v0)/den;                                  // m/min
-    return Math.max(0.5*v0, Math.min(1.8*v0, v))/60;       // clamp to a sane range → m/s
+    return Math.max(0.4*base, Math.min(2.0*base, v))/60;   // clamp vs base flat speed → m/s
   }
-  return cycSpeedMS(it.watts||0, grade);
+  return cycSpeedMS((it.watts||0)*m, grade);
 }
+// speed (m/s) at a grade holding a given workload (intensity index zi; defaults to S.eventZone)
+function courseSolveSpeed(grade, zi){ return solveSpeedScaled(grade, 1, intItem(zi==null?S.eventZone:zi)); }
+
+// pacing-strategy intensity multiplier around the rider's selected average.
+// climb* scale by grade (full effect at ±PACE_GREF, proportional between, flat = 1);
+// neg/fade ramp over the course by distance fraction. Normalized later so the average holds.
+const PACE_GREF=0.06;                                       // grade (6%) at which climb strategies reach full effect
+function paceMult(strat, grade, frac){
+  const gn=Math.max(-1,Math.min(1,(grade||0)/PACE_GREF));
+  switch(strat){
+    case 'climb5':  return 1+0.05*gn;
+    case 'climb10': return 1+0.10*gn;
+    case 'climb15': return 1+0.15*gn;
+    case 'neg':     return 1+0.06*(2*(frac||0)-1);          // start easier → finish harder
+    case 'fade':    return 1-0.06*(2*(frac||0)-1);          // start harder → fade
+    default:        return 1;                                // even
+  }
+}
+const PACE_LABELS={ even:'Even (hold average)', climb5:'Climb +5% / ease descents', climb10:'Climb +10% / ease descents', climb15:'Climb +15% / ease descents', neg:'Negative split', fade:'Fast start / fade' };
 // integrate the course at the selected workload → total time + per-30-min grade profile
 function courseTime(){
   const c=S.course; if(!c||!c.profile||c.profile.length<2) return null;
-  const pr=c.profile, SEG=SEG_LEN*3600;                    // seconds per 30-min segment
-  let T=0, D=0, nextBound=SEG; const segDist=[], segGr=[], bounds=[];
+  const pr=c.profile, SEG=SEG_LEN*3600, totalD=pr[pr.length-1][0]||1;
+  const strat=S.pacingStrategy||'even';
+  const useStrat = !S.segBreakdown && strat!=='even';      // strategy drives pacing unless manual segments are on
+  const baseIt=intItem(S.eventZone);
+  // normalize a strategy so its time-weighted average intensity equals the selected average (redistribute, don't inflate)
+  let scale=1;
+  if(useStrat){
+    let sw=0, st=0;
+    for(let i=1;i<pr.length;i++){ const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
+      const grade=(pr[i][1]-pr[i-1][1])/dd, m=paceMult(strat,grade,pr[i-1][0]/totalD);
+      const v=solveSpeedScaled(grade,m,baseIt); if(v<=0) continue;
+      const dt=dd/v; sw+=m*dt; st+=dt; }
+    const avgM=st>0?sw/st:1; scale=avgM>0?1/avgM:1;
+  }
+  let T=0, D=0, nextBound=SEG; const segDist=[], segGr=[], segIv=[], bounds=[];
   for(let i=1;i<pr.length;i++){
     const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
     const grade=(pr[i][1]-pr[i-1][1])/dd;
-    // in 30-min-segment mode each segment can hold its own power/pace; pick by elapsed-time index
-    const zi = S.segBreakdown ? (S.segZones[Math.floor(T/SEG)] ?? S.eventZone) : S.eventZone;
-    const v=courseSolveSpeed(grade, zi); if(v<=0) continue;
+    let v, iv;                                             // iv = representative intensity (W cyc · flat-speed m/min run)
+    if(useStrat){ const m=paceMult(strat,grade,pr[i-1][0]/totalD)*scale; v=solveSpeedScaled(grade,m,baseIt);
+      iv=(isRun()?(baseIt.speed||0):(baseIt.watts||0))*m; }
+    else { const zi=S.segBreakdown?(S.segZones[Math.floor(T/SEG)]??S.eventZone):S.eventZone; v=courseSolveSpeed(grade,zi);
+      const it2=intItem(zi); iv=isRun()?(it2.speed||0):(it2.watts||0); }
+    if(v<=0) continue;
     const dt=dd/v;
     // record the distance reached at each 30-min boundary this pair crosses (interpolated)
-    while(T+dt>=nextBound){ const frac=Math.max(0,Math.min(1,(nextBound-T)/dt)); bounds.push(D+dd*frac); nextBound+=SEG; }
+    while(T+dt>=nextBound){ const fr=Math.max(0,Math.min(1,(nextBound-T)/dt)); bounds.push(D+dd*fr); nextBound+=SEG; }
     const b=Math.floor((T+dt/2)/SEG);                      // bucket by the pair's midpoint time
-    segDist[b]=(segDist[b]||0)+dd; segGr[b]=(segGr[b]||0)+dd*grade;
+    segDist[b]=(segDist[b]||0)+dd; segGr[b]=(segGr[b]||0)+dd*grade; segIv[b]=(segIv[b]||0)+iv*dd;
     T+=dt; D+=dd;
   }
-  const nSeg=Math.max(1, Math.ceil(T/SEG)), grades=[];
-  for(let b=0;b<nSeg;b++){ const w=segDist[b]||0; grades.push(+(((w>0?segGr[b]/w:0))*100).toFixed(1)); }
-  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, bounds, distM:D };
+  const nSeg=Math.max(1, Math.ceil(T/SEG)), grades=[], ivs=[];
+  for(let b=0;b<nSeg;b++){ const w=segDist[b]||0; grades.push(+(((w>0?segGr[b]/w:0))*100).toFixed(1)); ivs.push(w>0?segIv[b]/w:0); }
+  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds, distM:D, scale, strat:useStrat?strat:(S.segBreakdown?'manual':'even') };
 }
 // inline elevation-profile sparkline (filled area + line), with 30-min segment
 // shading + dashed dividers placed at each boundary's distance (from courseTime t)
@@ -791,19 +827,26 @@ function courseParamRow(label,key,unit,step,presets){
 function coursePanel(){
   const run=isRun(), c=S.course;
   const head=`<div class="panel" style="margin-top:16px">
-    <h2>Course (GPS) <span class="muted" style="text-transform:none;font-weight:400">— optional</span></h2>`;
+    <h2>Performance Predictor <span class="muted" style="text-transform:none;font-weight:400">— GPS course, optional</span></h2>`;
   const fileRow=`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Upload track</label>
       <input type="file" id="courseFile" accept=".gpx,.tcx,application/gpx+xml,application/xml,text/xml" style="flex:1;min-width:0"></div>
     <div class="note">Drop in a <b>GPX</b> or <b>TCX</b> file exported from Strava, Garmin, Komoot, or Ride With GPS. We read distance, elevation &amp; grade to build your segment plan — parsing happens entirely in your browser; nothing is uploaded.</div>`;
   if(!c) return head+fileRow+`</div>`;
   const mi=c.distM/M_PER_MI, t=courseTime(), it=intItem(S.eventZone);
   const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
-  const wlLbl = S.segBreakdown ? `per-segment ${run?'pace':'power'}` : wl;   // breakdown mode = each segment's own intensity
+  const strat=S.pacingStrategy||'even';
+  const wlLbl = S.segBreakdown ? `per-segment ${run?'pace':'power'}`
+              : (strat==='even' ? wl : `${wl}, ${PACE_LABELS[strat].toLowerCase()}`);   // strategy redistributes the average
   return head+`
     <div class="row-actions" style="margin-bottom:8px;align-items:center">
       <span class="muted" style="font-size:12px">📈 ${escHtml(c.name||'course')}</span>
       <button class="sm ghost" onclick="window._clearCourse()" style="margin-left:auto">Clear course</button>
     </div>
+    ${S.segBreakdown
+      ? `<div class="note">Using your <b>manual 30-min segments</b> — switch <b>${run?'Run':'Ride'} breakdown</b> to <b>Single average</b> (above) to use a preset pacing strategy instead.</div>`
+      : `<div class="field"><label style="flex:0 0 auto;margin-right:8px">Pacing strategy</label>
+          <select onchange="window._setPacing(this.value)" style="flex:1;min-width:0">${Object.keys(PACE_LABELS).map(k=>`<option value="${k}"${strat===k?' selected':''}>${PACE_LABELS[k]}</option>`).join('')}</select></div>
+        <div class="note">Distributes your selected <b>${wl}</b> average across the course — climb strategies push harder uphill and ease on descents (normalized so your <i>average effort</i> stays put); splits ramp effort over the ride. <b>Apply</b> bakes it into the 30-min segments.</div>`}
     ${(()=>{ const dmax=c.profile[c.profile.length-1][0]||1, bs=(t&&t.bounds)||[];
       const step=Math.max(1,Math.ceil(bs.length/16));   // thin labels so they don't collide on long courses
       const labs=bs.map((d,i)=>(i%step===0||i===bs.length-1)
@@ -1906,10 +1949,11 @@ function viewSources(){
     + ref('Péronnet F, Massicotte D','1991','Table of nonprotein respiratory quotient: an update.','Canadian Journal of Sport Sciences, 16(1), 23–29.')
     + ref('Frayn KN','1983','Calculation of substrate oxidation rates in vivo from gaseous exchange.','Journal of Applied Physiology, 55(2), 628–634.'))}
 
-  ${sec('GPS course — power/pace → speed → time',
-    'For an uploaded course, speed at each point is solved from your chosen workload and the local grade, then integrated into time and the 30-minute segments. Cycling solves road speed from power against gravity + rolling resistance + aerodynamic drag (steady-state form: the acceleration and wind terms are omitted). Running inverts the ACSM running equation at constant oxygen cost (hold effort, let pace drift with grade), clamped because the linear model is unreliable on steep descents.',
+  ${sec('Performance predictor — pacing &amp; course time',
+    'For an uploaded course, speed at each point is solved from your chosen workload and the local grade, then integrated into total time and the 30-minute segments. Cycling solves road speed from power against gravity + rolling resistance + aerodynamic drag (steady-state form: the acceleration and wind terms are omitted). Running inverts the ACSM running equation at constant oxygen cost (hold effort, let pace drift with grade), clamped because the linear model is unreliable on steep descents. Preset pacing strategies redistribute your selected average — pushing harder uphill (where time is spent) and easing on descents (where extra power is lost to cubic aero drag) — normalized so time-weighted average effort is held constant.',
     ref('Martin JC, Milliken DL, Cobb JE, McFadden KL, Coggan AR','1998','Validation of a mathematical model for road cycling power.','Journal of Applied Biomechanics, 14(3), 276–291.')
     + ref('di Prampero PE, Cortili G, Mognoni P, Saibene F','1979','Equation of motion of a cyclist.','Journal of Applied Physiology, 47(1), 201–206. — gravity, rolling and air-resistance components of cycling power.')
+    + ref('Swain DP','1997','A model for optimizing cycling performance by varying power on hills and in wind.','Medicine &amp; Science in Sports &amp; Exercise, 29(8), 1104–1108. — basis for riding harder uphill / easier downhill at a fixed average effort.')
     + ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — running speed/grade ⇄ oxygen-cost equation, here inverted at constant effort.'))}
 
   ${sec('Glycogen stores &amp; depletion',
@@ -2158,17 +2202,22 @@ window._loadCourse=(e)=>{
   rd.onerror=()=>alert('Could not read the file.');
   rd.readAsText(f);
 };
-// push the course onto the 30-min segment plan: duration from estimated time, grades per block
+// push the course onto the 30-min segment plan: duration from estimated time, grades + (strategy) intensity per block
 window._applyCourse=()=>{
   const r=courseTime(); if(!r){ alert('Upload a course first.'); return; }
   S.eventHours=+r.hours.toFixed(2);
-  S.segBreakdown=true;
   S.segGrades=r.segGrades.slice();
-  S.segZones=Array.from({length:r.nSeg},()=>S.eventZone);
+  // snap each segment's target intensity (from the pacing strategy) to the nearest available zone/workload index
+  const L=intensities();
+  const nearestIdx=val=>{ if(!(val>0)) return S.eventZone; let bi=0,bd=Infinity;
+    L.forEach((it,i)=>{ const iv=isRun()?(it.speed||0):(it.watts||0), d=Math.abs(iv-val); if(d<bd){bd=d;bi=i;} }); return bi; };
+  S.segZones=r.segIv.map(nearestIdx);
+  S.segBreakdown=true;
   if(S.course) S.course.appliedAt=S.eventZone;
   render();
 };
 window._clearCourse=()=>{ S.course=null; render(); };
+window._setPacing=(v)=>{ S.pacingStrategy=v; render(); };
 // cycling time-model params via preset dropdown (manual number input commits through the generic data-k handler)
 window._setCourseParam=(key,val)=>{ if(val==='') return; S[key]=+val; render(); };
 
