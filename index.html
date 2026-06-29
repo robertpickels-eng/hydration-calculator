@@ -821,7 +821,7 @@ function syncDuration(){
 // diverging colour for a segment's effort relative to the rider's average (cool=easier, warm=harder)
 function paceColor(r){
   const t=Math.max(-1,Math.min(1,((r||1)-1)/0.2));        // ±20% off average → full cool/warm
-  const warm=[200,80,46], cool=[64,116,196], neut=[120,130,150], mix=(a,b,f)=>Math.round(a+(b-a)*f);
+  const warm=[200,80,46], cool=[34,92,184], neut=[178,184,196], mix=(a,b,f)=>Math.round(a+(b-a)*f);
   const c = t>=0 ? neut.map((n,i)=>mix(n,warm[i],t)) : neut.map((n,i)=>mix(n,cool[i],-t));
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
@@ -914,8 +914,8 @@ function coursePanel(){
     })()}
     <div class="muted" style="font-size:10px;margin-top:2px;display:flex;flex-wrap:wrap;gap:3px 10px;align-items:center">
       <span>Bands tinted by <b>effort vs your average</b>; dashed dividers mark each <b>30-min segment</b> at ${wlLbl} — climbs compress a segment, descents stretch it.</span>
-      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(64,116,196);display:inline-block"></span>easier</span>
-      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(120,130,150);display:inline-block"></span>average</span>
+      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(34,92,184);display:inline-block"></span>easier</span>
+      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(178,184,196);border:1px solid rgba(73,83,109,.35);display:inline-block"></span>average</span>
       <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(200,80,46);display:inline-block"></span>harder</span>
     </div>
     <div class="grid cols3" style="margin-top:10px">
@@ -2413,7 +2413,22 @@ window._resetAthlete=()=>{ if(confirm('Reset all saved inputs to defaults? This 
 
 loadAthlete();                                   // restore last session's inputs (if any)
 window.addEventListener('beforeunload', saveAthlete);  // belt-and-suspenders save
-render();
+// resilient first paint: a malformed restored object (e.g. an old/partial saved course) must never
+// blank the whole app. Drop the most fragile restored state and retry; if it still fails, offer a reset.
+try{ render(); }
+catch(e){
+  console.error('Initial render failed — recovering:', e);
+  try{ S.course=null; }catch(_){}
+  try{ render(); }
+  catch(e2){
+    console.error('Recovery render also failed:', e2);
+    const app=document.getElementById('app');
+    if(app) app.innerHTML='<div class="panel" style="margin-top:16px"><h2>Couldn’t load your saved data</h2>'
+      +'<div class="note">Something in this browser’s saved profile is preventing the calculator from loading. '
+      +'Resetting clears only your saved inputs in this browser.</div>'
+      +'<button class="sm" style="margin-top:10px" onclick="try{localStorage.removeItem(ATH_KEY);}catch(e){};location.reload();">Reset saved data &amp; reload</button></div>';
+  }
+}
 _booted=true;                                    // initial render done — count real usage from here on
 </script>
 <!-- GoatCounter analytics (privacy-friendly, cookieless) -->
