@@ -334,7 +334,7 @@ const S = {
   bikeLbs:18,                                  // bike weight (lbs) — cycling course-time model (total mass = body + bike)
   cda:0.32,                                    // aerodynamic drag area CdA (m²) — road hoods default
   crr:0.005,                                   // rolling-resistance coefficient — good road tires
-  airRho:1.20,                                 // air density (kg/m³) — ~sea level, mild temp
+  airRho:1.225,                                // air density (kg/m³) — standard sea level, 15°C (preset-aligned)
   // --- event fuel plan ---
   planItems:[],                                // per-hour product picks: [{hour, prodId, qty}]
   planBottles:{},                              // per-hour bottle override {hour: bottles}; unset = bottles/hr × dur
@@ -769,6 +769,24 @@ function courseSpark(c, t){
     ${lines}
   </svg>`;
 }
+// preset menus for the cycling time model (label → value); manual entry stays available alongside
+const BIKE_PRESETS=[['Aero / race road — 16',16],['Road — 18',18],['Endurance / disc road — 20',20],['TT / tri — 21',21],['Gravel — 22',22],['MTB — 28',28]];
+const CDA_PRESETS =[['Upright / tops — 0.40',0.40],['Road hoods — 0.32',0.32],['Road drops — 0.28',0.28],['Aero / TT bars — 0.24',0.24],['Gravel — 0.38',0.38],['MTB — 0.48',0.48]];
+const CRR_PRESETS =[['Race tires, smooth tarmac — 0.004',0.004],['Good road clinchers — 0.005',0.005],['Training / rough tarmac — 0.007',0.007],['Gravel — 0.012',0.012],['MTB knobby off-road — 0.020',0.020]];
+const RHO_PRESETS =[['Sea level, 15°C — 1.225',1.225],['Sea level, 25°C — 1.18',1.18],['500 m — 1.17',1.17],['1000 m — 1.11',1.11],['Boulder ~1650 m — 1.04',1.04],['2000 m — 1.01',1.01],['2500 m — 0.96',0.96]];
+// one row: label + preset dropdown (selects a known value, or shows "Custom…") + manual number input
+function courseParamRow(label,key,unit,step,presets){
+  const cur=+S[key], match=presets.find(p=>Math.abs(p[1]-cur)<1e-9);
+  const opts=presets.map(p=>`<option value="${p[1]}"${match&&match[1]===p[1]?' selected':''}>${p[0]}</option>`).join('');
+  return `<div class="field" style="gap:6px">
+    <label style="flex:0 0 84px">${label}</label>
+    <select onchange="window._setCourseParam('${key}',this.value)" style="flex:1;min-width:0">
+      <option value="" disabled${match?'':' selected'}>Custom…</option>${opts}
+    </select>
+    <input type="number" step="${step}" value="${S[key]}" data-k="${key}" data-obj="S" style="width:62px" title="Manual entry">
+    <span class="u" style="width:auto">${unit}</span>
+  </div>`;
+}
 // the Course (GPS) panel on the Athlete & Activity tab
 function coursePanel(){
   const run=isRun(), c=S.course;
@@ -806,13 +824,11 @@ function coursePanel(){
       <button class="sm" onclick="window._applyCourse()" style="margin-left:auto">Apply to 30-min plan →</button>
     </div>
     ${run?'':`<div class="sub-h" style="margin-top:12px">Cycling time model</div>
-    <div class="fgrid">
-      ${numField('Bike weight','bikeLbs','lbs')}
-      <div class="field"><label>CdA</label><input type="number" step="0.01" value="${S.cda}" data-k="cda" data-obj="S"><span class="u">m²</span></div>
-      <div class="field"><label>Crr</label><input type="number" step="0.001" value="${S.crr}" data-k="crr" data-obj="S"><span class="u">&nbsp;</span></div>
-      <div class="field"><label>Air density</label><input type="number" step="0.01" value="${S.airRho}" data-k="airRho" data-obj="S"><span class="u">kg/m³</span></div>
-    </div>
-    <div class="note">Speed at each grade is solved from your selected power against gravity + rolling + aero drag (Martin et&nbsp;al.). Defaults are a road bike on the hoods — drop CdA for aero bars, raise Crr for gravel/MTB.</div>`}
+    ${courseParamRow('Bike weight','bikeLbs','lbs',0.5,BIKE_PRESETS)}
+    ${courseParamRow('CdA','cda','m²',0.01,CDA_PRESETS)}
+    ${courseParamRow('Crr','crr','',0.001,CRR_PRESETS)}
+    ${courseParamRow('Air density','airRho','kg/m³',0.01,RHO_PRESETS)}
+    <div class="note">Speed at each grade is solved from your selected power against gravity + rolling + aero drag (Martin et&nbsp;al.). Pick a preset or type your own — total mass adds your body weight to the bike, and air density thins with altitude (Boulder ≈ 1.04).</div>`}
     <div class="note">${run
       ? `Running time holds your selected effort (VO₂) and lets pace drift with grade — climbs slow you, descents speed you up. The ACSM model is least reliable on steep descents, so per-segment speed is clamped to a sane range.`
       : `At constant power your calories don't change with grade, so for cycling the course's value is an accurate <b>duration</b> and how it splits across the 30-minute blocks — the segment list below inherits it.`}</div>
@@ -2153,6 +2169,8 @@ window._applyCourse=()=>{
   render();
 };
 window._clearCourse=()=>{ S.course=null; render(); };
+// cycling time-model params via preset dropdown (manual number input commits through the generic data-k handler)
+window._setCourseParam=(key,val)=>{ if(val==='') return; S[key]=+val; render(); };
 
 /* --- event plan: per-hour food items + fuel library --- */
 window._addPlanItem=(hour)=>{ S.planItems.push({id:_xid('pi'),hour,prodId:FUEL_PRODUCTS[0].id,qty:1}); render(); };
