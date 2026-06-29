@@ -326,6 +326,7 @@ const S = {
   intensityMode:'zone',                        // 'zone' (%FTP zones) | 'workload' (custom wattage rows)
   workloads:[100,125,150,175,200],             // pre-set wattage rows (Pre-Set Workload mode)
   eventZone:1,                                 // default avg-intensity index for the whole ride (into the active intensity list)
+  eventIntPct:100,                             // manual fine-tune of the average intensity, as % of the selected zone's midpoint (predictor)
   segBreakdown:false,                          // show per-30-min-segment intensity editor
   segZones:[],                                 // chosen intensity index per 30-min segment
   activityMode:'manual',                       // Activity Information source: 'manual' (enter duration/intensity) | 'course' (upload a GPS track → auto 30-min plan)
@@ -606,6 +607,13 @@ function intensities(){
 }
 function intItem(i){ const L=intensities(); return L[Math.min(i,L.length-1)]||{}; }
 function intMetricsByIdx(i, grade=0){ return imetrics(intItem(i), grade); }
+// the predictor's working AVERAGE intensity: the selected zone's midpoint scaled by the manual
+// fine-tune (eventIntPct, % of that zone). returns a synthetic intensity item with adjusted watts/speed.
+function eventBaseIt(){
+  const it=intItem(S.eventZone), f=(+S.eventIntPct||100)/100;
+  if(isRun()){ const sp=(it.speed||0)*f; return {...it, speed:sp, pace:speedToPace(sp)}; }
+  return {...it, watts:(it.watts||0)*f};
+}
 // hours at an intensity (level) before stored glycogen is exhausted with NO fuel
 function bonkHours(i){ const m=intMetricsByIdx(i,0); return m.choKcalHr>0 ? glycogenKcal()/m.choKcalHr : 99; }
 // keep the chosen intensity indices valid when the list length changes (mode/row edits)
@@ -803,7 +811,7 @@ function courseTime(){
   const pr=c.profile, SEG=SEG_LEN*3600, totalD=pr[pr.length-1][0]||1;
   const strat=S.pacingStrategy||'even';
   const useStrat = !S.segBreakdown && strat!=='even';      // strategy drives pacing unless manual segments are on
-  const baseIt=intItem(S.eventZone);
+  const baseIt=eventBaseIt();                              // adjusted average (selected zone × manual fine-tune)
   // normalize a strategy so its time-weighted average intensity equals the selected average (redistribute, don't inflate)
   let scale=1;
   if(useStrat){
@@ -828,8 +836,9 @@ function courseTime(){
     let v, iv;                                             // iv = representative intensity (W cyc · flat-speed m/min run)
     if(useStrat){ const m=paceMult(strat,grade,pr[i-1][0]/totalD)*scale; v=solveSpeedScaled(grade,m,baseIt);
       iv=(isRun()?(baseIt.speed||0):(baseIt.watts||0))*m; }
-    else { const zi=S.segBreakdown?(S.segZones[Math.floor(T/SEG)]??S.eventZone):S.eventZone; v=courseSolveSpeed(grade,zi);
-      const it2=intItem(zi); iv=isRun()?(it2.speed||0):(it2.watts||0); }
+    else { let it2; if(S.segBreakdown){ const zi=S.segZones[Math.floor(T/SEG)]??S.eventZone; it2=intItem(zi); }
+      else { it2=baseIt; }                                 // even strategy holds the (adjusted) average
+      v=solveSpeedScaled(grade,1,it2); iv=isRun()?(it2.speed||0):(it2.watts||0); }
     if(v<=0) continue;
     let dt=dd/v;
     // ---- reserve dynamics: deplete above CP/CS (clamp the effort if it would run the reserve dry),
@@ -889,7 +898,7 @@ function courseSpark(c, t){
   const bs=((t&&t.bounds)||[]).filter(d=>d>0&&d<dmax-1e-6);
   const edges=[0,...bs,dmax];
   // tint each 30-min band by its effort vs the selected average
-  const segIv=(t&&t.segIv)||[], baseIt=intItem(S.eventZone), baseIv=isRun()?(baseIt.speed||0):(baseIt.watts||0);
+  const segIv=(t&&t.segIv)||[], baseIt=eventBaseIt(), baseIv=isRun()?(baseIt.speed||0):(baseIt.watts||0);
   let bands='';
   for(let i=0;i<edges.length-1;i++){ const x0=X(edges[i]), x1=X(edges[i+1]);
     const r=(baseIv>0 && segIv[i]>0)?segIv[i]/baseIv:1;
@@ -944,7 +953,7 @@ function courseBody(intOpts){
     <div class="note">Pick a built-in <b>reference course</b> above, or drop in a <b>GPX</b>/<b>TCX</b> file exported from Strava, Garmin, Komoot, or Ride With GPS. We read distance, elevation &amp; grade to build your segment plan — parsing happens entirely in your browser; nothing is uploaded.</div>`;
   const loading = _courseLoading ? `<div class="note">⏳ Reading course… large files can take a few seconds.</div>` : '';
   if(!c) return ref+loading+fileRow;
-  const mi=c.distM/M_PER_MI, t=S._ct||courseTime(), it=intItem(S.eventZone);
+  const mi=c.distM/M_PER_MI, t=S._ct||courseTime(), it=eventBaseIt();
   const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
   const strat=S.pacingStrategy||'even';
   const wlLbl = strat==='even' ? wl : `${wl}, ${PACE_LABELS[strat].toLowerCase()}`;   // strategy redistributes the average
@@ -956,41 +965,19 @@ function courseBody(intOpts){
         ${run?`<input type="number" data-seg="g${i}" step="0.5" value="${s.grade}" style="width:50px" onchange="window._setSegGrade(${i},this.value)" title="% grade"><span class="u" style="width:auto">%</span>`:''}
       </div>`).join('')}
     </div>`;
-  return ref+loading+`
-    <div class="row-actions" style="margin:6px 0 8px;align-items:center">
-      <span class="muted" style="font-size:12px">📈 ${escHtml(c.name||'course')}</span>
-      <button class="sm ghost" onclick="window._clearCourse()" style="margin-left:auto">Clear course</button>
-    </div>
-    <div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg ${run?'pace':'intensity'} <span class="muted">(zone)</span></label>
-      <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select></div>
-    <div class="field"><label style="flex:0 0 auto;margin-right:8px">Pacing strategy</label>
+  // avg intensity = selected zone + a manual fine-tune input (watts cyc · pace run) right beside the dropdown
+  const avgRow = `<div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg ${run?'pace':'intensity'} <span class="muted">(zone)</span></label>
+      <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select>
+      <input type="${run?'text':'number'}"${run?'':' step="5"'} value="${run?paceFmt(it.pace):Math.round(it.watts)}" style="width:60px;${run?'text-align:center':''}" onchange="window._setEventIntensity(this.value)" title="Fine-tune the average ${run?'pace':'power'} up or down from the zone midpoint">
+      <span class="u" style="width:auto">${run?'/mi':'W'}</span></div>
+    ${S.eventIntPct!=100?`<div class="note" style="margin-top:0">Manually set to <b>${fmt(S.eventIntPct,0)}%</b> of the zone midpoint — <a onclick="window._setEventZone(${S.eventZone})" style="color:var(--accent2);cursor:pointer">reset to midpoint</a>.</div>`:''}`;
+  const pacingRow = `<div class="field"><label style="flex:0 0 auto;margin-right:8px">Pacing strategy</label>
       <select onchange="window._setPacing(this.value)" style="flex:1;min-width:0">${Object.keys(PACE_LABELS).map(k=>`<option value="${k}"${strat===k?' selected':''}>${PACE_LABELS[k]}</option>`).join('')}</select></div>
     <div class="row-actions" style="margin-top:8px;align-items:center">
-      <span class="muted" style="font-size:11px">Distributes your selected <b>${wl}</b> average across the course — climb strategies push harder uphill and ease on descents (normalized so your <i>average effort</i> holds). Each 30-min segment snaps to the nearest <b>zone</b> (effort = its midpoint); <b>Re-apply</b> rebuilds them after a change, then fine-tune any segment below.</span>
+      <span class="muted" style="font-size:11px">Distributes your <b>${wl}</b> average across the course — climb strategies push harder uphill and ease on descents (normalized so your <i>average effort</i> holds). Each 30-min segment snaps to the nearest <b>zone</b>; <b>Re-apply</b> rebuilds them, then fine-tune any segment below.</span>
       <button class="sm" onclick="window._applyCourse()" style="margin-left:auto">Re-apply to 30-min plan →</button>
-    </div>
-    ${(()=>{ const dmax=c.profile[c.profile.length-1][0]||1, bs=(t&&t.bounds)||[];
-      const step=Math.max(1,Math.ceil(bs.length/16));   // thin labels so they don't collide on long courses
-      const labs=bs.map((d,i)=>(i%step===0||i===bs.length-1)
-        ? `<span style="position:absolute;left:${Math.min(98,d/dmax*100).toFixed(2)}%;transform:translateX(-50%);font-size:9px;color:var(--muted);white-space:nowrap">${hm((i+1)*SEG_LEN)}</span>` : '').join('');
-      return `<div style="position:relative;margin-top:10px">${courseSpark(c,t)}${bs.length?`<div style="position:relative;height:12px;margin-top:1px">${labs}</div>`:''}</div>`;
-    })()}
-    <div class="muted" style="font-size:10px;margin-top:2px;display:flex;flex-wrap:wrap;gap:3px 10px;align-items:center">
-      <span>Bands tinted by <b>effort vs your average</b>; dashed dividers mark each <b>30-min segment</b> at ${wlLbl} — climbs compress a segment, descents stretch it.</span>
-      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(34,92,184);display:inline-block"></span>easier</span>
-      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(178,184,196);border:1px solid rgba(73,83,109,.35);display:inline-block"></span>average</span>
-      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(200,80,46);display:inline-block"></span>harder</span>
-    </div>
-    <div class="grid cols3" style="margin-top:10px">
-      <div class="res"><span>Distance</span><span class="v">${fmt(mi,1)} mi · ${fmt(c.distM/1000,1)} km</span></div>
-      <div class="res"><span>Elevation gain</span><span class="v">${fmt(c.gainM*3.28084,0)} ft · ${fmt(c.gainM,0)} m</span></div>
-      <div class="res"><span>Elevation loss</span><span class="v">${fmt(c.lossM*3.28084,0)} ft · ${fmt(c.lossM,0)} m</span></div>
-      <div class="res"><span>Avg grade</span><span class="v">${fmt(c.avgGrade,1)}%</span></div>
-      <div class="res"><span>Max grade</span><span class="v">${fmt(c.maxGrade,1)}%</span></div>
-      <div class="res"><span>Mean altitude</span><span class="v">${fmt((c.elevMeanM||0)*3.28084,0)} ft · ${fmt(c.elevMeanM||0,0)} m</span></div>
-      <div class="res"><span>Est. moving time <span class="muted">(@ ${wlLbl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
-    </div>
-    ${(()=>{
+    </div>`;
+  const sustainBlock = (()=>{
       const cpLbl = run ? paceFmt(speedToPace(csSpeed()))+'/mi' : Math.round(cpWatts())+' W';
       const reserveKey = run ? 'dPrimeM' : 'wPrimeKJ';
       const reserveEff = run ? dPrimeMeters() : wPrimeKJeff();
@@ -1011,14 +998,55 @@ function courseBody(intOpts){
           ${overridden?`<a onclick="window._resetReserve()" style="color:var(--accent2);cursor:pointer;font-size:11px;margin-left:4px">auto</a>`:`<span class="muted" style="font-size:11px;margin-left:4px">auto · ${run?'2.5 m/kg':'0.30 kJ/kg'}</span>`}
         </div>
         <div class="note" style="margin-top:2px">${status}. Efforts above ${run?'critical speed':'critical power'} draw down a <i>finite</i> reserve (T<sub>lim</sub> = ${R} / (intensity − boundary)) that recovers only slowly below it (Skiba). A strategy that would empty it is clamped to what's actually sustainable, and the anaerobic work done above the line is charged to your carbohydrate need.</div>`;
-    })()}
-    ${run?'':`<div class="sub-h" style="margin-top:12px">Cycling time model</div>
+    })();
+  const cyclingModel = run ? '' : `<div class="sub-h">Cycling time model</div>
     ${courseParamRow('Bike weight','bikeLbs','lbs',0.5,BIKE_PRESETS)}
     ${courseParamRow('CdA','cda','m²',0.01,CDA_PRESETS)}
     ${courseParamRow('Crr','crr','',0.0001,CRR_PRESETS)}
     ${courseParamRow('Air density','airRho','kg/m³',0.01,RHO_PRESETS)}
     <div class="note">Speed at each grade is solved from your selected power against gravity + rolling + aero drag (Martin et&nbsp;al.). Pick a preset or type your own. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA) — override above if you have a measured value. Total mass adds your body weight to the bike.</div>
-    <div class="note"><b>Air-density assumptions:</b> uses the International Standard Atmosphere (dry air, 15&nbsp;°C at sea level, standard lapse rate) applied to the course's <i>mean</i> altitude — one value for the whole ride. It doesn't know the day's temperature, humidity or barometric pressure: a hot or low-pressure day means thinner air (you'd be a touch faster), a cold or high-pressure day means denser air (slightly slower). Altitude is whatever your device logged (GPS/barometric), so accuracy follows the track. Aero drag scales directly with air density, so this mostly matters at higher speeds on flats and descents.</div>`}
+    <div class="note"><b>Air-density assumptions:</b> uses the International Standard Atmosphere (dry air, 15&nbsp;°C at sea level, standard lapse rate) applied to the course's <i>mean</i> altitude — one value for the whole ride. It doesn't know the day's temperature, humidity or barometric pressure: a hot or low-pressure day means thinner air (you'd be a touch faster), a cold or high-pressure day means denser air (slightly slower). Altitude is whatever your device logged (GPS/barometric), so accuracy follows the track. Aero drag scales directly with air density, so this mostly matters at higher speeds on flats and descents.</div>`;
+  // elevation sparkline + overlays: proposed avg watts/pace inside each band, time + cumulative distance under each divider
+  const sparkAndLabels = (()=>{
+      const dmax=c.profile[c.profile.length-1][0]||1, bs=(t&&t.bounds)||[];
+      const bsf=bs.filter(d=>d>0&&d<dmax-1e-6), edges=[0,...bsf,dmax], segIv=(t&&t.segIv)||[];
+      const step=Math.max(1,Math.ceil(bsf.length/16));     // thin labels so they don't collide on long courses
+      const wattLabs=edges.slice(0,-1).map((e0,i)=>{ if(i%step!==0 && i!==edges.length-2) return '';
+        const mid=(e0+edges[i+1])/2, iv=segIv[i]; if(!(iv>0)) return '';
+        const lab=run?paceFmt(speedToPace(iv))+'/mi':Math.round(iv)+'W';
+        return `<span style="position:absolute;left:${Math.min(97,Math.max(3,mid/dmax*100)).toFixed(2)}%;top:3px;transform:translateX(-50%);font-size:9px;font-weight:600;font-family:var(--font-mono);color:var(--txt);white-space:nowrap;background:rgba(241,242,243,.72);padding:0 2px;border-radius:2px">${lab}</span>`;
+      }).join('');
+      const labs=bsf.map((d,i)=>(i%step===0||i===bsf.length-1)
+        ? `<span style="position:absolute;left:${Math.min(98,d/dmax*100).toFixed(2)}%;transform:translateX(-50%);font-size:9px;color:var(--muted);white-space:nowrap;text-align:center;line-height:1.15">${hm((i+1)*SEG_LEN)}<br><span style="color:var(--accent2);font-family:var(--font-mono)">${fmt(d/M_PER_MI,1)} mi</span></span>` : '').join('');
+      return `<div style="position:relative;margin-top:10px">${courseSpark(c,t)}<div style="position:absolute;inset:0;pointer-events:none">${wattLabs}</div></div>${bsf.length?`<div style="position:relative;height:26px;margin-top:1px">${labs}</div>`:''}`;
+    })();
+  return ref+loading+`
+    <div class="row-actions" style="margin:6px 0 8px;align-items:center">
+      <span class="muted" style="font-size:12px">📈 ${escHtml(c.name||'course')}</span>
+      <button class="sm ghost" onclick="window._clearCourse()" style="margin-left:auto">Clear course</button>
+    </div>
+    ${run
+      ? `${avgRow}${pacingRow}${sustainBlock}`
+      : `<div class="grid cols2">
+          <div>${avgRow}${pacingRow}${sustainBlock}</div>
+          <div>${cyclingModel}</div>
+        </div>`}
+    ${sparkAndLabels}
+    <div class="muted" style="font-size:10px;margin-top:2px;display:flex;flex-wrap:wrap;gap:3px 10px;align-items:center">
+      <span>Bands tinted by <b>effort vs your average</b>, labelled with the <b>proposed avg ${run?'pace':'power'}</b>; dashed dividers mark each <b>30-min segment</b> (time + distance below) at ${wlLbl} — climbs compress a segment, descents stretch it.</span>
+      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(34,92,184);display:inline-block"></span>easier</span>
+      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(178,184,196);border:1px solid rgba(73,83,109,.35);display:inline-block"></span>average</span>
+      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(200,80,46);display:inline-block"></span>harder</span>
+    </div>
+    <div class="grid cols3" style="margin-top:10px">
+      <div class="res"><span>Distance</span><span class="v">${fmt(mi,1)} mi · ${fmt(c.distM/1000,1)} km</span></div>
+      <div class="res"><span>Elevation gain</span><span class="v">${fmt(c.gainM*3.28084,0)} ft · ${fmt(c.gainM,0)} m</span></div>
+      <div class="res"><span>Elevation loss</span><span class="v">${fmt(c.lossM*3.28084,0)} ft · ${fmt(c.lossM,0)} m</span></div>
+      <div class="res"><span>Avg grade</span><span class="v">${fmt(c.avgGrade,1)}%</span></div>
+      <div class="res"><span>Max grade</span><span class="v">${fmt(c.maxGrade,1)}%</span></div>
+      <div class="res"><span>Mean altitude</span><span class="v">${fmt((c.elevMeanM||0)*3.28084,0)} ft · ${fmt(c.elevMeanM||0,0)} m</span></div>
+      <div class="res"><span>Est. moving time <span class="muted">(@ ${wlLbl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
+    </div>
     ${segEditor}
     <div class="note">${run
       ? `Running time holds your selected effort (VO₂) and lets pace drift with grade — climbs slow you, descents speed you up. The ACSM model is least reliable on steep descents, so per-segment speed is clamped to a sane range.`
@@ -2350,7 +2378,7 @@ window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'
 
 /* --- caloric: glycogen muscle state (rested vs carb-loaded) --- */
 /* --- athlete: activity (cycling vs running) --- */
-window._setActivity=(a)=>{ if(S.activity===a) return; S.activity=a; clampIntensityIdx(); render(); };
+window._setActivity=(a)=>{ if(S.activity===a) return; S.activity=a; S.eventIntPct=100; clampIntensityIdx(); render(); };
 window._setGlyState=(v)=>{ if(S.glyState===v||!GLY_CONC[v]) return; S.glyState=v; render(); };
 window._setGutAdapt=(level)=>{ if(S.gutAdapt===level) return; S.gutAdapt=level; render(); };
 /* --- running: pre-set pace rows --- */
@@ -2366,7 +2394,14 @@ window._setWorkload=(i,v)=>{ S.workloads[i]=+v||0; render(); };
 window._addWorkload=()=>{ const last=S.workloads[S.workloads.length-1]; S.workloads.push((+last||75)+25); render(); };
 window._rmWorkload=(i)=>{ if(S.workloads.length<=1) return; S.workloads.splice(i,1); clampIntensityIdx(); render(); };
 /* --- caloric: event intensity + 30-min segments --- */
-window._setEventZone=(v)=>{ S.eventZone=+v; render(); };
+window._setEventZone=(v)=>{ S.eventZone=+v; S.eventIntPct=100; render(); };  // a new zone resets the manual fine-tune to its midpoint
+// manual fine-tune of the average intensity (watts cyc · pace run) — stored as % of the selected zone's midpoint
+window._setEventIntensity=(val)=>{
+  const it=intItem(S.eventZone);
+  if(isRun()){ const base=it.speed||0, sp=paceToSpeed(parsePace(val)); if(base>0&&sp>0) S.eventIntPct=+(sp/base*100).toFixed(1); }
+  else { const base=it.watts||0, w=+val||0; if(base>0&&w>0) S.eventIntPct=+(w/base*100).toFixed(1); }
+  render();
+};
 window._setSegMode=(on)=>{
   if(S.segBreakdown===on) return;
   S.segBreakdown=on;
