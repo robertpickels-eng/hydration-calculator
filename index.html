@@ -334,7 +334,7 @@ const S = {
   pacingStrategy:'even',                        // performance-predictor pacing: even|climb5|climb10|climb15|neg|fade (off the selected average)
   bikeLbs:18,                                  // bike weight (lbs) — cycling course-time model (total mass = body + bike)
   cda:0.32,                                    // aerodynamic drag area CdA (m²) — road hoods default
-  crr:0.005,                                   // rolling-resistance coefficient — good road tires
+  crr:0.0045,                                  // rolling-resistance coefficient — Recreation road preset (Michelin Power Road, butyl)
   airRho:1.225,                                // air density (kg/m³) — standard sea level, 15°C (preset-aligned)
   // --- event fuel plan ---
   planItems:[],                                // per-hour product picks: [{hour, prodId, qty}]
@@ -811,7 +811,13 @@ function courseSpark(c, t){
 // preset menus for the cycling time model (label → value); manual entry stays available alongside
 const BIKE_PRESETS=[['Aero / race road — 16',16],['Road — 18',18],['Endurance / disc road — 20',20],['TT / tri — 21',21],['Gravel — 22',22],['MTB — 28',28]];
 const CDA_PRESETS =[['Upright / tops — 0.40',0.40],['Road hoods — 0.32',0.32],['Road drops — 0.28',0.28],['Aero / TT bars — 0.24',0.24],['Gravel — 0.38',0.38],['MTB — 0.48',0.48]];
-const CRR_PRESETS =[['High-performance road — 0.004',0.004],['Recreation road — 0.005',0.005],['Fast gravel — 0.008',0.008],['Knobby gravel — 0.012',0.012],['XC mountain bike — 0.017',0.017]];
+const CRR_PRESETS =[
+  ['High-performance road — 0.0029 (Conti GP 5000 TL)',0.0029],
+  ['Recreation road — 0.0045 (Michelin Power Road, butyl)',0.0045],
+  ['Fast gravel — 0.0052 (Conti Terra Speed TL)',0.0052],
+  ['Grippy gravel — 0.0074 (WTB Resolute TCS Light TL)',0.0074],
+  ['Fast XC — 0.0057 (Schwalbe Rick XC TL)',0.0057],
+  ['Grippy XC — 0.0079 (Conti Dubnital Race Grip TL)',0.0079]];
 const RHO_PRESETS =[['Sea level, 15°C — 1.225',1.225],['Sea level, 25°C — 1.18',1.18],['500 m — 1.17',1.17],['1000 m — 1.11',1.11],['Boulder ~1650 m — 1.04',1.04],['2000 m — 1.01',1.01],['2500 m — 0.96',0.96]];
 // one row: label + preset dropdown (selects a known value, or shows "Custom…") + manual number input
 function courseParamRow(label,key,unit,step,presets){
@@ -873,7 +879,7 @@ function coursePanel(){
     ${run?'':`<div class="sub-h" style="margin-top:12px">Cycling time model</div>
     ${courseParamRow('Bike weight','bikeLbs','lbs',0.5,BIKE_PRESETS)}
     ${courseParamRow('CdA','cda','m²',0.01,CDA_PRESETS)}
-    ${courseParamRow('Crr','crr','',0.001,CRR_PRESETS)}
+    ${courseParamRow('Crr','crr','',0.0001,CRR_PRESETS)}
     ${courseParamRow('Air density','airRho','kg/m³',0.01,RHO_PRESETS)}
     <div class="note">Speed at each grade is solved from your selected power against gravity + rolling + aero drag (Martin et&nbsp;al.). Pick a preset or type your own. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA) — override above if you have a measured value. Total mass adds your body weight to the bike.</div>`}
     <div class="note">${run
@@ -1958,7 +1964,8 @@ function viewSources(){
     ref('Martin JC, Milliken DL, Cobb JE, McFadden KL, Coggan AR','1998','Validation of a mathematical model for road cycling power.','Journal of Applied Biomechanics, 14(3), 276–291.')
     + ref('di Prampero PE, Cortili G, Mognoni P, Saibene F','1979','Equation of motion of a cyclist.','Journal of Applied Physiology, 47(1), 201–206. — gravity, rolling and air-resistance components of cycling power.')
     + ref('Swain DP','1997','A model for optimizing cycling performance by varying power on hills and in wind.','Medicine &amp; Science in Sports &amp; Exercise, 29(8), 1104–1108. — basis for riding harder uphill / easier downhill at a fixed average effort.')
-    + ref('Wilson DG, Schmidt T','2020','Bicycling Science (4th ed.).','MIT Press. — representative rolling-resistance (Crr) and drag-area (CdA) values for road, gravel and MTB tires and positions.')
+    + ref('Wilson DG, Schmidt T','2020','Bicycling Science (4th ed.).','MIT Press. — drag-area (CdA) reference values by riding position.')
+    + ref('BicycleRollingResistance.com','lab data','Rolling-resistance test database.','— Crr presets are lab-measured values for specific named tires (e.g. Continental GP 5000 TL, Michelin Power Road, WTB Resolute, Schwalbe/Continental XC); real-world Crr varies with pressure, surface and load.')
     + ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — running speed/grade ⇄ oxygen-cost equation, here inverted at constant effort.'))}
 
   ${sec('Glycogen stores &amp; depletion',
