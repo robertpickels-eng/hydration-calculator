@@ -329,6 +329,12 @@ const S = {
   segZones:[],                                 // chosen intensity index per 30-min segment
   reservePct:25,                               // % glycogen to keep in reserve at event end
   gutAdapt:'adapted',                           // gut training level → carb cap: unadapted 90 · adapted 120 · highcarb 150 g/hr
+  // --- GPS course (uploaded track) ---
+  course:null,                                 // parsed track: {name, distM, gainM, lossM, avgGrade, maxGrade, profile:[[d_m,ele_m],…]}
+  bikeLbs:18,                                  // bike weight (lbs) — cycling course-time model (total mass = body + bike)
+  cda:0.32,                                    // aerodynamic drag area CdA (m²) — road hoods default
+  crr:0.005,                                   // rolling-resistance coefficient — good road tires
+  airRho:1.20,                                 // air density (kg/m³) — ~sea level, mild temp
   // --- event fuel plan ---
   planItems:[],                                // per-hour product picks: [{hour, prodId, qty}]
   planBottles:{},                              // per-hour bottle override {hour: bottles}; unset = bottles/hr × dur
@@ -637,6 +643,161 @@ function choExcess(intakeG, ceilingG){
 }
 
 /* ============================================================
+   GPS COURSE  — parse an uploaded GPX/TCX track into a smoothed
+   elevation profile, then solve workload → speed → time so the
+   30-minute segments + activity duration come straight off the course.
+   All parsing is client-side; nothing leaves the browser.
+   ============================================================ */
+// great-circle distance between two lat/lon points (m)
+function haversine(la1,lo1,la2,lo2){
+  const R=6371000, rad=Math.PI/180;
+  const dla=(la2-la1)*rad, dlo=(lo2-lo1)*rad;
+  const a=Math.sin(dla/2)**2 + Math.cos(la1*rad)*Math.cos(la2*rad)*Math.sin(dlo/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(a)));
+}
+// parse GPX (<trkpt>/<rtept>) or TCX (<Trackpoint>) text → compact, smoothed profile + stats
+function parseTrack(text){
+  const doc=new DOMParser().parseFromString(text,'application/xml');
+  if(doc.querySelector('parsererror')) throw new Error('not valid XML');
+  let pts=[];
+  doc.querySelectorAll('trkpt, rtept').forEach(p=>{                       // GPX
+    const lat=+p.getAttribute('lat'), lon=+p.getAttribute('lon');
+    const eN=p.querySelector('ele'), ele=eN?parseFloat(eN.textContent):NaN;
+    if(isFinite(lat)&&isFinite(lon)) pts.push({lat,lon,ele:isFinite(ele)?ele:null});
+  });
+  if(!pts.length) doc.querySelectorAll('Trackpoint').forEach(p=>{          // TCX
+    const la=p.querySelector('Position > LatitudeDegrees'),
+          lo=p.querySelector('Position > LongitudeDegrees'),
+          al=p.querySelector('AltitudeMeters');
+    if(la&&lo){ const lat=+la.textContent, lon=+lo.textContent, ele=al?parseFloat(al.textContent):NaN;
+      if(isFinite(lat)&&isFinite(lon)) pts.push({lat,lon,ele:isFinite(ele)?ele:null}); }
+  });
+  if(pts.length<2) throw new Error('no track points found (need a GPX or TCX with a track)');
+  // cumulative distance along the track
+  let cum=0; const raw=[{d:0,ele:pts[0].ele}];
+  for(let i=1;i<pts.length;i++){ cum+=haversine(pts[i-1].lat,pts[i-1].lon,pts[i].lat,pts[i].lon); raw.push({d:cum,ele:pts[i].ele}); }
+  if(!(cum>0)) throw new Error('track has no distance');
+  // carry-forward any missing elevations
+  let last=0; raw.forEach(r=>{ if(r.ele==null) r.ele=last; else last=r.ele; });
+  // resample to even spacing → compact storage + clean grade math (cap ~1500 samples)
+  const spacing=Math.max(20, cum/1500), prof=[];
+  let j=0;
+  for(let di=0; di<=cum; di+=spacing){
+    while(j<raw.length-1 && raw[j+1].d<di) j++;
+    const a=raw[j], b=raw[Math.min(j+1,raw.length-1)];
+    const t=(b.d>a.d)?(di-a.d)/(b.d-a.d):0;
+    prof.push([+di.toFixed(1), +(a.ele+(b.ele-a.ele)*t).toFixed(1)]);
+  }
+  // smooth elevation (±2-sample moving average) to kill GPS noise before computing grade
+  const sm=prof.map((p,i)=>{ let s=0,n=0; for(let k=-2;k<=2;k++){ const q=prof[i+k]; if(q){ s+=q[1]; n++; } } return [p[0], +(s/n).toFixed(1)]; });
+  let gain=0,loss=0,maxG=0;
+  for(let i=1;i<sm.length;i++){ const dd=sm[i][0]-sm[i-1][0], de=sm[i][1]-sm[i-1][1];
+    if(de>0)gain+=de; else loss-=de;
+    if(dd>0) maxG=Math.max(maxG, Math.abs(de/dd)); }
+  const avgGrade=(sm[sm.length-1][1]-sm[0][1])/cum;
+  return { distM:cum, gainM:gain, lossM:loss, maxGrade:maxG*100, avgGrade:avgGrade*100, profile:sm };
+}
+// cycling: solve road speed (m/s) at a given grade for a target power, against
+// gravity + rolling + aero drag (simplified Martin et al. 1998). Cubic → bisection.
+function cycSpeedMS(P, grade){
+  const m=(S.bodyLbs + (+S.bikeLbs||0))/2.2;            // total system mass (kg)
+  const g=9.8067, th=Math.atan(grade||0);
+  const Gf=m*g*(Math.sin(th) + (+S.crr||0)*Math.cos(th)); // resistive force from gravity+rolling (N)
+  const A=0.5*(+S.airRho||1.2)*(+S.cda||0.32);            // aero coefficient
+  const Pw=0.97*Math.max(0,P);                            // power at wheel (drivetrain η≈0.97)
+  const f=v=>A*v*v*v + Gf*v - Pw;                         // = 0 at the steady-state speed
+  let lo=0.01, hi=40;
+  if(f(hi)<0) return 35;                                  // steep descent → terminal-ish, clamp
+  for(let k=0;k<60;k++){ const mid=(lo+hi)/2; if(f(mid)>0) hi=mid; else lo=mid; }
+  return Math.max(1.0, Math.min(35,(lo+hi)/2));           // floor ~3.6 km/h (walk the bike)
+}
+// speed (m/s) at a grade holding the currently-selected workload (S.eventZone)
+function courseSolveSpeed(grade){
+  const it=intItem(S.eventZone);
+  if(isRun()){
+    const v0=it.speed||0;                                  // flat speed (m/min)
+    if(v0<=0) return 0;
+    let den=0.2 + 0.9*Math.max(-0.30,Math.min(0.30,grade)); // ACSM VO₂, iso-effort solve for speed
+    if(den<0.05) den=0.05;                                 // guard steep descents (model breaks down)
+    const v=(0.2*v0)/den;                                  // m/min
+    return Math.max(0.5*v0, Math.min(1.8*v0, v))/60;       // clamp to a sane range → m/s
+  }
+  return cycSpeedMS(it.watts||0, grade);
+}
+// integrate the course at the selected workload → total time + per-30-min grade profile
+function courseTime(){
+  const c=S.course; if(!c||!c.profile||c.profile.length<2) return null;
+  const pr=c.profile, SEG=SEG_LEN*3600;                    // seconds per 30-min segment
+  let T=0; const segDist=[], segGr=[];
+  for(let i=1;i<pr.length;i++){
+    const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
+    const grade=(pr[i][1]-pr[i-1][1])/dd;
+    const v=courseSolveSpeed(grade); if(v<=0) continue;
+    const dt=dd/v, b=Math.floor((T+dt/2)/SEG);             // bucket by the pair's midpoint time
+    segDist[b]=(segDist[b]||0)+dd; segGr[b]=(segGr[b]||0)+dd*grade;
+    T+=dt;
+  }
+  const nSeg=Math.max(1, Math.ceil(T/SEG)), grades=[];
+  for(let b=0;b<nSeg;b++){ const w=segDist[b]||0; grades.push(+(((w>0?segGr[b]/w:0))*100).toFixed(1)); }
+  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades };
+}
+// inline elevation-profile sparkline (filled area + line)
+function courseSpark(c){
+  const pr=c.profile; if(!pr||pr.length<2) return '';
+  const W=600, H=70, dmax=pr[pr.length-1][0]||1;
+  let emin=Infinity, emax=-Infinity; pr.forEach(p=>{ if(p[1]<emin)emin=p[1]; if(p[1]>emax)emax=p[1]; });
+  if(emax-emin<1) emax=emin+1;
+  const X=d=>d/dmax*W, Y=e=>H-3-((e-emin)/(emax-emin))*(H-6);
+  const pts=pr.map(p=>X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1));
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:70px;display:block;background:rgba(73,83,109,.06);border-radius:6px">
+    <path d="M0,${H} L${pts.join(' L')} L${W},${H} Z" fill="var(--accent2)" opacity="0.16"></path>
+    <path d="M${pts.join(' L')}" fill="none" stroke="var(--accent2)" stroke-width="1.5"></path>
+  </svg>`;
+}
+// the Course (GPS) panel on the Athlete & Activity tab
+function coursePanel(){
+  const run=isRun(), c=S.course;
+  const head=`<div class="panel" style="margin-top:16px">
+    <h2>Course (GPS) <span class="muted" style="text-transform:none;font-weight:400">— optional</span></h2>`;
+  const fileRow=`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Upload track</label>
+      <input type="file" id="courseFile" accept=".gpx,.tcx,application/gpx+xml,application/xml,text/xml" style="flex:1;min-width:0"></div>
+    <div class="note">Drop in a <b>GPX</b> or <b>TCX</b> file exported from Strava, Garmin, Komoot, or Ride With GPS. We read distance, elevation &amp; grade to build your segment plan — parsing happens entirely in your browser; nothing is uploaded.</div>`;
+  if(!c) return head+fileRow+`</div>`;
+  const mi=c.distM/M_PER_MI, t=courseTime(), it=intItem(S.eventZone);
+  const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
+  return head+`
+    <div class="row-actions" style="margin-bottom:8px;align-items:center">
+      <span class="muted" style="font-size:12px">📈 ${escHtml(c.name||'course')}</span>
+      <button class="sm ghost" onclick="window._clearCourse()" style="margin-left:auto">Clear course</button>
+    </div>
+    ${courseSpark(c)}
+    <div class="grid cols3" style="margin-top:10px">
+      <div class="res"><span>Distance</span><span class="v">${fmt(mi,1)} mi · ${fmt(c.distM/1000,1)} km</span></div>
+      <div class="res"><span>Elevation gain</span><span class="v">${fmt(c.gainM*3.28084,0)} ft · ${fmt(c.gainM,0)} m</span></div>
+      <div class="res"><span>Elevation loss</span><span class="v">${fmt(c.lossM*3.28084,0)} ft · ${fmt(c.lossM,0)} m</span></div>
+      <div class="res"><span>Avg grade</span><span class="v">${fmt(c.avgGrade,1)}%</span></div>
+      <div class="res"><span>Max grade</span><span class="v">${fmt(c.maxGrade,1)}%</span></div>
+      <div class="res"><span>Est. moving time <span class="muted">(@ ${wl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
+    </div>
+    <div class="row-actions" style="margin-top:10px;align-items:center">
+      <span class="muted" style="font-size:11px">Sets activity duration from the estimated time at your selected ${run?'pace':'power'} and fills the 30-minute segments with the course's grade profile.</span>
+      <button class="sm" onclick="window._applyCourse()" style="margin-left:auto">Apply to 30-min plan →</button>
+    </div>
+    ${run?'':`<div class="sub-h" style="margin-top:12px">Cycling time model</div>
+    <div class="fgrid">
+      ${numField('Bike weight','bikeLbs','lbs')}
+      <div class="field"><label>CdA</label><input type="number" step="0.01" value="${S.cda}" data-k="cda" data-obj="S"><span class="u">m²</span></div>
+      <div class="field"><label>Crr</label><input type="number" step="0.001" value="${S.crr}" data-k="crr" data-obj="S"><span class="u">&nbsp;</span></div>
+      <div class="field"><label>Air density</label><input type="number" step="0.01" value="${S.airRho}" data-k="airRho" data-obj="S"><span class="u">kg/m³</span></div>
+    </div>
+    <div class="note">Speed at each grade is solved from your selected power against gravity + rolling + aero drag (Martin et&nbsp;al.). Defaults are a road bike on the hoods — drop CdA for aero bars, raise Crr for gravel/MTB.</div>`}
+    <div class="note">${run
+      ? `Running time holds your selected effort (VO₂) and lets pace drift with grade — climbs slow you, descents speed you up. The ACSM model is least reliable on steep descents, so per-segment speed is clamped to a sane range.`
+      : `At constant power your calories don't change with grade, so for cycling the course's value is an accurate <b>duration</b> and how it splits across the 30-minute blocks — the segment list below inherits it.`}</div>
+  </div>`;
+}
+
+/* ============================================================
    FUEL PRODUCT LIBRARY  (for the Fueling Plan — gels/bars/chews/etc.)
    Each item: per-serving kcal + carbohydrate grams.  Editable + extendable.
    ============================================================ */
@@ -794,6 +955,7 @@ function dbEdit(id, field, sub, val){
    ============================================================ */
 const $ = (s,el=document)=>el.querySelector(s);
 const fmt=(n,d=1)=>Number.isFinite(n)?(+n).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+const escHtml=s=>(''+(s==null?'':s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function numField(label,key,unit,step=1,obj=S){
   return `<div class="field"><label>${label}</label>
     <input type="number" step="${step}" value="${obj[key]??''}" data-k="${key}" data-obj="${obj===S?'S':'comp'}">
@@ -1012,7 +1174,8 @@ function viewRider(){
         ${ev.overGut?`<div class="note" style="color:var(--warn)">Capped at the ${carbCap()} g/hr gut-absorption limit (${gutAdaptLabel()}) — fully holding your reserve would take ~${fmt(ev.targetRateGRaw,0)} g/hr, so you'll dip into reserves. Spread carbs across drink + food and train your gut.</div>`:''}
       </div>
     </div>
-  </div>`;
+  </div>
+  ${coursePanel()}`;
 }
 
 /* ---------- TAB: HYDRATION  (bottle + osmolality + projection) ---------- */
@@ -1796,6 +1959,8 @@ function refreshOutputs(){
 }
 function bind(){
   document.querySelectorAll('[data-tab]').forEach(el=>el.onclick=()=>{active=el.dataset.tab;render();});
+  // GPS course file picker (Athlete & Activity tab)
+  const cf=$('#courseFile'); if(cf) cf.onchange=(e)=>window._loadCourse(e);
   // generic numeric/text inputs bound to S — commit on blur (onchange) so the
   // page doesn't re-render mid-keystroke (which would drop focus / transpose digits)
   document.querySelectorAll('input[data-k]').forEach(el=>{
@@ -1939,6 +2104,27 @@ window._setSegMode=(on)=>{
   render();
 };
 window._setSegZone=(i,v)=>{ S.segZones[i]=+v; render(); };
+
+/* --- GPS course: load / apply / clear --- */
+window._loadCourse=(e)=>{
+  const f=e&&e.target&&e.target.files&&e.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ try{ const c=parseTrack(String(rd.result)); c.name=f.name; c.appliedAt=null; S.course=c; render(); }
+    catch(err){ alert('Could not read this file: '+err.message+'.\n\nExport a GPX or TCX track from Strava, Garmin, Komoot, or Ride With GPS.'); } };
+  rd.onerror=()=>alert('Could not read the file.');
+  rd.readAsText(f);
+};
+// push the course onto the 30-min segment plan: duration from estimated time, grades per block
+window._applyCourse=()=>{
+  const r=courseTime(); if(!r){ alert('Upload a course first.'); return; }
+  S.eventHours=+r.hours.toFixed(2);
+  S.segBreakdown=true;
+  S.segGrades=r.segGrades.slice();
+  S.segZones=Array.from({length:r.nSeg},()=>S.eventZone);
+  if(S.course) S.course.appliedAt=S.eventZone;
+  render();
+};
+window._clearCourse=()=>{ S.course=null; render(); };
 
 /* --- event plan: per-hour food items + fuel library --- */
 window._addPlanItem=(hour)=>{ S.planItems.push({id:_xid('pi'),hour,prodId:FUEL_PRODUCTS[0].id,qty:1}); render(); };
