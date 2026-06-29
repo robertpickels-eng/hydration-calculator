@@ -335,8 +335,9 @@ const S = {
   // --- GPS course (uploaded track) ---
   course:null,                                 // parsed track: {name, distM, gainM, lossM, avgGrade, maxGrade, profile:[[d_m,ele_m],…]}
   pacingStrategy:'even',                        // performance-predictor pacing: even|climb5|climb10|neg|fade (off the selected average)
-  wPrimeKJ:null,                                // W′ override (kJ, cycling anaerobic work capacity); null → auto 0.30 kJ/kg. CP = FTP.
-  dPrimeM:null,                                 // D′ override (m, running anaerobic distance capacity); null → auto 2.5 m/kg. CS = threshold pace.
+  athleteType:'balanced',                       // anaerobic-reserve profile → auto W′/D′ per kg: aerobic | balanced | anaerobic
+  wPrimeKJ:null,                                // W′ override (kJ, cycling anaerobic work capacity); null → auto by athleteType. CP = FTP.
+  dPrimeM:null,                                 // D′ override (m, running anaerobic distance capacity); null → auto by athleteType. CS = threshold pace.
   bikeLbs:18,                                  // bike weight (lbs) — cycling course-time model (total mass = body + bike)
   cda:0.32,                                    // aerodynamic drag area CdA (m²) — road hoods default
   crr:0.0045,                                  // rolling-resistance coefficient — Recreation road preset (Michelin Power Road, butyl)
@@ -483,6 +484,8 @@ const GUT_LEVELS = { unadapted:90, adapted:120, highcarb:150 };   // g/hr carb-a
 function carbCap(){ return GUT_LEVELS[S.gutAdapt] || 120; }        // gut-absorption ceiling for the selected level
 function gutAdaptLabel(){ return {unadapted:'unadapted',adapted:'adapted',highcarb:'high-carb-adapted'}[S.gutAdapt] || ''; }
 function isRun(){ return S.activity==='running'; }
+// small pointer to the Sources tab — used where the science prose was moved off the feature pages
+const srcLink = (label='methods → Sources') => `<a onclick="active='sources';render()" style="color:var(--accent2);cursor:pointer">${label}</a>`;
 // zone sets per activity
 const ZONES_CYC = [
   { label:'Recovery',  pct:55,  cls:'z1' },
@@ -524,8 +527,14 @@ function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
    when over the line (T_lim = W′/(P−CP)) and reconstitutes below it (Skiba monoexponential). */
 function cpWatts(){ return Math.max(1,+S.ftp||0); }                                 // critical power (W)
 function csSpeed(){ return Math.max(1,vThreshold()); }                              // critical speed (m/min, flat-equivalent)
-function wPrimeJ(){ return (S.wPrimeKJ!=null ? +S.wPrimeKJ : 0.30*(S.bodyLbs/2.2))*1000; } // W′ in joules
-function dPrimeMeters(){ return S.dPrimeM!=null ? +S.dPrimeM : 2.5*(S.bodyLbs/2.2); }      // D′ in metres
+// anaerobic-reserve size per kg body mass by athlete type — endurance/diesel runs a smaller reserve
+// above CP/CS, a punchy/sprint type a larger one. Auto value unless the rider overrides W′/D′ directly.
+const WPRIME_KJ_KG = { aerobic:0.20, balanced:0.30, anaerobic:0.45 };
+const DPRIME_M_KG  = { aerobic:1.8,  balanced:2.5,  anaerobic:3.5  };
+function wPrimeCoef(){ return WPRIME_KJ_KG[S.athleteType] ?? 0.30; }
+function dPrimeCoef(){ return DPRIME_M_KG[S.athleteType] ?? 2.5; }
+function wPrimeJ(){ return (S.wPrimeKJ!=null ? +S.wPrimeKJ : wPrimeCoef()*(S.bodyLbs/2.2))*1000; } // W′ in joules
+function dPrimeMeters(){ return S.dPrimeM!=null ? +S.dPrimeM : dPrimeCoef()*(S.bodyLbs/2.2); }      // D′ in metres
 function wPrimeKJeff(){ return wPrimeJ()/1000; }                                     // effective W′ (kJ) for display
 
 // glycogen stores (kcal) = liver glycogen + active-muscle glycogen.
@@ -974,7 +983,7 @@ function courseBody(intOpts){
   const pacingRow = `<div class="field"><label style="flex:0 0 auto;margin-right:8px">Pacing strategy</label>
       <select onchange="window._setPacing(this.value)" style="flex:1;min-width:0">${Object.keys(PACE_LABELS).map(k=>`<option value="${k}"${strat===k?' selected':''}>${PACE_LABELS[k]}</option>`).join('')}</select></div>
     <div class="row-actions" style="margin-top:8px;align-items:center">
-      <span class="muted" style="font-size:11px">Distributes your <b>${wl}</b> average across the course — climb strategies push harder uphill and ease on descents (normalized so your <i>average effort</i> holds). Each 30-min segment snaps to the nearest <b>zone</b>; <b>Re-apply</b> rebuilds them, then fine-tune any segment below.</span>
+      <span class="muted" style="font-size:11px">Distributes your <b>${wl}</b> average across the course; each 30-min segment snaps to the nearest <b>zone</b>. <b>Re-apply</b> rebuilds them, then fine-tune any segment below. ${srcLink('how pacing works →')}</span>
       <button class="sm" onclick="window._applyCourse()" style="margin-left:auto">Re-apply to 30-min plan →</button>
     </div>`;
   const sustainBlock = (()=>{
@@ -995,30 +1004,34 @@ function courseBody(intOpts){
           <label style="flex:0 0 auto;margin-right:6px" title="${run?'D′ — finite distance reserve above critical speed':'W′ — finite work capacity above critical power'}">${R}</label>
           <input type="number" step="${run?1:0.5}" value="${fmt(reserveEff, run?0:1)}" data-k="${reserveKey}" data-obj="S" style="width:64px" title="Override the auto value">
           <span class="u" style="width:auto">${run?'m':'kJ'}</span>
-          ${overridden?`<a onclick="window._resetReserve()" style="color:var(--accent2);cursor:pointer;font-size:11px;margin-left:4px">auto</a>`:`<span class="muted" style="font-size:11px;margin-left:4px">auto · ${run?'2.5 m/kg':'0.30 kJ/kg'}</span>`}
+          ${overridden?`<a onclick="window._resetReserve()" style="color:var(--accent2);cursor:pointer;font-size:11px;margin-left:4px">auto</a>`:`<span class="muted" style="font-size:11px;margin-left:4px">auto · ${S.athleteType} · ${run?fmt(dPrimeCoef(),1)+' m/kg':fmt(wPrimeCoef(),2)+' kJ/kg'}</span>`}
         </div>
-        <div class="note" style="margin-top:2px">${status}. Efforts above ${run?'critical speed':'critical power'} draw down a <i>finite</i> reserve (T<sub>lim</sub> = ${R} / (intensity − boundary)) that recovers only slowly below it (Skiba). A strategy that would empty it is clamped to what's actually sustainable, and the anaerobic work done above the line is charged to your carbohydrate need.</div>`;
+        <div class="note" style="margin-top:2px">${status}. ${srcLink(`how the ${R} reserve works →`)}</div>`;
     })();
   const cyclingModel = run ? '' : `<div class="sub-h">Cycling time model</div>
     ${courseParamRow('Bike weight','bikeLbs','lbs',0.5,BIKE_PRESETS)}
     ${courseParamRow('CdA','cda','m²',0.01,CDA_PRESETS)}
     ${courseParamRow('Crr','crr','',0.0001,CRR_PRESETS)}
     ${courseParamRow('Air density','airRho','kg/m³',0.01,RHO_PRESETS)}
-    <div class="note">Speed at each grade is solved from your selected power against gravity + rolling + aero drag (Martin et&nbsp;al.). Pick a preset or type your own. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA) — override above if you have a measured value. Total mass adds your body weight to the bike.</div>
-    <div class="note"><b>Air-density assumptions:</b> uses the International Standard Atmosphere (dry air, 15&nbsp;°C at sea level, standard lapse rate) applied to the course's <i>mean</i> altitude — one value for the whole ride. It doesn't know the day's temperature, humidity or barometric pressure: a hot or low-pressure day means thinner air (you'd be a touch faster), a cold or high-pressure day means denser air (slightly slower). Altitude is whatever your device logged (GPS/barometric), so accuracy follows the track. Aero drag scales directly with air density, so this mostly matters at higher speeds on flats and descents.</div>`;
+    <div class="note">Pick a preset or type your own. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA) — override if you have a measured value. ${srcLink('cycling power & air-density model →')}</div>`;
   // elevation sparkline + overlays: proposed avg watts/pace inside each band, time + cumulative distance under each divider
   const sparkAndLabels = (()=>{
       const dmax=c.profile[c.profile.length-1][0]||1, bs=(t&&t.bounds)||[];
       const bsf=bs.filter(d=>d>0&&d<dmax-1e-6), edges=[0,...bsf,dmax], segIv=(t&&t.segIv)||[];
-      const step=Math.max(1,Math.ceil(bsf.length/16));     // thin labels so they don't collide on long courses
+      const step=Math.max(1,Math.ceil(bsf.length/16));     // narrow watt chips — fine to keep dense
+      const lstep=Math.max(1,Math.ceil(bsf.length/9));     // wider time+distance labels — thin harder so they don't collide
       const wattLabs=edges.slice(0,-1).map((e0,i)=>{ if(i%step!==0 && i!==edges.length-2) return '';
         const mid=(e0+edges[i+1])/2, iv=segIv[i]; if(!(iv>0)) return '';
         const lab=run?paceFmt(speedToPace(iv))+'/mi':Math.round(iv)+'W';
         return `<span style="position:absolute;left:${Math.min(97,Math.max(3,mid/dmax*100)).toFixed(2)}%;top:3px;transform:translateX(-50%);font-size:9px;font-weight:600;font-family:var(--font-mono);color:var(--txt);white-space:nowrap;background:rgba(241,242,243,.72);padding:0 2px;border-radius:2px">${lab}</span>`;
       }).join('');
-      const labs=bsf.map((d,i)=>(i%step===0||i===bsf.length-1)
+      // drop the last 30-min label if it crowds the finish (within ~7% of the end)
+      const labs=bsf.map((d,i)=>((i%lstep===0) && d/dmax<0.9)
         ? `<span style="position:absolute;left:${Math.min(98,d/dmax*100).toFixed(2)}%;transform:translateX(-50%);font-size:9px;color:var(--muted);white-space:nowrap;text-align:center;line-height:1.15">${hm((i+1)*SEG_LEN)}<br><span style="color:var(--accent2);font-family:var(--font-mono)">${fmt(d/M_PER_MI,1)} mi</span></span>` : '').join('');
-      return `<div style="position:relative;margin-top:10px">${courseSpark(c,t)}<div style="position:absolute;inset:0;pointer-events:none">${wattLabs}</div></div>${bsf.length?`<div style="position:relative;height:26px;margin-top:1px">${labs}</div>`:''}`;
+      // finish marker — always shown, even when the final segment is shorter than 30 min
+      const finishLab=`<span style="position:absolute;left:100%;transform:translateX(-100%);font-size:9px;color:var(--accent);font-weight:700;white-space:nowrap;text-align:right;line-height:1.15">🏁 ${t?hm(t.hours):'—'}<br><span style="font-family:var(--font-mono)">${fmt(mi,1)} mi</span></span>`;
+      const finishLine=`<span style="position:absolute;right:0;top:0;bottom:0;border-left:1px dashed var(--accent)"></span>`;
+      return `<div style="position:relative;margin-top:10px">${courseSpark(c,t)}<div style="position:absolute;inset:0;pointer-events:none">${wattLabs}${finishLine}</div></div><div style="position:relative;height:26px;margin-top:1px">${labs}${finishLab}</div>`;
     })();
   return ref+loading+`
     <div class="row-actions" style="margin:6px 0 8px;align-items:center">
@@ -1048,9 +1061,7 @@ function courseBody(intOpts){
       <div class="res"><span>Est. moving time <span class="muted">(@ ${wlLbl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
     </div>
     ${segEditor}
-    <div class="note">${run
-      ? `Running time holds your selected effort (VO₂) and lets pace drift with grade — climbs slow you, descents speed you up. The ACSM model is least reliable on steep descents, so per-segment speed is clamped to a sane range.`
-      : `At constant power your calories don't change with grade, so for cycling the course's value is an accurate <b>duration</b> and how it splits across the 30-minute blocks — the segment list above inherits it.`}</div>`;
+    <div class="note">${run?'Pace drifts with grade at a held effort':'Duration and its 30-min split come straight off the course at constant power'} — ${srcLink('how course time is modelled →')}</div>`;
 }
 
 /* ============================================================
@@ -1359,6 +1370,14 @@ function viewRider(){
             <option value="female"${S.gender==='female'?' selected':''}>Female</option>
           </select><span class="u">&nbsp;</span></div>
         ${anchor}
+        <div class="sub-h">Athlete type <span class="muted" style="text-transform:none">(anaerobic reserve ${run?'D′':'W′'})</span></div>
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Profile</label>
+          <select onchange="window._setAthleteType(this.value)" style="flex:1;min-width:0">
+            <option value="aerobic"${S.athleteType==='aerobic'?' selected':''}>Aerobic / diesel — smaller reserve</option>
+            <option value="balanced"${S.athleteType==='balanced'?' selected':''}>Balanced — default</option>
+            <option value="anaerobic"${S.athleteType==='anaerobic'?' selected':''}>Anaerobic / punchy — larger reserve</option>
+          </select></div>
+        <div class="note">Sets your auto <b>${run?'D′':'W′'}</b> reserve (${run?fmt(dPrimeCoef(),1)+' m/kg → '+fmt(dPrimeMeters(),0)+' m':fmt(wPrimeCoef(),2)+' kJ/kg → '+fmt(wPrimeKJeff(),1)+' kJ'}), the finite capacity above ${run?'critical speed':'critical power'} the Performance Predictor draws on. Override it directly in the predictor's Sustainability box. ${srcLink('reserve model →')}</div>
         <div class="sub-h">Sweat sodium</div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Concentration</label>
           <select id="sweatNaSel" style="flex:1;min-width:0">
@@ -1394,7 +1413,7 @@ function viewRider(){
         <div class="res"><span>Predicted glycogen</span><span class="v">${fmt(glycogenKcal()/4,0)} g · ${fmt(glycogenKcal(),0)} kcal</span></div>
         <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
-        <div class="note">Derived from weight, gender, sport &amp; ${run?'pace':'FTP'} — these feed the Caloric (glycogen, time-to-bonk) and Hydration (ECF, sodium balance) models. Running engages more total muscle than cycling, so its active fraction is higher.</div>
+        <div class="note">Derived from weight, gender, sport &amp; ${run?'pace':'FTP'} — these feed the Caloric (glycogen, time-to-bonk) and Hydration (ECF, sodium balance) models. ${srcLink('model details →')}</div>
       </div>
     </div>
   </div>
@@ -1528,7 +1547,7 @@ function viewHydration(){
           ${numField('Malto DE','maltoDE','',1)}
         </div>
         ${S.extraCarbs.map(x=>extraRow(x,'c')).join('')}
-        <div class="note">Malto eff. MW ≈ ${fmt(maltoMW(S.maltoDE),0)} g/mol (18016/DE) — higher DE → more particles → higher osmolality.</div>
+        <div class="note">Malto eff. MW ≈ ${fmt(maltoMW(S.maltoDE),0)} g/mol (18016/DE). ${srcLink('osmolality method →')}</div>
         ${headWithAdd('Electrolyte salts — g/bottle','window._addExtraLyte()')}
         <div class="fgrid">
           ${compField('NaCl','nacl','g')}
@@ -1573,7 +1592,7 @@ function osmolalityPanel(){
         </div>
         <div class="gauge"><div class="mk" style="left:calc(${mk}% - 1px)"></div></div>
         <div class="muted" style="font-size:12px">Hypo&nbsp;·&nbsp;Iso(~290)&nbsp;·&nbsp;Hyper&nbsp;→ ${ton.desc}</div>
-        <div class="note">Σ(g ÷ molar mass × particles) ÷ volume. Sugars = 1, NaCl = 2, Na-citrate = 4, maltodextrin ≈ 1 per (18016/DE) g.</div>
+        <div class="note">Σ(g ÷ molar mass × particles) ÷ volume. ${srcLink('particle factors &amp; method →')}</div>
       </div>
       <div>
         <div class="res"><span>Carbohydrate total</span><span class="v">${fmt(carbG,1)} g</span></div>
@@ -1709,7 +1728,7 @@ function viewCaloric(){
           <td><button class="sm ghost" onclick="window.${run?'_rmPace':'_rmWorkload'}(${i})" title="remove">×</button></td></tr>`;}).join('')}
         </tbody></table></div>
       <div class="row-actions"><button class="ghost sm" onclick="window.${run?'_addPace':'_addWorkload'}()">＋ Add ${run?'pace (−15s)':'workload (+25W)'}</button></div>
-      <div class="note">Enter the steady ${run?'paces':'wattages'} you plan to ${run?'run':'ride'}. Each row computes energy & substrate use just like the zones. Bonk = hours at that steady ${run?'pace':'wattage'} before stored glycogen is exhausted with no fuel.</div>`
+      <div class="note">Enter the steady ${run?'paces':'wattages'} you plan to ${run?'run':'ride'}. Bonk = hours at that steady ${run?'pace':'wattage'} before stored glycogen is exhausted with no fuel. ${srcLink('energy &amp; substrate methods →')}</div>`
     : `<div class="scroll" style="margin-top:8px"><table class="tc">
         <thead><tr><th>Zone</th><th>${pctLbl}</th><th>${run?'Pace':'Watts'}</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
           <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th></tr></thead>
@@ -1721,7 +1740,7 @@ function viewCaloric(){
           <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
           <td>${b>=12?'&gt;12':b.toFixed(1)}</td></tr>`;}).join('')}
         </tbody></table></div>
-      <div class="note">ACSM ${run?'running (level-ground reference)':'cycling'} VO₂ · Weir caloric equivalent · RQ-based substrate split.${run?' Pace/% show the zone range; VO₂/Cal/CHO/Fat/Bonk are computed at the zone midpoint.':''} Bonk = hours at that steady ${run?'pace':'zone'} before stored glycogen is exhausted with no fuel.</div>`;
+      <div class="note">${run?'Pace/% show the zone range; VO₂/Cal/CHO/Fat/Bonk are computed at the zone midpoint. ':''}Bonk = hours at that steady ${run?'pace':'zone'} before stored glycogen is exhausted with no fuel. ${srcLink('energy &amp; substrate methods →')}</div>`;
 
   const evZone = ints[Math.min(S.eventZone, ints.length-1)] || {};
   const evIntLabel = S.segBreakdown ? '30-min segments'
@@ -1762,7 +1781,7 @@ function viewCaloric(){
       <div class="res" style="border:none"><span>Energy stored&nbsp;</span><span class="v">${fmt(glycogenKcal(),0)} kcal</span></div>
       <div class="res" style="border:none"><span>Active muscle&nbsp;</span><span class="v">${fmt(activeMuscleKg(),1)} kg @ ${glyConc()} g/kg</span></div>
     </div>
-    <div class="note" style="margin-top:4px">Muscle-glycogen concentration in engaged muscle (wet weight): <b>Typical training ${GLY_CONC.training} g/kg</b> (~110 mmol/kg — a normal training day, not fully topped off) · <b>Tapered &amp; rested ${GLY_CONC.rested} g/kg</b> (~150 mmol/kg — fully recovered and carb-replete after a taper) · <b>Carb-loaded ${GLY_CONC.loaded} g/kg</b> (~220 mmol/kg — supercompensated). Liver adds <b>${fmt(liverKcal(),0)} kcal</b> (~${fmt(liverKcal()/4,0)} g), scaled by the same state plus your lean body mass — well-fed; an overnight-fasted start would be lower.</div>
+    <div class="note" style="margin-top:4px">Muscle-glycogen concentration in engaged muscle: <b>Typical training ${GLY_CONC.training}</b> · <b>Tapered &amp; rested ${GLY_CONC.rested}</b> · <b>Carb-loaded ${GLY_CONC.loaded} g/kg</b>, plus a liver contribution of <b>${fmt(liverKcal(),0)} kcal</b> (~${fmt(liverKcal()/4,0)} g, well-fed). ${srcLink('glycogen sizing &amp; sources →')}</div>
     <div class="sub-h">Hours until bonk — no fuel</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px">
       ${ints.map((z,i)=>{const b=bonkHours(i);return `<div class="bonk-item ${z.cls}">
@@ -2142,7 +2161,7 @@ function viewSources(){
     + ref('Achten J, Gleeson M, Jeukendrup AE','2002','Determination of the exercise intensity that elicits maximal fat oxidation.','Medicine &amp; Science in Sports &amp; Exercise, 34(1), 92–97. — Fatmax and its dependence on fitness.'))}
 
   ${sec('Performance predictor — pacing &amp; course time',
-    'For an uploaded course, speed at each point is solved from your chosen workload and the local grade, then integrated into total time and the 30-minute segments. Cycling solves road speed from power against gravity + rolling resistance + aerodynamic drag (steady-state form: the acceleration and wind terms are omitted). Running inverts the ACSM running equation at constant oxygen cost (hold effort, let pace drift with grade), clamped because the linear model is unreliable on steep descents. Preset pacing strategies redistribute your selected average — pushing harder uphill (where time is spent) and easing on descents (where extra power is lost to cubic aero drag) — normalized so time-weighted average effort is held constant, then <b>capped by what is physiologically sustainable</b> (see <i>Critical power, anaerobic reserve &amp; pacing physiology</i> below).',
+    'For an uploaded course, speed at each point is solved from your chosen workload and the local grade, then integrated into total time and the 30-minute segments. Cycling solves road speed from power against gravity + rolling resistance + aerodynamic drag (steady-state form: the acceleration and wind terms are omitted). Running inverts the ACSM running equation at constant oxygen cost (hold effort, let pace drift with grade), clamped because the linear model is unreliable on steep descents. Preset pacing strategies redistribute your selected average — pushing harder uphill (where time is spent) and easing on descents (where extra power is lost to cubic aero drag) — normalized so time-weighted average effort is held constant, then <b>capped by what is physiologically sustainable</b> (see <i>Critical power, anaerobic reserve &amp; pacing physiology</i> below). Air density is scaled from the course’s <i>mean</i> altitude via the ISO standard atmosphere (dry air, 15&nbsp;°C sea level, standard lapse rate) — one value for the whole ride; it does not account for the day’s temperature, humidity or barometric pressure (a hot or low-pressure day is thinner air, slightly faster; cold or high-pressure denser, slightly slower), and altitude is whatever the device logged. Aero drag scales directly with air density, so it matters most at higher speeds on flats and descents.',
     ref('Martin JC, Milliken DL, Cobb JE, McFadden KL, Coggan AR','1998','Validation of a mathematical model for road cycling power.','Journal of Applied Biomechanics, 14(3), 276–291.')
     + ref('di Prampero PE, Cortili G, Mognoni P, Saibene F','1979','Equation of motion of a cyclist.','Journal of Applied Physiology, 47(1), 201–206. — gravity, rolling and air-resistance components of cycling power.')
     + ref('Swain DP','1997','A model for optimizing cycling performance by varying power on hills and in wind.','Medicine &amp; Science in Sports &amp; Exercise, 29(8), 1104–1108. — basis for riding harder uphill / easier downhill at a fixed average effort.')
@@ -2152,7 +2171,7 @@ function viewSources(){
     + ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — running speed/grade ⇄ oxygen-cost equation, here inverted at constant effort.'))}
 
   ${sec('Critical power, anaerobic reserve &amp; pacing physiology',
-    'Pacing is bounded by the power–duration relationship, not just by grade. Critical power (CP, taken here as your FTP) and critical speed (CS, your threshold pace) mark the sustainable boundary; above it a <i>finite</i> reserve — W′ (cycling) or D′ (running) — is drawn down at a rate set by how far over the line you are (T<sub>lim</sub> = W′ ÷ (P − CP)) and is reconstituted only slowly below it (Skiba monoexponential). A strategy that would empty the reserve is clamped to what is actually sustainable, and the anaerobic work performed above CP/CS is charged to carbohydrate plus a VO₂ slow-component surcharge. Defaults: W′ ≈ 0.30 kJ/kg, D′ ≈ 2.5 m/kg (editable).',
+    'Pacing is bounded by the power–duration relationship, not just by grade. Critical power (CP, taken here as your FTP) and critical speed (CS, your threshold pace) mark the sustainable boundary; above it a <i>finite</i> reserve — W′ (cycling) or D′ (running) — is drawn down at a rate set by how far over the line you are (T<sub>lim</sub> = W′ ÷ (P − CP)) and is reconstituted only slowly below it (Skiba monoexponential). A strategy that would empty the reserve is clamped to what is actually sustainable, and the anaerobic work performed above CP/CS is charged to carbohydrate plus a VO₂ slow-component surcharge. Reserve size is set by an athlete-type selector (Athlete &amp; Activity tab) and scales with body mass: W′ ≈ 0.20 (aerobic / diesel) · 0.30 (balanced) · 0.45 (anaerobic / punchy) kJ/kg, and D′ ≈ 1.8 · 2.5 · 3.5 m/kg respectively — all directly editable in the predictor.',
     ref('Monod H, Scherrer J','1965','The work capacity of a synergic muscular group.','Ergonomics, 8(3), 329–338. — original critical-power concept.')
     + ref('Jones AM, Vanhatalo A, Burnley M, Morton RH, Poole DC','2010','Critical power: implications for determination of V̇O₂max and exercise tolerance.','Medicine &amp; Science in Sports &amp; Exercise, 42(10), 1876–1890. — CP as the heavy/severe-domain boundary and W′ above it.')
     + ref('Skiba PF, Chidnok W, Vanhatalo A, Jones AM','2012','Modeling the expenditure and reconstitution of work capacity above critical power.','Medicine &amp; Science in Sports &amp; Exercise, 44(8), 1526–1532. — the W′-balance depletion/reconstitution model used here.')
@@ -2163,7 +2182,7 @@ function viewSources(){
     + ref('Minetti AE, Moia C, Roi GS, Susta D, Ferretti G','2002','Energy cost of walking and running at extreme uphill and downhill slopes.','Journal of Applied Physiology, 93(3), 1039–1046. — gradient energy cost underpinning the running anaerobic-work charge.'))}
 
   ${sec('Glycogen stores &amp; depletion',
-    'Muscle-glycogen concentration per kg of engaged muscle (×4.18 kcal/g) plus a liver contribution; time-to-bonk = stored glycogen ÷ carbohydrate burn rate. The engaged-muscle mass is estimated from sex-specific skeletal-muscle mass and the fraction actively recruited by the sport (cycling engages less than running).',
+    'Muscle-glycogen concentration per kg of engaged muscle (×4.18 kcal/g) plus a liver contribution; time-to-bonk = stored glycogen ÷ carbohydrate burn rate. The engaged-muscle mass is estimated from sex-specific skeletal-muscle mass and the fraction actively recruited by the sport (cycling engages less than running). Muscle-glycogen states used here: typical training ≈ 110 mmol/kg (a normal training day, not topped off), tapered &amp; rested ≈ 150 mmol/kg (recovered and carb-replete), carb-loaded ≈ 220 mmol/kg (supercompensated); liver glycogen scales with the same state plus lean body mass and assumes a well-fed start (an overnight fast would be lower).',
     ref('Janssen I, Heymsfield SB, Wang Z, Ross R','2000','Skeletal muscle mass and distribution in 468 men and women aged 18–88 yr.','Journal of Applied Physiology, 89(1), 81–88. — sex-specific skeletal-muscle mass behind the active-muscle constants.')
     + ref('Bergström J, Hermansen L, Hultman E, Saltin B','1967','Diet, muscle glycogen and physical performance.','Acta Physiologica Scandinavica, 71(2–3), 140–150. — trained-rested vs carbohydrate-loaded muscle glycogen.')
     + ref('Nilsson LH, Hultman E','1973','Liver glycogen in man — the effect of total starvation or a carbohydrate-poor diet followed by carbohydrate refeeding.','Scandinavian Journal of Clinical and Laboratory Investigation, 32(4), 325–330. — liver glycogen content and its sensitivity to feeding/fasting.')
@@ -2182,7 +2201,7 @@ function viewSources(){
     + ref('Edelman IS, Leibman J','1959','Anatomy of body water and electrolytes.','The American Journal of Medicine, 27(2), 256–277. — body-fluid compartment sizing behind the ECF and sodium-content estimates.'))}
 
   ${sec('Drink osmolality &amp; gastric emptying',
-    'Bottle osmolality from carbohydrate + electrolyte particles and its effect on gastric emptying; maltodextrin osmolality estimated from its dextrose equivalent (number-average MW ≈ 18016 ÷ DE).',
+    'Bottle osmolality = Σ(grams ÷ molar mass × particles) ÷ volume, and its effect on gastric emptying. Particle (dissociation) factors used: sugars = 1, NaCl = 2, sodium citrate = 4, maltodextrin ≈ 1 per (18016/DE) g — so a higher DE means more, smaller particles and higher osmolality; maltodextrin osmolality is estimated from its dextrose equivalent (number-average MW ≈ 18016 ÷ DE).',
     ref('Vist GE, Maughan RJ','1995','The effect of osmolality and carbohydrate content on the rate of gastric emptying of liquids in man.','The Journal of Physiology, 486(2), 523–531.'))}
 
   <div class="note" style="margin-top:18px">Citations are provided so the methods can be checked against the primary literature. Where a model uses a representative constant (e.g. liver glycogen, active-muscle fraction), that value is an approximation chosen to sit within the ranges reported in these works; individual physiology varies.</div>
@@ -2476,6 +2495,8 @@ window._setActivityMode=(m)=>{
   render();
 };
 window._resetReserve=()=>{ if(isRun()) S.dPrimeM=null; else S.wPrimeKJ=null; render(); };  // revert W′/D′ to the body-mass auto default
+// athlete type sets the auto W′/D′ size; picking one clears any manual override so the new default takes effect
+window._setAthleteType=(v)=>{ if(S.athleteType===v) return; S.athleteType=v; S.wPrimeKJ=null; S.dPrimeM=null; render(); };
 // cycling time-model params via preset dropdown (manual number input commits through the generic data-k handler)
 window._setCourseParam=(key,val)=>{ if(val==='') return; S[key]=+val; render(); };
 
