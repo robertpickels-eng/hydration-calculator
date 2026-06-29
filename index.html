@@ -825,15 +825,17 @@ function paceColor(r){
   const c = t>=0 ? neut.map((n,i)=>mix(n,warm[i],t)) : neut.map((n,i)=>mix(n,cool[i],-t));
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
-// inline elevation-profile sparkline (filled area + line). 30-min segment bands are tinted by
-// effort vs the rider's average (from courseTime t.segIv); dashed dividers mark each boundary.
+// inline elevation-profile sparkline. The elevation silhouette is the brand green (var(--accent));
+// effort-vs-average tint is confined to the SKY (region above the ridgeline) via a clip path so it
+// never muddies the green profile. 30-min segment bands tinted from t.segIv; dashed dividers mark boundaries.
+let _sparkN=0;                                          // unique clip-id counter (one sparkline can clip independently)
 function courseSpark(c, t){
   const pr=c.profile; if(!pr||pr.length<2) return '';
   const W=600, H=70, dmax=pr[pr.length-1][0]||1;
   let emin=Infinity, emax=-Infinity; pr.forEach(p=>{ if(p[1]<emin)emin=p[1]; if(p[1]>emax)emax=p[1]; });
   if(emax-emin<1) emax=emin+1;
   const X=d=>d/dmax*W, Y=e=>H-3-((e-emin)/(emax-emin))*(H-6);
-  const pts=pr.map(p=>X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1));
+  const ridge=pr.map(p=>X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1)).join(' L');   // ridgeline polyline, x=0→W
   const bs=((t&&t.bounds)||[]).filter(d=>d>0&&d<dmax-1e-6);
   const edges=[0,...bs,dmax];
   // tint each 30-min band by its effort vs the selected average
@@ -841,12 +843,14 @@ function courseSpark(c, t){
   let bands='';
   for(let i=0;i<edges.length-1;i++){ const x0=X(edges[i]), x1=X(edges[i+1]);
     const r=(baseIv>0 && segIv[i]>0)?segIv[i]/baseIv:1;
-    bands+=`<rect x="${x0.toFixed(1)}" y="0" width="${(x1-x0).toFixed(1)}" height="${H}" fill="${paceColor(r)}" opacity="0.30"></rect>`; }
-  const lines=bs.map(d=>`<line x1="${X(d).toFixed(1)}" y1="0" x2="${X(d).toFixed(1)}" y2="${H}" stroke="rgba(40,44,52,0.6)" stroke-width="1" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"></line>`).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:70px;display:block;background:rgba(73,83,109,.06);border-radius:6px">
-    ${bands}
-    <path d="M0,${H} L${pts.join(' L')} L${W},${H} Z" fill="var(--accent2)" opacity="0.14"></path>
-    <path d="M${pts.join(' L')}" fill="none" stroke="var(--accent2)" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
+    bands+=`<rect x="${x0.toFixed(1)}" y="0" width="${(x1-x0).toFixed(1)}" height="${H}" fill="${paceColor(r)}" opacity="0.45"></rect>`; }
+  const lines=bs.map(d=>`<line x1="${X(d).toFixed(1)}" y1="0" x2="${X(d).toFixed(1)}" y2="${H}" stroke="rgba(40,44,52,0.45)" stroke-width="1" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"></line>`).join('');
+  const uid='spk'+(_sparkN++);                          // sky clip = area above the ridgeline
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:70px;display:block;background:rgba(77,93,61,.05);border-radius:6px">
+    <defs><clipPath id="${uid}"><path d="M0,0 L${ridge} L${W},0 Z"></path></clipPath></defs>
+    <g clip-path="url(#${uid})">${bands}</g>
+    <path d="M0,${H} L${ridge} L${W},${H} Z" fill="var(--accent)" opacity="0.22"></path>
+    <path d="M${ridge}" fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
     ${lines}
   </svg>`;
 }
