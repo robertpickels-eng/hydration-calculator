@@ -2091,11 +2091,13 @@ function viewSources(){
   <div class="note">The calculations in this tool are built on established exercise-physiology and sports-nutrition methods; the works below are the published bases for each model. Per-product nutrition values are <span class="est">estimates</span> read from public labels and vary by batch and region. <b>For education and planning only — not medical or dietary advice.</b></div>
 
   ${sec('Energy expenditure &amp; substrate use',
-    'Power (cycling) or pace and grade (running) → oxygen cost → calories, split into fat vs carbohydrate by respiratory quotient.',
+    'Power (cycling) or pace and grade (running) → oxygen cost → calories, split into fat vs carbohydrate by respiratory quotient. The fat-vs-carbohydrate balance is shifted by training status: fitter athletes oxidize more fat at a given relative intensity and reach all-carbohydrate later (the crossover concept / maximal-fat-oxidation “Fatmax”).',
     ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — metabolic equations for cycling power and running speed/grade.')
     + ref('Weir JB de V','1949','New methods for calculating metabolic rate with special reference to protein metabolism.','The Journal of Physiology, 109(1–2), 1–9.')
-    + ref('Péronnet F, Massicotte D','1991','Table of nonprotein respiratory quotient: an update.','Canadian Journal of Sport Sciences, 16(1), 23–29.')
-    + ref('Frayn KN','1983','Calculation of substrate oxidation rates in vivo from gaseous exchange.','Journal of Applied Physiology, 55(2), 628–634.'))}
+    + ref('Péronnet F, Massicotte D','1991','Table of nonprotein respiratory quotient: an update.','Canadian Journal of Sport Sciences, 16(1), 23–29. — %carbohydrate vs respiratory exchange ratio.')
+    + ref('Frayn KN','1983','Calculation of substrate oxidation rates in vivo from gaseous exchange.','Journal of Applied Physiology, 55(2), 628–634.')
+    + ref('Brooks GA, Mercier J','1994','Balance of carbohydrate and lipid utilization during exercise: the “crossover” concept.','Journal of Applied Physiology, 76(6), 2253–2261. — basis for the training-status shift in fat vs carbohydrate use.')
+    + ref('Achten J, Gleeson M, Jeukendrup AE','2002','Determination of the exercise intensity that elicits maximal fat oxidation.','Medicine &amp; Science in Sports &amp; Exercise, 34(1), 92–97. — Fatmax and its dependence on fitness.'))}
 
   ${sec('Performance predictor — pacing &amp; course time',
     'For an uploaded course, speed at each point is solved from your chosen workload and the local grade, then integrated into total time and the 30-minute segments. Cycling solves road speed from power against gravity + rolling resistance + aerodynamic drag (steady-state form: the acceleration and wind terms are omitted). Running inverts the ACSM running equation at constant oxygen cost (hold effort, let pace drift with grade), clamped because the linear model is unreliable on steep descents. Preset pacing strategies redistribute your selected average — pushing harder uphill (where time is spent) and easing on descents (where extra power is lost to cubic aero drag) — normalized so time-weighted average effort is held constant, then <b>capped by what is physiologically sustainable</b> (see <i>Critical power, anaerobic reserve &amp; pacing physiology</i> below).',
@@ -2104,6 +2106,7 @@ function viewSources(){
     + ref('Swain DP','1997','A model for optimizing cycling performance by varying power on hills and in wind.','Medicine &amp; Science in Sports &amp; Exercise, 29(8), 1104–1108. — basis for riding harder uphill / easier downhill at a fixed average effort.')
     + ref('Wilson DG, Schmidt T','2020','Bicycling Science (4th ed.).','MIT Press. — drag-area (CdA) reference values by riding position.')
     + ref('BicycleRollingResistance.com','lab data','Rolling-resistance test database.','— Crr presets are lab-measured values for specific named tires (e.g. Continental GP 5000 TL, Michelin Power Road, WTB Resolute, Schwalbe/Continental XC); real-world Crr varies with pressure, surface and load.')
+    + ref('International Organization for Standardization','1975','ISO 2533:1975 — Standard Atmosphere.','Geneva: ISO. — barometric/altitude air-density model used to scale aero drag to the course’s mean altitude.')
     + ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — running speed/grade ⇄ oxygen-cost equation, here inverted at constant effort.'))}
 
   ${sec('Critical power, anaerobic reserve &amp; pacing physiology',
@@ -2114,23 +2117,27 @@ function viewSources(){
     + ref('Skiba PF, Clarke D, Vanhatalo A, Jones AM','2014','Effect of work and recovery durations on W′ reconstitution during intermittent exercise.','Medicine &amp; Science in Sports &amp; Exercise, 46(7), 1433–1440. — recovery-intensity dependence of the reconstitution time-constant.')
     + ref('Jones AM, Vanhatalo A','2017','The ‘critical power’ concept: applications to sports performance with a focus on intermittent high-intensity exercise.','Sports Medicine, 47(Suppl 1), 65–78. — critical speed / D′ in running.')
     + ref('Abbiss CR, Laursen PB','2008','Describing and understanding pacing strategies during athletic competition.','Sports Medicine, 38(3), 239–252. — pacing taxonomy and the teleoanticipation framework.')
+    + ref('Jones AM, Grassi B, Christensen PM, Krustrup P, Bangsbo J, Poole DC','2011','Slow component of V̇O₂ kinetics: mechanistic bases and practical applications.','Medicine &amp; Science in Sports &amp; Exercise, 43(11), 2046–2062. — extra O₂ cost of severe-domain work behind the slow-component surcharge.')
     + ref('Minetti AE, Moia C, Roi GS, Susta D, Ferretti G','2002','Energy cost of walking and running at extreme uphill and downhill slopes.','Journal of Applied Physiology, 93(3), 1039–1046. — gradient energy cost underpinning the running anaerobic-work charge.'))}
 
   ${sec('Glycogen stores &amp; depletion',
-    'Muscle-glycogen concentration per kg of engaged muscle (×4.18 kcal/g) plus a liver contribution; time-to-bonk = stored glycogen ÷ carbohydrate burn rate.',
-    ref('Bergström J, Hermansen L, Hultman E, Saltin B','1967','Diet, muscle glycogen and physical performance.','Acta Physiologica Scandinavica, 71(2–3), 140–150. — trained-rested vs carbohydrate-loaded muscle glycogen.')
+    'Muscle-glycogen concentration per kg of engaged muscle (×4.18 kcal/g) plus a liver contribution; time-to-bonk = stored glycogen ÷ carbohydrate burn rate. The engaged-muscle mass is estimated from sex-specific skeletal-muscle mass and the fraction actively recruited by the sport (cycling engages less than running).',
+    ref('Janssen I, Heymsfield SB, Wang Z, Ross R','2000','Skeletal muscle mass and distribution in 468 men and women aged 18–88 yr.','Journal of Applied Physiology, 89(1), 81–88. — sex-specific skeletal-muscle mass behind the active-muscle constants.')
+    + ref('Bergström J, Hermansen L, Hultman E, Saltin B','1967','Diet, muscle glycogen and physical performance.','Acta Physiologica Scandinavica, 71(2–3), 140–150. — trained-rested vs carbohydrate-loaded muscle glycogen.')
     + ref('Nilsson LH, Hultman E','1973','Liver glycogen in man — the effect of total starvation or a carbohydrate-poor diet followed by carbohydrate refeeding.','Scandinavian Journal of Clinical and Laboratory Investigation, 32(4), 325–330. — liver glycogen content and its sensitivity to feeding/fasting.')
     + ref('Acheson KJ, Schutz Y, Bessard T, et al.','1988','Glycogen storage capacity and de novo lipogenesis during massive carbohydrate overfeeding in man.','American Journal of Clinical Nutrition, 48(2), 240–247.'))}
 
   ${sec('Carbohydrate intake &amp; gut absorption',
-    'Hourly carbohydrate targets and the gut-absorption ceiling: ≈ 60 g/hr from single-transportable (glucose-only) vs ≈ 90 g/hr from multiple-transportable (glucose + fructose) carbohydrate.',
+    'Hourly carbohydrate targets and the gut-absorption ceiling: ≈ 60 g/hr from single-transportable (glucose-only) vs ≈ 90 g/hr from multiple-transportable (glucose + fructose) carbohydrate. The higher trained ceilings (adapted 120, high-carb 150 g/hr) reflect deliberate gut training, which up-regulates intestinal transporters and raises tolerable intake.',
     ref('Jeukendrup AE','2014','A step towards personalized sports nutrition: carbohydrate intake during exercise.','Sports Medicine, 44(Suppl 1), S25–S33.')
-    + ref('Jentjens RLPG, Moseley L, Waring RH, Harding LK, Jeukendrup AE','2004','Oxidation of combined ingestion of glucose and fructose during exercise.','Journal of Applied Physiology, 96(4), 1277–1284.'))}
+    + ref('Jentjens RLPG, Moseley L, Waring RH, Harding LK, Jeukendrup AE','2004','Oxidation of combined ingestion of glucose and fructose during exercise.','Journal of Applied Physiology, 96(4), 1277–1284.')
+    + ref('Jeukendrup AE','2017','Training the gut for athletes.','Sports Medicine, 47(Suppl 1), 101–110. — adaptation of carbohydrate absorption with training (the elevated 120/150 g/hr ceilings).'))}
 
   ${sec('Hydration, sweat &amp; sodium',
-    'Sweat-rate fluid replacement, sodium-balance targets, and extracellular-fluid sizing.',
-    ref('Sawka MN, Burke LM, Eichner ER, Maughan RJ, Montain SJ, Stachenfeld NS','2007','American College of Sports Medicine position stand: Exercise and fluid replacement.','Medicine &amp; Science in Sports &amp; Exercise, 39(2), 377–390.')
-    + ref('Baker LB','2017','Sweating rate and sweat sodium concentration in athletes: a review of methodology and intra/interindividual variability.','Sports Medicine, 47(Suppl 1), 111–128.'))}
+    'Sweat-rate fluid replacement, sodium-balance targets, and extracellular-fluid sizing (ECF ≈ 25% of body mass; plasma [Na⁺] ≈ 140 mmol/L).',
+    ref('Sawka MN, Burke LM, Eichner ER, Maughan RJ, Montain SJ, Stachenfeld NS','2007','American College of Sports Medicine position stand: Exercise and fluid replacement.','Medicine &amp; Science in Sports &amp; Exercise, 39(2), 377–390. — the ≤2% body-mass acceptable-loss threshold.')
+    + ref('Baker LB','2017','Sweating rate and sweat sodium concentration in athletes: a review of methodology and intra/interindividual variability.','Sports Medicine, 47(Suppl 1), 111–128.')
+    + ref('Edelman IS, Leibman J','1959','Anatomy of body water and electrolytes.','The American Journal of Medicine, 27(2), 256–277. — body-fluid compartment sizing behind the ECF and sodium-content estimates.'))}
 
   ${sec('Drink osmolality &amp; gastric emptying',
     'Bottle osmolality from carbohydrate + electrolyte particles and its effect on gastric emptying; maltodextrin osmolality estimated from its dextrose equivalent (number-average MW ≈ 18016 ÷ DE).',
