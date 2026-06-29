@@ -321,7 +321,8 @@ const S = {
   runPaces:[600,540,480,450,420],              // pre-set pace rows (sec/mi): 10:00,9:00,8:00,7:30,7:00
   eventGrade:0,                                // % grade for the whole ride (running, single-average)
   segGrades:[],                                // per-30-min-segment % grade (running, breakdown)
-  eventHours:2,                                // planned event duration — drives caloric + plan
+  eventHours:2,                                // EFFECTIVE event duration — drives caloric + plan; auto-set to the course prediction while a course is loaded, else mirrors manualHours
+  manualHours:2,                               // user's manual duration entry — used whenever NO course is loaded (preserved across course load/clear)
   intensityMode:'zone',                        // 'zone' (%FTP zones) | 'workload' (custom wattage rows)
   workloads:[100,125,150,175,200],             // pre-set wattage rows (Pre-Set Workload mode)
   eventZone:1,                                 // default avg-intensity index for the whole ride (into the active intensity list)
@@ -659,10 +660,11 @@ function haversine(la1,lo1,la2,lo2){
   return 2*R*Math.asin(Math.min(1,Math.sqrt(a)));
 }
 // parse GPX (<trkpt>/<rtept>) or TCX (<Trackpoint>) text → compact, smoothed profile + stats
-function parseTrack(text){
+// extract trackpoints {lat,lon,ele} via the DOM — robust, but builds a full tree (heavy on huge files)
+function trackPointsDOM(text){
   const doc=new DOMParser().parseFromString(text,'application/xml');
   if(doc.querySelector('parsererror')) throw new Error('not valid XML');
-  let pts=[];
+  const pts=[];
   doc.querySelectorAll('trkpt, rtept').forEach(p=>{                       // GPX
     const lat=+p.getAttribute('lat'), lon=+p.getAttribute('lon');
     const eN=p.querySelector('ele'), ele=eN?parseFloat(eN.textContent):NaN;
@@ -675,6 +677,30 @@ function parseTrack(text){
     if(la&&lo){ const lat=+la.textContent, lon=+lo.textContent, ele=al?parseFloat(al.textContent):NaN;
       if(isFinite(lat)&&isFinite(lon)) pts.push({lat,lon,ele:isFinite(ele)?ele:null}); }
   });
+  return pts;
+}
+// extract trackpoints via streaming regex — no DOM, far lower memory for very large files
+function trackPointsRegex(text){
+  const pts=[];
+  if(text.indexOf('<Trackpoint')>=0 && text.indexOf('<trkpt')<0){          // TCX
+    const blocks=text.split('<Trackpoint>');
+    for(let i=1;i<blocks.length;i++){ const b=blocks[i];
+      const la=b.match(/<LatitudeDegrees>([^<]+)</), lo=b.match(/<LongitudeDegrees>([^<]+)</), al=b.match(/<AltitudeMeters>([^<]+)</);
+      if(la&&lo){ const lat=+la[1], lon=+lo[1], ele=al?parseFloat(al[1]):NaN;
+        if(isFinite(lat)&&isFinite(lon)) pts.push({lat,lon,ele:isFinite(ele)?ele:null}); } }
+  } else {                                                                 // GPX (paired or self-closing, in order)
+    const re=/<(?:trkpt|rtept)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:trkpt|rtept)>)/g; let m;
+    while((m=re.exec(text))){ const a=m[1]||'', inner=m[2]||'';
+      const la=a.match(/lat="([^"]+)"/), lo=a.match(/lon="([^"]+)"/), el=inner.match(/<ele>([^<]+)</);
+      if(la&&lo){ const lat=+la[1], lon=+lo[1], ele=el?parseFloat(el[1]):NaN;
+        if(isFinite(lat)&&isFinite(lon)) pts.push({lat,lon,ele:isFinite(ele)?ele:null}); } }
+  }
+  return pts;
+}
+function parseTrack(text){
+  const big = text.length > 8388608;                       // ~8 MB+ → skip the DOM (memory), stream with regex
+  let pts = big ? trackPointsRegex(text) : trackPointsDOM(text);
+  if(pts.length<2 && !big) pts = trackPointsRegex(text);    // DOM found nothing → regex fallback
   if(pts.length<2) throw new Error('no track points found (need a GPX or TCX with a track)');
   // cumulative distance along the track
   let cum=0; const raw=[{d:0,ele:pts[0].ele}];
@@ -785,6 +811,13 @@ function courseTime(){
   for(let b=0;b<nSeg;b++){ const w=segDist[b]||0; grades.push(+(((w>0?segGr[b]/w:0))*100).toFixed(1)); ivs.push(w>0?segIv[b]/w:0); }
   return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds, distM:D, scale, strat:useStrat?strat:(S.segBreakdown?'manual':'even') };
 }
+// keep the EFFECTIVE activity duration (S.eventHours, used everywhere downstream) in sync with the
+// source of truth: the Performance-Predictor estimate while a course is loaded, else the user's
+// manual entry (S.manualHours). Called at the top of render() so every tab reflects it.
+function syncDuration(){
+  const t = S.course ? courseTime() : null;
+  S.eventHours = t ? +t.hours.toFixed(2) : (+S.manualHours||0);
+}
 // diverging colour for a segment's effort relative to the rider's average (cool=easier, warm=harder)
 function paceColor(r){
   const t=Math.max(-1,Math.min(1,((r||1)-1)/0.2));        // ±20% off average → full cool/warm
@@ -856,13 +889,14 @@ function coursePanel(){
   const fileRow=`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Upload track</label>
       <input type="file" id="courseFile" accept=".gpx,.tcx,application/gpx+xml,application/xml,text/xml" style="flex:1;min-width:0"></div>
     <div class="note">Pick a built-in <b>reference course</b> above, or drop in a <b>GPX</b>/<b>TCX</b> file exported from Strava, Garmin, Komoot, or Ride With GPS. We read distance, elevation &amp; grade to build your segment plan — parsing happens entirely in your browser; nothing is uploaded.</div>`;
-  if(!c) return head+ref+fileRow+`</div>`;
+  const loading = _courseLoading ? `<div class="note">⏳ Reading course… large files can take a few seconds.</div>` : '';
+  if(!c) return head+ref+loading+fileRow+`</div>`;
   const mi=c.distM/M_PER_MI, t=courseTime(), it=intItem(S.eventZone);
   const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
   const strat=S.pacingStrategy||'even';
   const wlLbl = S.segBreakdown ? `per-segment ${run?'pace':'power'}`
               : (strat==='even' ? wl : `${wl}, ${PACE_LABELS[strat].toLowerCase()}`);   // strategy redistributes the average
-  return head+ref+`
+  return head+ref+loading+`
     <div class="row-actions" style="margin-bottom:8px;align-items:center">
       <span class="muted" style="font-size:12px">📈 ${escHtml(c.name||'course')}</span>
       <button class="sm ghost" onclick="window._clearCourse()" style="margin-left:auto">Clear course</button>
@@ -894,8 +928,8 @@ function coursePanel(){
       <div class="res"><span>Est. moving time <span class="muted">(@ ${wlLbl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
     </div>
     <div class="row-actions" style="margin-top:10px;align-items:center">
-      <span class="muted" style="font-size:11px">Sets activity duration from the estimated time at your selected ${run?'pace':'power'} and fills the 30-minute segments with the course's grade profile.</span>
-      <button class="sm" onclick="window._applyCourse()" style="margin-left:auto">Apply to 30-min plan →</button>
+      <span class="muted" style="font-size:11px">Duration and the 30-minute segment grade &amp; ${run?'pace':'power'} profile are filled in automatically when a course is loaded. Use <b>Re-apply</b> to rebuild the segments after changing your pacing strategy or average ${run?'pace':'power'}.</span>
+      <button class="sm" onclick="window._applyCourse()" style="margin-left:auto">Re-apply to 30-min plan →</button>
     </div>
     ${run?'':`<div class="sub-h" style="margin-top:12px">Cycling time model</div>
     ${courseParamRow('Bike weight','bikeLbs','lbs',0.5,BIKE_PRESETS)}
@@ -1017,6 +1051,7 @@ function loadAthlete(){
       delete s.highCarbAdapted;
       if(s.glyState===undefined && s.carbLoaded!==undefined) s.glyState = s.carbLoaded ? 'loaded' : 'rested'; // migrate old boolean
       delete s.carbLoaded;
+      if(s.manualHours===undefined) s.manualHours = (s.eventHours!==undefined ? +s.eventHours : S.manualHours); // seed manual entry from old saves
       Object.assign(S, s);
     }
     // keep a saved fuel list only if it's the new brand/split schema; legacy generic lists
@@ -1258,7 +1293,12 @@ function viewRider(){
     <h2>Activity Information</h2>
     <div class="grid cols2">
       <div>
-        ${numField('Activity duration','eventHours','hr',0.5)}
+        ${S.course
+          ? `<div class="field"><label>Activity duration</label>
+              <input type="number" value="${fmt(S.eventHours,2)}" step="0.5" disabled title="Set by the Performance Predictor from the loaded course — clear the course to enter your own">
+              <span class="u">hr</span></div>
+             <div class="note">⛰ From the <b>Performance Predictor</b> — estimated time for <b>${escHtml(S.course.name||'your course')}</b> at your selected ${run?'pace':'power'}${S.segBreakdown?' / segments':(S.pacingStrategy&&S.pacingStrategy!=='even'?' / pacing strategy':'')}. <a onclick="window._clearCourse()" style="color:var(--accent2);cursor:pointer">Clear the course</a> to enter a duration manually.</div>`
+          : numField('Activity duration','manualHours','hr',0.5)}
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg ${run?'pace':'intensity'}</label>
           <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select></div>
         ${run&&!S.segBreakdown?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg grade</label>
@@ -2048,6 +2088,7 @@ function trackCalcUse(){
 }
 function render(){
   trackCalcUse();
+  syncDuration();   // effective duration = course prediction (if a course is loaded) else the manual entry
   const sx=window.pageXOffset, sy=window.pageYOffset;   // preserve scroll position across the rebuild
   const ae=document.activeElement;
   const sig = (ae && $('#app').contains(ae)) ? elSig(ae) : null;
@@ -2228,21 +2269,33 @@ window._setSegMode=(on)=>{
 window._setSegZone=(i,v)=>{ S.segZones[i]=+v; render(); };
 
 /* --- GPS course: load / apply / clear --- */
+let _courseLoading=false;                                  // shows a "Reading course…" state during a big parse
 window._loadCourse=(e)=>{
-  const f=e&&e.target&&e.target.files&&e.target.files[0]; if(!f) return;
+  const inp=e&&e.target, f=inp&&inp.files&&inp.files[0]; if(!f) return;
+  const MB=f.size/1048576;
+  if(MB>25 && !confirm(`This track is ${MB.toFixed(0)} MB. Large files take a few seconds to read and use a lot of memory (especially on phones). Continue?`)){
+    if(inp) inp.value=''; return;
+  }
+  _courseLoading=true; render();                           // paint the "Reading…" state before the synchronous parse
   const rd=new FileReader();
-  rd.onload=()=>{ try{ const c=parseTrack(String(rd.result)); c.name=f.name; c.appliedAt=null; S.course=c;
-      S.airRho=+isaDensity(c.elevMeanM).toFixed(3);   // pull air density from the course's mean altitude
-      render(); }
-    catch(err){ alert('Could not read this file: '+err.message+'.\n\nExport a GPX or TCX track from Strava, Garmin, Komoot, or Ride With GPS.'); } };
-  rd.onerror=()=>alert('Could not read the file.');
+  rd.onload=()=>{ const text=String(rd.result);
+    setTimeout(()=>{                                       // yield so the indicator paints before parsing
+      try{ const c=parseTrack(text); c.name=f.name; c.appliedAt=null; S.course=c;
+        S.airRho=+isaDensity(c.elevMeanM).toFixed(3);      // pull air density from the course's mean altitude
+        applyCourseToPlan(); }                             // auto-fill the 30-min segment grade/intensity profile on load
+      catch(err){ alert('Could not read this file: '+err.message+'.\n\nExport a GPX or TCX track from Strava, Garmin, Komoot, or Ride With GPS.'); }
+      finally{ _courseLoading=false; if(inp) inp.value=''; render(); }
+    }, 20);
+  };
+  rd.onerror=()=>{ _courseLoading=false; render(); alert('Could not read the file.'); };
   rd.readAsText(f);
 };
-// push the course onto the 30-min plan: duration, grades, and EXACT per-segment intensity.
+// push the course onto the 30-min plan: grades + EXACT per-segment intensity (duration syncs separately via syncDuration).
 // uniform effort keeps the rider's intensity model; a varying strategy generates exact workload/pace rows
 // (one per distinct segment value, incl. the average) so the plan matches the prediction — no snapping.
-window._applyCourse=()=>{
-  const r=courseTime(); if(!r){ alert('Upload a course first.'); return; }
+// returns false (no-op) if there's no course to apply; takes NO action on the view (caller renders).
+function applyCourseToPlan(){
+  const r=courseTime(); if(!r) return false;
   const run=isRun(), baseIt=intItem(S.eventZone);
   S.eventHours=+r.hours.toFixed(2);
   S.segGrades=r.segGrades.slice();
@@ -2259,8 +2312,10 @@ window._applyCourse=()=>{
   }
   S.segBreakdown=true;
   if(S.course) S.course.appliedAt=S.eventZone;
-  render();
-};
+  return true;
+}
+// manual "Apply to 30-min plan" button — re-bakes the segments (e.g. after changing pacing strategy)
+window._applyCourse=()=>{ if(!applyCourseToPlan()){ alert('Upload a course first.'); return; } render(); };
 window._clearCourse=()=>{ S.course=null; render(); };
 // load a built-in reference course (deep-copied so the constant isn't mutated); air density from its altitude
 window._loadBuiltin=(key)=>{
@@ -2268,6 +2323,7 @@ window._loadBuiltin=(key)=>{
   const c=JSON.parse(JSON.stringify(src)); c.appliedAt=null;
   S.course=c;
   S.airRho=+isaDensity(c.elevMeanM||0).toFixed(3);
+  applyCourseToPlan();                                // auto-fill the 30-min segment grade/intensity profile on load
   render();
 };
 window._setPacing=(v)=>{ S.pacingStrategy=v; render(); };
