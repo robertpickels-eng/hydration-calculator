@@ -785,8 +785,15 @@ function courseTime(){
   for(let b=0;b<nSeg;b++){ const w=segDist[b]||0; grades.push(+(((w>0?segGr[b]/w:0))*100).toFixed(1)); ivs.push(w>0?segIv[b]/w:0); }
   return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds, distM:D, scale, strat:useStrat?strat:(S.segBreakdown?'manual':'even') };
 }
-// inline elevation-profile sparkline (filled area + line), with 30-min segment
-// shading + dashed dividers placed at each boundary's distance (from courseTime t)
+// diverging colour for a segment's effort relative to the rider's average (cool=easier, warm=harder)
+function paceColor(r){
+  const t=Math.max(-1,Math.min(1,((r||1)-1)/0.2));        // ±20% off average → full cool/warm
+  const warm=[200,80,46], cool=[64,116,196], neut=[120,130,150], mix=(a,b,f)=>Math.round(a+(b-a)*f);
+  const c = t>=0 ? neut.map((n,i)=>mix(n,warm[i],t)) : neut.map((n,i)=>mix(n,cool[i],-t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+// inline elevation-profile sparkline (filled area + line). 30-min segment bands are tinted by
+// effort vs the rider's average (from courseTime t.segIv); dashed dividers mark each boundary.
 function courseSpark(c, t){
   const pr=c.profile; if(!pr||pr.length<2) return '';
   const W=600, H=70, dmax=pr[pr.length-1][0]||1;
@@ -794,17 +801,19 @@ function courseSpark(c, t){
   if(emax-emin<1) emax=emin+1;
   const X=d=>d/dmax*W, Y=e=>H-3-((e-emin)/(emax-emin))*(H-6);
   const pts=pr.map(p=>X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1));
-  // 30-min segment edges in metres → alternating shaded bands + dividers
   const bs=((t&&t.bounds)||[]).filter(d=>d>0&&d<dmax-1e-6);
   const edges=[0,...bs,dmax];
+  // tint each 30-min band by its effort vs the selected average
+  const segIv=(t&&t.segIv)||[], baseIt=intItem(S.eventZone), baseIv=isRun()?(baseIt.speed||0):(baseIt.watts||0);
   let bands='';
-  for(let i=0;i<edges.length-1;i+=2){ const x0=X(edges[i]), x1=X(edges[i+1]);
-    bands+=`<rect x="${x0.toFixed(1)}" y="0" width="${(x1-x0).toFixed(1)}" height="${H}" fill="var(--accent2)" opacity="0.08"></rect>`; }
-  const lines=bs.map(d=>`<line x1="${X(d).toFixed(1)}" y1="0" x2="${X(d).toFixed(1)}" y2="${H}" stroke="var(--accent2)" stroke-width="1" stroke-dasharray="2 2" opacity="0.6" vector-effect="non-scaling-stroke"></line>`).join('');
+  for(let i=0;i<edges.length-1;i++){ const x0=X(edges[i]), x1=X(edges[i+1]);
+    const r=(baseIv>0 && segIv[i]>0)?segIv[i]/baseIv:1;
+    bands+=`<rect x="${x0.toFixed(1)}" y="0" width="${(x1-x0).toFixed(1)}" height="${H}" fill="${paceColor(r)}" opacity="0.30"></rect>`; }
+  const lines=bs.map(d=>`<line x1="${X(d).toFixed(1)}" y1="0" x2="${X(d).toFixed(1)}" y2="${H}" stroke="rgba(40,44,52,0.6)" stroke-width="1" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"></line>`).join('');
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:70px;display:block;background:rgba(73,83,109,.06);border-radius:6px">
     ${bands}
-    <path d="M0,${H} L${pts.join(' L')} L${W},${H} Z" fill="var(--accent2)" opacity="0.16"></path>
-    <path d="M${pts.join(' L')}" fill="none" stroke="var(--accent2)" stroke-width="1.5" vector-effect="non-scaling-stroke"></path>
+    <path d="M0,${H} L${pts.join(' L')} L${W},${H} Z" fill="var(--accent2)" opacity="0.14"></path>
+    <path d="M${pts.join(' L')}" fill="none" stroke="var(--accent2)" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
     ${lines}
   </svg>`;
 }
@@ -862,7 +871,12 @@ function coursePanel(){
         ? `<span style="position:absolute;left:${Math.min(98,d/dmax*100).toFixed(2)}%;transform:translateX(-50%);font-size:9px;color:var(--muted);white-space:nowrap">${hm((i+1)*SEG_LEN)}</span>` : '').join('');
       return `<div style="position:relative">${courseSpark(c,t)}${bs.length?`<div style="position:relative;height:12px;margin-top:1px">${labs}</div>`:''}</div>`;
     })()}
-    <div class="muted" style="font-size:10px;margin-top:2px">Shaded bands &amp; dashed dividers mark each <b>30-min segment</b> at ${wlLbl} (estimated time) — climbs stretch a segment over less ground, descents over more.${S.segBreakdown?` Change a segment's ${run?'pace':'power'} below and the bands re-time live.`:''}</div>
+    <div class="muted" style="font-size:10px;margin-top:2px;display:flex;flex-wrap:wrap;gap:3px 10px;align-items:center">
+      <span>Bands tinted by <b>effort vs your average</b>; dashed dividers mark each <b>30-min segment</b> at ${wlLbl} — climbs compress a segment, descents stretch it.</span>
+      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(64,116,196);display:inline-block"></span>easier</span>
+      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(120,130,150);display:inline-block"></span>average</span>
+      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(200,80,46);display:inline-block"></span>harder</span>
+    </div>
     <div class="grid cols3" style="margin-top:10px">
       <div class="res"><span>Distance</span><span class="v">${fmt(mi,1)} mi · ${fmt(c.distM/1000,1)} km</span></div>
       <div class="res"><span>Elevation gain</span><span class="v">${fmt(c.gainM*3.28084,0)} ft · ${fmt(c.gainM,0)} m</span></div>
@@ -2217,16 +2231,25 @@ window._loadCourse=(e)=>{
   rd.onerror=()=>alert('Could not read the file.');
   rd.readAsText(f);
 };
-// push the course onto the 30-min segment plan: duration from estimated time, grades + (strategy) intensity per block
+// push the course onto the 30-min plan: duration, grades, and EXACT per-segment intensity.
+// uniform effort keeps the rider's intensity model; a varying strategy generates exact workload/pace rows
+// (one per distinct segment value, incl. the average) so the plan matches the prediction — no snapping.
 window._applyCourse=()=>{
   const r=courseTime(); if(!r){ alert('Upload a course first.'); return; }
+  const run=isRun(), baseIt=intItem(S.eventZone);
   S.eventHours=+r.hours.toFixed(2);
   S.segGrades=r.segGrades.slice();
-  // snap each segment's target intensity (from the pacing strategy) to the nearest available zone/workload index
-  const L=intensities();
-  const nearestIdx=val=>{ if(!(val>0)) return S.eventZone; let bi=0,bd=Infinity;
-    L.forEach((it,i)=>{ const iv=isRun()?(it.speed||0):(it.watts||0), d=Math.abs(iv-val); if(d<bd){bd=d;bi=i;} }); return bi; };
-  S.segZones=r.segIv.map(nearestIdx);
+  const exact=r.segIv.map(iv=> run ? Math.round(speedToPace(iv)) : Math.round(iv));   // pace sec/mi · or watts
+  if(exact.every(v=>v===exact[0])){
+    S.segZones=Array.from({length:r.nSeg},()=>S.eventZone);                            // even effort — no new rows
+  } else {
+    const baseVal = run ? Math.round(speedToPace(baseIt.speed||0)) : Math.round(baseIt.watts||0);
+    const uniq=[...new Set([...exact, baseVal])].sort((a,b)=>a-b);                      // exact rows, average included
+    S.intensityMode='workload';
+    if(run) S.runPaces=uniq.slice(); else S.workloads=uniq.slice();
+    S.segZones=exact.map(v=>uniq.indexOf(v));
+    S.eventZone=uniq.indexOf(baseVal);
+  }
   S.segBreakdown=true;
   if(S.course) S.course.appliedAt=S.eventZone;
   render();
