@@ -649,6 +649,8 @@ function choExcess(intakeG, ceilingG){
    30-minute segments + activity duration come straight off the course.
    All parsing is client-side; nothing leaves the browser.
    ============================================================ */
+// air density (kg/m³) at altitude h (m) — International Standard Atmosphere, 15°C sea level
+function isaDensity(h){ return 1.225*Math.pow(Math.max(0,1-2.25577e-5*(h||0)),4.25588); }
 // great-circle distance between two lat/lon points (m)
 function haversine(la1,lo1,la2,lo2){
   const R=6371000, rad=Math.PI/180;
@@ -696,7 +698,8 @@ function parseTrack(text){
     if(de>0)gain+=de; else loss-=de;
     if(dd>0) maxG=Math.max(maxG, Math.abs(de/dd)); }
   const avgGrade=(sm[sm.length-1][1]-sm[0][1])/cum;
-  return { distM:cum, gainM:gain, lossM:loss, maxGrade:maxG*100, avgGrade:avgGrade*100, profile:sm };
+  let eleSum=0; sm.forEach(p=>eleSum+=p[1]); const elevMeanM=sm.length?eleSum/sm.length:0;
+  return { distM:cum, gainM:gain, lossM:loss, maxGrade:maxG*100, avgGrade:avgGrade*100, elevMeanM, profile:sm };
 }
 // cycling: solve road speed (m/s) at a given grade for a target power, against
 // gravity + rolling + aero drag (simplified Martin et al. 1998). Cubic → bisection.
@@ -808,7 +811,7 @@ function courseSpark(c, t){
 // preset menus for the cycling time model (label → value); manual entry stays available alongside
 const BIKE_PRESETS=[['Aero / race road — 16',16],['Road — 18',18],['Endurance / disc road — 20',20],['TT / tri — 21',21],['Gravel — 22',22],['MTB — 28',28]];
 const CDA_PRESETS =[['Upright / tops — 0.40',0.40],['Road hoods — 0.32',0.32],['Road drops — 0.28',0.28],['Aero / TT bars — 0.24',0.24],['Gravel — 0.38',0.38],['MTB — 0.48',0.48]];
-const CRR_PRESETS =[['Race tires, smooth tarmac — 0.004',0.004],['Good road clinchers — 0.005',0.005],['Training / rough tarmac — 0.007',0.007],['Gravel — 0.012',0.012],['MTB knobby off-road — 0.020',0.020]];
+const CRR_PRESETS =[['High-performance road — 0.004',0.004],['Recreation road — 0.005',0.005],['Fast gravel — 0.008',0.008],['Knobby gravel — 0.012',0.012],['XC mountain bike — 0.017',0.017]];
 const RHO_PRESETS =[['Sea level, 15°C — 1.225',1.225],['Sea level, 25°C — 1.18',1.18],['500 m — 1.17',1.17],['1000 m — 1.11',1.11],['Boulder ~1650 m — 1.04',1.04],['2000 m — 1.01',1.01],['2500 m — 0.96',0.96]];
 // one row: label + preset dropdown (selects a known value, or shows "Custom…") + manual number input
 function courseParamRow(label,key,unit,step,presets){
@@ -860,6 +863,7 @@ function coursePanel(){
       <div class="res"><span>Elevation loss</span><span class="v">${fmt(c.lossM*3.28084,0)} ft · ${fmt(c.lossM,0)} m</span></div>
       <div class="res"><span>Avg grade</span><span class="v">${fmt(c.avgGrade,1)}%</span></div>
       <div class="res"><span>Max grade</span><span class="v">${fmt(c.maxGrade,1)}%</span></div>
+      <div class="res"><span>Mean altitude</span><span class="v">${fmt((c.elevMeanM||0)*3.28084,0)} ft · ${fmt(c.elevMeanM||0,0)} m</span></div>
       <div class="res"><span>Est. moving time <span class="muted">(@ ${wlLbl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
     </div>
     <div class="row-actions" style="margin-top:10px;align-items:center">
@@ -871,7 +875,7 @@ function coursePanel(){
     ${courseParamRow('CdA','cda','m²',0.01,CDA_PRESETS)}
     ${courseParamRow('Crr','crr','',0.001,CRR_PRESETS)}
     ${courseParamRow('Air density','airRho','kg/m³',0.01,RHO_PRESETS)}
-    <div class="note">Speed at each grade is solved from your selected power against gravity + rolling + aero drag (Martin et&nbsp;al.). Pick a preset or type your own — total mass adds your body weight to the bike, and air density thins with altitude (Boulder ≈ 1.04).</div>`}
+    <div class="note">Speed at each grade is solved from your selected power against gravity + rolling + aero drag (Martin et&nbsp;al.). Pick a preset or type your own. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA) — override above if you have a measured value. Total mass adds your body weight to the bike.</div>`}
     <div class="note">${run
       ? `Running time holds your selected effort (VO₂) and lets pace drift with grade — climbs slow you, descents speed you up. The ACSM model is least reliable on steep descents, so per-segment speed is clamped to a sane range.`
       : `At constant power your calories don't change with grade, so for cycling the course's value is an accurate <b>duration</b> and how it splits across the 30-minute blocks — the segment list below inherits it.`}</div>
@@ -1954,6 +1958,7 @@ function viewSources(){
     ref('Martin JC, Milliken DL, Cobb JE, McFadden KL, Coggan AR','1998','Validation of a mathematical model for road cycling power.','Journal of Applied Biomechanics, 14(3), 276–291.')
     + ref('di Prampero PE, Cortili G, Mognoni P, Saibene F','1979','Equation of motion of a cyclist.','Journal of Applied Physiology, 47(1), 201–206. — gravity, rolling and air-resistance components of cycling power.')
     + ref('Swain DP','1997','A model for optimizing cycling performance by varying power on hills and in wind.','Medicine &amp; Science in Sports &amp; Exercise, 29(8), 1104–1108. — basis for riding harder uphill / easier downhill at a fixed average effort.')
+    + ref('Wilson DG, Schmidt T','2020','Bicycling Science (4th ed.).','MIT Press. — representative rolling-resistance (Crr) and drag-area (CdA) values for road, gravel and MTB tires and positions.')
     + ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — running speed/grade ⇄ oxygen-cost equation, here inverted at constant effort.'))}
 
   ${sec('Glycogen stores &amp; depletion',
@@ -2197,7 +2202,9 @@ window._setSegZone=(i,v)=>{ S.segZones[i]=+v; render(); };
 window._loadCourse=(e)=>{
   const f=e&&e.target&&e.target.files&&e.target.files[0]; if(!f) return;
   const rd=new FileReader();
-  rd.onload=()=>{ try{ const c=parseTrack(String(rd.result)); c.name=f.name; c.appliedAt=null; S.course=c; render(); }
+  rd.onload=()=>{ try{ const c=parseTrack(String(rd.result)); c.name=f.name; c.appliedAt=null; S.course=c;
+      S.airRho=+isaDensity(c.elevMeanM).toFixed(3);   // pull air density from the course's mean altitude
+      render(); }
     catch(err){ alert('Could not read this file: '+err.message+'.\n\nExport a GPX or TCX track from Strava, Garmin, Komoot, or Ride With GPS.'); } };
   rd.onerror=()=>alert('Could not read the file.');
   rd.readAsText(f);
