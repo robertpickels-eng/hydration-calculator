@@ -728,30 +728,43 @@ function courseSolveSpeed(grade){
 function courseTime(){
   const c=S.course; if(!c||!c.profile||c.profile.length<2) return null;
   const pr=c.profile, SEG=SEG_LEN*3600;                    // seconds per 30-min segment
-  let T=0; const segDist=[], segGr=[];
+  let T=0, D=0, nextBound=SEG; const segDist=[], segGr=[], bounds=[];
   for(let i=1;i<pr.length;i++){
     const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
     const grade=(pr[i][1]-pr[i-1][1])/dd;
     const v=courseSolveSpeed(grade); if(v<=0) continue;
-    const dt=dd/v, b=Math.floor((T+dt/2)/SEG);             // bucket by the pair's midpoint time
+    const dt=dd/v;
+    // record the distance reached at each 30-min boundary this pair crosses (interpolated)
+    while(T+dt>=nextBound){ const frac=Math.max(0,Math.min(1,(nextBound-T)/dt)); bounds.push(D+dd*frac); nextBound+=SEG; }
+    const b=Math.floor((T+dt/2)/SEG);                      // bucket by the pair's midpoint time
     segDist[b]=(segDist[b]||0)+dd; segGr[b]=(segGr[b]||0)+dd*grade;
-    T+=dt;
+    T+=dt; D+=dd;
   }
   const nSeg=Math.max(1, Math.ceil(T/SEG)), grades=[];
   for(let b=0;b<nSeg;b++){ const w=segDist[b]||0; grades.push(+(((w>0?segGr[b]/w:0))*100).toFixed(1)); }
-  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades };
+  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, bounds, distM:D };
 }
-// inline elevation-profile sparkline (filled area + line)
-function courseSpark(c){
+// inline elevation-profile sparkline (filled area + line), with 30-min segment
+// shading + dashed dividers placed at each boundary's distance (from courseTime t)
+function courseSpark(c, t){
   const pr=c.profile; if(!pr||pr.length<2) return '';
   const W=600, H=70, dmax=pr[pr.length-1][0]||1;
   let emin=Infinity, emax=-Infinity; pr.forEach(p=>{ if(p[1]<emin)emin=p[1]; if(p[1]>emax)emax=p[1]; });
   if(emax-emin<1) emax=emin+1;
   const X=d=>d/dmax*W, Y=e=>H-3-((e-emin)/(emax-emin))*(H-6);
   const pts=pr.map(p=>X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1));
+  // 30-min segment edges in metres → alternating shaded bands + dividers
+  const bs=((t&&t.bounds)||[]).filter(d=>d>0&&d<dmax-1e-6);
+  const edges=[0,...bs,dmax];
+  let bands='';
+  for(let i=0;i<edges.length-1;i+=2){ const x0=X(edges[i]), x1=X(edges[i+1]);
+    bands+=`<rect x="${x0.toFixed(1)}" y="0" width="${(x1-x0).toFixed(1)}" height="${H}" fill="var(--accent2)" opacity="0.08"></rect>`; }
+  const lines=bs.map(d=>`<line x1="${X(d).toFixed(1)}" y1="0" x2="${X(d).toFixed(1)}" y2="${H}" stroke="var(--accent2)" stroke-width="1" stroke-dasharray="2 2" opacity="0.6" vector-effect="non-scaling-stroke"></line>`).join('');
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:70px;display:block;background:rgba(73,83,109,.06);border-radius:6px">
+    ${bands}
     <path d="M0,${H} L${pts.join(' L')} L${W},${H} Z" fill="var(--accent2)" opacity="0.16"></path>
-    <path d="M${pts.join(' L')}" fill="none" stroke="var(--accent2)" stroke-width="1.5"></path>
+    <path d="M${pts.join(' L')}" fill="none" stroke="var(--accent2)" stroke-width="1.5" vector-effect="non-scaling-stroke"></path>
+    ${lines}
   </svg>`;
 }
 // the Course (GPS) panel on the Athlete & Activity tab
@@ -770,7 +783,13 @@ function coursePanel(){
       <span class="muted" style="font-size:12px">📈 ${escHtml(c.name||'course')}</span>
       <button class="sm ghost" onclick="window._clearCourse()" style="margin-left:auto">Clear course</button>
     </div>
-    ${courseSpark(c)}
+    ${(()=>{ const dmax=c.profile[c.profile.length-1][0]||1, bs=(t&&t.bounds)||[];
+      const step=Math.max(1,Math.ceil(bs.length/16));   // thin labels so they don't collide on long courses
+      const labs=bs.map((d,i)=>(i%step===0||i===bs.length-1)
+        ? `<span style="position:absolute;left:${Math.min(98,d/dmax*100).toFixed(2)}%;transform:translateX(-50%);font-size:9px;color:var(--muted);white-space:nowrap">${hm((i+1)*SEG_LEN)}</span>` : '').join('');
+      return `<div style="position:relative">${courseSpark(c,t)}${bs.length?`<div style="position:relative;height:12px;margin-top:1px">${labs}</div>`:''}</div>`;
+    })()}
+    <div class="muted" style="font-size:10px;margin-top:2px">Shaded bands &amp; dashed dividers mark each <b>30-min segment</b> at ${wl} (estimated time) — climbs stretch a segment over less ground, descents over more.</div>
     <div class="grid cols3" style="margin-top:10px">
       <div class="res"><span>Distance</span><span class="v">${fmt(mi,1)} mi · ${fmt(c.distM/1000,1)} km</span></div>
       <div class="res"><span>Elevation gain</span><span class="v">${fmt(c.gainM*3.28084,0)} ft · ${fmt(c.gainM,0)} m</span></div>
