@@ -332,7 +332,9 @@ const S = {
   gutAdapt:'adapted',                           // gut training level → carb cap: unadapted 90 · adapted 120 · highcarb 150 g/hr
   // --- GPS course (uploaded track) ---
   course:null,                                 // parsed track: {name, distM, gainM, lossM, avgGrade, maxGrade, profile:[[d_m,ele_m],…]}
-  pacingStrategy:'even',                        // performance-predictor pacing: even|climb5|climb10|climb15|neg|fade (off the selected average)
+  pacingStrategy:'even',                        // performance-predictor pacing: even|climb5|climb10|neg|fade (off the selected average)
+  wPrimeKJ:null,                                // W′ override (kJ, cycling anaerobic work capacity); null → auto 0.30 kJ/kg. CP = FTP.
+  dPrimeM:null,                                 // D′ override (m, running anaerobic distance capacity); null → auto 2.5 m/kg. CS = threshold pace.
   bikeLbs:18,                                  // bike weight (lbs) — cycling course-time model (total mass = body + bike)
   cda:0.32,                                    // aerodynamic drag area CdA (m²) — road hoods default
   crr:0.0045,                                  // rolling-resistance coefficient — Recreation road preset (Michelin Power Road, butyl)
@@ -513,6 +515,17 @@ function kmToMiPace(secKm){ return secKm*MI_PER_KM; }
 
 function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
 
+/* ---- critical power / critical speed + anaerobic reserve (W′ cyc · D′ run) ----
+   CP/CS = the sustainable boundary (≈30-min power/pace) above which VO₂ & lactate rise without
+   steady state. We take CP = FTP and CS = threshold pace (within a few %; both already entered).
+   W′ (J, cycling) / D′ (m, running) = the FINITE work/distance available ABOVE CP/CS; it depletes
+   when over the line (T_lim = W′/(P−CP)) and reconstitutes below it (Skiba monoexponential). */
+function cpWatts(){ return Math.max(1,+S.ftp||0); }                                 // critical power (W)
+function csSpeed(){ return Math.max(1,vThreshold()); }                              // critical speed (m/min, flat-equivalent)
+function wPrimeJ(){ return (S.wPrimeKJ!=null ? +S.wPrimeKJ : 0.30*(S.bodyLbs/2.2))*1000; } // W′ in joules
+function dPrimeMeters(){ return S.dPrimeM!=null ? +S.dPrimeM : 2.5*(S.bodyLbs/2.2); }      // D′ in metres
+function wPrimeKJeff(){ return wPrimeJ()/1000; }                                     // effective W′ (kJ) for display
+
 // glycogen stores (kcal) = liver glycogen + active-muscle glycogen.
 // active-muscle glycogen = muscle mass (kg×LEAN×MUSC) × ACTIVE fraction × CONC (g/kg) × 4.18 kcal/g.
 // LEAN/MUSC are body comp (gender); ACTIVE (engaged fraction of total skeletal muscle) is ACTIVITY×gender:
@@ -613,6 +626,8 @@ function segments(){
   }
   return out;
 }
+// fraction of extra (slow-component) O₂ cost charged to time spent above CP/CS — severe-domain VO₂ drift
+const VO2_SLOW_FRAC = 0.06;
 // roll the segments up into event totals + the carbohydrate fueling target
 function eventTotals(){
   const segs=segments();
@@ -620,6 +635,14 @@ function eventTotals(){
   segs.forEach(s=>{ const m=intMetricsByIdx(s.zi, s.grade);
     kcal+=m.kcalHr*s.dur; choKcal+=m.choKcalHr*s.dur; fatKcal+=m.fatKcalHr*s.dur; });
   const hrs=Math.max(0.001,+S.eventHours||0);
+  // physiological cost of working above CP/CS on a loaded course: anaerobic work is ~all glycolytic
+  // (charge as carbohydrate), plus a VO₂ slow-component surcharge over the time spent above the boundary.
+  let anaerKcal=0, slowKcal=0; const ct=S._ct;
+  if(ct){ const kg=S.bodyLbs/2.2;
+    anaerKcal = isRun() ? ct.anaerWork*(1.04/1000)*kg     // D′ metres × running energy cost (~1.04 kcal/kg/km)
+                        : ct.anaerWork/0.24/4184;          // W′ joules (mechanical) ÷ gross efficiency ÷ 4184
+    slowKcal  = VO2_SLOW_FRAC * (kcal/hrs) * (ct.supraSec/3600);
+    choKcal += anaerKcal + slowKcal; kcal += anaerKcal + slowKcal; }  // both draw on carbohydrate
   const gly=glycogenKcal(), usableGly=gly*(1-S.reservePct/100);
   // carbohydrate that must be eaten so endogenous glycogen stays above the reserve to the finish
   const reqSuppKcal=Math.max(0, choKcal-usableGly);
@@ -631,6 +654,7 @@ function eventTotals(){
     targetRateGRaw, targetRateGCap:cap,
     targetRateG, targetRateKcal:targetRateG*4,
     overGut: targetRateGRaw>cap,                         // true requirement exceeds the gut ceiling
+    anaerKcal, slowKcal, supraKcal:anaerKcal+slowKcal,   // physiological supra-threshold surcharge (kcal)
     kcalHr:kcal/hrs, choGhr:(choKcal/4)/hrs };
 }
 // over-fueling check: is carb intake ≥20% above the gut-absorption ceiling (the rate the gut can
@@ -766,13 +790,12 @@ function paceMult(strat, grade, frac){
   switch(strat){
     case 'climb5':  return 1+0.05*gn;
     case 'climb10': return 1+0.10*gn;
-    case 'climb15': return 1+0.15*gn;
     case 'neg':     return 1+0.06*(2*(frac||0)-1);          // start easier → finish harder
     case 'fade':    return 1-0.06*(2*(frac||0)-1);          // start harder → fade
     default:        return 1;                                // even
   }
 }
-const PACE_LABELS={ even:'Even (hold average)', climb5:'Climb +5% / ease descents', climb10:'Climb +10% / ease descents', climb15:'Climb +15% / ease descents', neg:'Negative split', fade:'Fast start / fade' };
+const PACE_LABELS={ even:'Even (hold average)', climb5:'Climb +5% / ease descents', climb10:'Climb +10% / ease descents', neg:'Negative split', fade:'Fast start / fade' };
 // integrate the course at the selected workload → total time + per-30-min grade profile
 function courseTime(){
   const c=S.course; if(!c||!c.profile||c.profile.length<2) return null;
@@ -790,7 +813,14 @@ function courseTime(){
       const dt=dd/v; sw+=m*dt; st+=dt; }
     const avgM=st>0?sw/st:1; scale=avgM>0?1/avgM:1;
   }
+  // anaerobic-reserve boundary + capacity (W′ cyc in J vs CP=W · D′ run in m vs CS=m/min flat-equiv)
+  const CP = isRun()? csSpeed() : cpWatts();
+  const Wp = isRun()? dPrimeMeters() : wPrimeJ();
+  const tauOf = iv => isRun()                             // reconstitution time-constant below the boundary (s)
+      ? 316 + 546*Math.exp(-3*Math.max(0,Math.min(1,(CP-iv)/CP)))   // running: normalized-deficit Skiba analogue
+      : 546*Math.exp(-0.01*Math.max(0,CP-iv)) + 316;                // cycling: Skiba 2012 (DCP in watts)
   let T=0, D=0, nextBound=SEG; const segDist=[], segGr=[], segIv=[], bounds=[];
+  let wbal=Wp, wMin=Wp, anaerWork=0, supraSec=0, capSec=0; // reserve state + anaerobic work done above the boundary
   for(let i=1;i<pr.length;i++){
     const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
     const grade=(pr[i][1]-pr[i-1][1])/dd;
@@ -800,7 +830,23 @@ function courseTime(){
     else { const zi=S.segBreakdown?(S.segZones[Math.floor(T/SEG)]??S.eventZone):S.eventZone; v=courseSolveSpeed(grade,zi);
       const it2=intItem(zi); iv=isRun()?(it2.speed||0):(it2.watts||0); }
     if(v<=0) continue;
-    const dt=dd/v;
+    let dt=dd/v;
+    // ---- reserve dynamics: deplete above CP/CS (clamp the effort if it would run the reserve dry),
+    //      reconstitute below it. T_lim = W′/(P−CP); depletion is linear in (intensity − boundary). ----
+    const unit = isRun()? dt/60 : dt;                     // reserve units consumed per step (m for D′ · W·s=J for W′)
+    if(iv>CP){
+      const demand=(iv-CP)*unit;
+      if(demand>wbal){                                    // not enough reserve → clamp this section to sustainable
+        const ivCap=CP + Math.max(0,wbal)/Math.max(unit,1e-9);
+        if(isRun()){ const mc=ivCap/(baseIt.speed||1); v=solveSpeedScaled(grade,mc,baseIt); }
+        else        { v=cycSpeedMS(ivCap,grade); }
+        anaerWork+=Math.max(0,wbal); wbal=0; iv=ivCap; dt=dd/Math.max(v,1e-6); capSec+=dt;
+      } else { wbal-=demand; anaerWork+=demand; }
+      supraSec+=dt;
+    } else {
+      const tau=tauOf(iv); wbal=Wp-(Wp-wbal)*Math.exp(-dt/Math.max(tau,1));
+    }
+    if(wbal<wMin) wMin=wbal;
     // record the distance reached at each 30-min boundary this pair crosses (interpolated)
     while(T+dt>=nextBound){ const fr=Math.max(0,Math.min(1,(nextBound-T)/dt)); bounds.push(D+dd*fr); nextBound+=SEG; }
     const b=Math.floor((T+dt/2)/SEG);                      // bucket by the pair's midpoint time
@@ -809,18 +855,21 @@ function courseTime(){
   }
   const nSeg=Math.max(1, Math.ceil(T/SEG)), grades=[], ivs=[];
   for(let b=0;b<nSeg;b++){ const w=segDist[b]||0; grades.push(+(((w>0?segGr[b]/w:0))*100).toFixed(1)); ivs.push(w>0?segIv[b]/w:0); }
-  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds, distM:D, scale, strat:useStrat?strat:(S.segBreakdown?'manual':'even') };
+  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds, distM:D, scale, strat:useStrat?strat:(S.segBreakdown?'manual':'even'),
+    cpBound:CP, wpFull:Wp, wbalMin:wMin, wbalMinPct:Wp>0?Math.max(0,wMin)/Wp*100:100,
+    anaerWork, supraSec, capSec, capped:capSec>0.5 };   // reserve diagnostics (W′/D′ units; capSec/supraSec in s)
 }
 // keep the EFFECTIVE activity duration (S.eventHours, used everywhere downstream) in sync with the
 // source of truth: the Performance-Predictor estimate while a course is loaded, else the user's
 // manual entry (S.manualHours). Called at the top of render() so every tab reflects it.
 function syncDuration(){
   const t = S.course ? courseTime() : null;
+  S._ct = t;                                              // cache for eventTotals (fuel coupling) + the predictor readout
   S.eventHours = t ? +t.hours.toFixed(2) : (+S.manualHours||0);
 }
 // diverging colour for a segment's effort relative to the rider's average (cool=easier, warm=harder)
 function paceColor(r){
-  const t=Math.max(-1,Math.min(1,((r||1)-1)/0.2));        // ±20% off average → full cool/warm
+  const t=Math.max(-1,Math.min(1,((r||1)-1)/0.10));       // ±10% off average → full cool/warm
   const warm=[200,80,46], cool=[34,92,184], neut=[178,184,196], mix=(a,b,f)=>Math.round(a+(b-a)*f);
   const c = t>=0 ? neut.map((n,i)=>mix(n,warm[i],t)) : neut.map((n,i)=>mix(n,cool[i],-t));
   return `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -895,7 +944,7 @@ function coursePanel(){
     <div class="note">Pick a built-in <b>reference course</b> above, or drop in a <b>GPX</b>/<b>TCX</b> file exported from Strava, Garmin, Komoot, or Ride With GPS. We read distance, elevation &amp; grade to build your segment plan — parsing happens entirely in your browser; nothing is uploaded.</div>`;
   const loading = _courseLoading ? `<div class="note">⏳ Reading course… large files can take a few seconds.</div>` : '';
   if(!c) return head+ref+loading+fileRow+`</div>`;
-  const mi=c.distM/M_PER_MI, t=courseTime(), it=intItem(S.eventZone);
+  const mi=c.distM/M_PER_MI, t=S._ct||courseTime(), it=intItem(S.eventZone);
   const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
   const strat=S.pacingStrategy||'even';
   const wlLbl = S.segBreakdown ? `per-segment ${run?'pace':'power'}`
@@ -931,6 +980,28 @@ function coursePanel(){
       <div class="res"><span>Mean altitude</span><span class="v">${fmt((c.elevMeanM||0)*3.28084,0)} ft · ${fmt(c.elevMeanM||0,0)} m</span></div>
       <div class="res"><span>Est. moving time <span class="muted">(@ ${wlLbl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
     </div>
+    ${(()=>{
+      const cpLbl = run ? paceFmt(speedToPace(csSpeed()))+'/mi' : Math.round(cpWatts())+' W';
+      const reserveKey = run ? 'dPrimeM' : 'wPrimeKJ';
+      const reserveEff = run ? dPrimeMeters() : wPrimeKJeff();
+      const overridden = run ? (S.dPrimeM!=null) : (S.wPrimeKJ!=null);
+      const minPct = t? t.wbalMinPct : 100, capped = t && t.capped;
+      const R = run?'D′':'W′';
+      const status = capped
+        ? `<span style="color:var(--bad)">⚠ unsustainable — clamped ${hm(t.capSec/3600)} of pacing down to your ${R} limit (time above is honest)</span>`
+        : (minPct<15 ? `<span style="color:#b8860b">sustainable but tight — ${R} dips to ${fmt(minPct,0)}% of capacity</span>`
+                     : `<span style="color:var(--good)">✓ sustainable — ${R} stays ≥ ${fmt(minPct,0)}% of capacity</span>`);
+      return `<div class="sub-h" style="margin-top:12px">Sustainability — anaerobic reserve</div>
+        <div class="field" style="gap:6px;flex-wrap:wrap">
+          <label style="flex:0 0 auto;margin-right:6px" title="Critical ${run?'speed = your threshold pace':'power = your FTP'} — the sustainable boundary (~30-min limit)">${run?'Critical speed':'Critical power'}</label>
+          <span class="v" style="margin-right:14px">${cpLbl}</span>
+          <label style="flex:0 0 auto;margin-right:6px" title="${run?'D′ — finite distance reserve above critical speed':'W′ — finite work capacity above critical power'}">${R}</label>
+          <input type="number" step="${run?1:0.5}" value="${fmt(reserveEff, run?0:1)}" data-k="${reserveKey}" data-obj="S" style="width:64px" title="Override the auto value">
+          <span class="u" style="width:auto">${run?'m':'kJ'}</span>
+          ${overridden?`<a onclick="window._resetReserve()" style="color:var(--accent2);cursor:pointer;font-size:11px;margin-left:4px">auto</a>`:`<span class="muted" style="font-size:11px;margin-left:4px">auto · ${run?'2.5 m/kg':'0.30 kJ/kg'}</span>`}
+        </div>
+        <div class="note" style="margin-top:2px">${status}. Efforts above ${run?'critical speed':'critical power'} draw down a <i>finite</i> reserve (T<sub>lim</sub> = ${R} / (intensity − boundary)) that recovers only slowly below it (Skiba). A strategy that would empty it is clamped to what's actually sustainable, and the anaerobic work done above the line is charged to your carbohydrate need.</div>`;
+    })()}
     <div class="row-actions" style="margin-top:10px;align-items:center">
       <span class="muted" style="font-size:11px">Duration and the 30-minute segment grade &amp; ${run?'pace':'power'} profile are filled in automatically when a course is loaded. Use <b>Re-apply</b> to rebuild the segments after changing your pacing strategy or average ${run?'pace':'power'}.</span>
       <button class="sm" onclick="window._applyCourse()" style="margin-left:auto">Re-apply to 30-min plan →</button>
@@ -1055,6 +1126,7 @@ function loadAthlete(){
       delete s.highCarbAdapted;
       if(s.glyState===undefined && s.carbLoaded!==undefined) s.glyState = s.carbLoaded ? 'loaded' : 'rested'; // migrate old boolean
       delete s.carbLoaded;
+      if(s.pacingStrategy==='climb15') s.pacingStrategy='climb10'; // +15% strategy retired (unsustainable over 30-min segments)
       if(s.manualHours===undefined) s.manualHours = (s.eventHours!==undefined ? +s.eventHours : S.manualHours); // seed manual entry from old saves
       Object.assign(S, s);
     }
@@ -2331,6 +2403,7 @@ window._loadBuiltin=(key)=>{
   render();
 };
 window._setPacing=(v)=>{ S.pacingStrategy=v; render(); };
+window._resetReserve=()=>{ if(isRun()) S.dPrimeM=null; else S.wPrimeKJ=null; render(); };  // revert W′/D′ to the body-mass auto default
 // cycling time-model params via preset dropdown (manual number input commits through the generic data-k handler)
 window._setCourseParam=(key,val)=>{ if(val==='') return; S[key]=+val; render(); };
 
