@@ -711,9 +711,9 @@ function cycSpeedMS(P, grade){
   for(let k=0;k<60;k++){ const mid=(lo+hi)/2; if(f(mid)>0) hi=mid; else lo=mid; }
   return Math.max(1.0, Math.min(35,(lo+hi)/2));           // floor ~3.6 km/h (walk the bike)
 }
-// speed (m/s) at a grade holding the currently-selected workload (S.eventZone)
-function courseSolveSpeed(grade){
-  const it=intItem(S.eventZone);
+// speed (m/s) at a grade holding a given workload (intensity index zi; defaults to S.eventZone)
+function courseSolveSpeed(grade, zi){
+  const it=intItem(zi==null?S.eventZone:zi);
   if(isRun()){
     const v0=it.speed||0;                                  // flat speed (m/min)
     if(v0<=0) return 0;
@@ -732,7 +732,9 @@ function courseTime(){
   for(let i=1;i<pr.length;i++){
     const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
     const grade=(pr[i][1]-pr[i-1][1])/dd;
-    const v=courseSolveSpeed(grade); if(v<=0) continue;
+    // in 30-min-segment mode each segment can hold its own power/pace; pick by elapsed-time index
+    const zi = S.segBreakdown ? (S.segZones[Math.floor(T/SEG)] ?? S.eventZone) : S.eventZone;
+    const v=courseSolveSpeed(grade, zi); if(v<=0) continue;
     const dt=dd/v;
     // record the distance reached at each 30-min boundary this pair crosses (interpolated)
     while(T+dt>=nextBound){ const frac=Math.max(0,Math.min(1,(nextBound-T)/dt)); bounds.push(D+dd*frac); nextBound+=SEG; }
@@ -778,6 +780,7 @@ function coursePanel(){
   if(!c) return head+fileRow+`</div>`;
   const mi=c.distM/M_PER_MI, t=courseTime(), it=intItem(S.eventZone);
   const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
+  const wlLbl = S.segBreakdown ? `per-segment ${run?'pace':'power'}` : wl;   // breakdown mode = each segment's own intensity
   return head+`
     <div class="row-actions" style="margin-bottom:8px;align-items:center">
       <span class="muted" style="font-size:12px">📈 ${escHtml(c.name||'course')}</span>
@@ -789,14 +792,14 @@ function coursePanel(){
         ? `<span style="position:absolute;left:${Math.min(98,d/dmax*100).toFixed(2)}%;transform:translateX(-50%);font-size:9px;color:var(--muted);white-space:nowrap">${hm((i+1)*SEG_LEN)}</span>` : '').join('');
       return `<div style="position:relative">${courseSpark(c,t)}${bs.length?`<div style="position:relative;height:12px;margin-top:1px">${labs}</div>`:''}</div>`;
     })()}
-    <div class="muted" style="font-size:10px;margin-top:2px">Shaded bands &amp; dashed dividers mark each <b>30-min segment</b> at ${wl} (estimated time) — climbs stretch a segment over less ground, descents over more.</div>
+    <div class="muted" style="font-size:10px;margin-top:2px">Shaded bands &amp; dashed dividers mark each <b>30-min segment</b> at ${wlLbl} (estimated time) — climbs stretch a segment over less ground, descents over more.${S.segBreakdown?` Change a segment's ${run?'pace':'power'} below and the bands re-time live.`:''}</div>
     <div class="grid cols3" style="margin-top:10px">
       <div class="res"><span>Distance</span><span class="v">${fmt(mi,1)} mi · ${fmt(c.distM/1000,1)} km</span></div>
       <div class="res"><span>Elevation gain</span><span class="v">${fmt(c.gainM*3.28084,0)} ft · ${fmt(c.gainM,0)} m</span></div>
       <div class="res"><span>Elevation loss</span><span class="v">${fmt(c.lossM*3.28084,0)} ft · ${fmt(c.lossM,0)} m</span></div>
       <div class="res"><span>Avg grade</span><span class="v">${fmt(c.avgGrade,1)}%</span></div>
       <div class="res"><span>Max grade</span><span class="v">${fmt(c.maxGrade,1)}%</span></div>
-      <div class="res"><span>Est. moving time <span class="muted">(@ ${wl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
+      <div class="res"><span>Est. moving time <span class="muted">(@ ${wlLbl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
     </div>
     <div class="row-actions" style="margin-top:10px;align-items:center">
       <span class="muted" style="font-size:11px">Sets activity duration from the estimated time at your selected ${run?'pace':'power'} and fills the 30-minute segments with the course's grade profile.</span>
@@ -1886,6 +1889,12 @@ function viewSources(){
     + ref('Weir JB de V','1949','New methods for calculating metabolic rate with special reference to protein metabolism.','The Journal of Physiology, 109(1–2), 1–9.')
     + ref('Péronnet F, Massicotte D','1991','Table of nonprotein respiratory quotient: an update.','Canadian Journal of Sport Sciences, 16(1), 23–29.')
     + ref('Frayn KN','1983','Calculation of substrate oxidation rates in vivo from gaseous exchange.','Journal of Applied Physiology, 55(2), 628–634.'))}
+
+  ${sec('GPS course — power/pace → speed → time',
+    'For an uploaded course, speed at each point is solved from your chosen workload and the local grade, then integrated into time and the 30-minute segments. Cycling solves road speed from power against gravity + rolling resistance + aerodynamic drag (steady-state form: the acceleration and wind terms are omitted). Running inverts the ACSM running equation at constant oxygen cost (hold effort, let pace drift with grade), clamped because the linear model is unreliable on steep descents.',
+    ref('Martin JC, Milliken DL, Cobb JE, McFadden KL, Coggan AR','1998','Validation of a mathematical model for road cycling power.','Journal of Applied Biomechanics, 14(3), 276–291.')
+    + ref('di Prampero PE, Cortili G, Mognoni P, Saibene F','1979','Equation of motion of a cyclist.','Journal of Applied Physiology, 47(1), 201–206. — gravity, rolling and air-resistance components of cycling power.')
+    + ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — running speed/grade ⇄ oxygen-cost equation, here inverted at constant effort.'))}
 
   ${sec('Glycogen stores &amp; depletion',
     'Muscle-glycogen concentration per kg of engaged muscle (×4.18 kcal/g) plus a liver contribution; time-to-bonk = stored glycogen ÷ carbohydrate burn rate.',
