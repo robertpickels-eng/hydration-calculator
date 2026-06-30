@@ -32,7 +32,7 @@
     --panel2:#e9ebed;    /* ink-50 — sunken: inputs, wells, hover */
     --line:#d0d3d6;      /* ink-200 — hairline borders */
     --txt:#181a1c;       /* ink-900 — strong text */
-    --muted:#66696e;     /* ink-500 — meta / labels */
+    --muted:#5a5d63;     /* ink-550 — meta / labels (AA on white + sunken) */
     /* accents */
     --accent:#4d5d3d;    /* brine-600 — the single star */
     --accent-700:#3e4b32;
@@ -43,6 +43,7 @@
     --good:#4d5d3d;      /* brine — success (== accent) */
     --paper:#f1f2f3;     /* text on dark accents */
     --shadow:0 1px 2px rgba(15,16,18,.05);
+    --chip-bg:rgba(241,242,243,.72);   /* sparkline watt-label pill bg (themed) */
     /* fonts */
     --font-display:'Schibsted Grotesk',system-ui,sans-serif;
     --font-body:'Hanken Grotesk',system-ui,-apple-system,sans-serif;
@@ -65,15 +66,17 @@
     letter-spacing:.16em;color:var(--accent);line-height:1.3}
   header .sub{color:var(--muted);font-size:12px;font-family:var(--font-body)}
   h1{font-size:20px;margin:0}
-  h2{font-family:var(--font-mono);font-size:11px;font-weight:500;margin:0 0 8px;color:var(--accent);
-    text-transform:uppercase;letter-spacing:.16em}
+  h2{font-family:var(--font-mono);font-size:14px;font-weight:700;margin:0 0 12px;color:var(--accent);
+    text-transform:uppercase;letter-spacing:.1em;padding-bottom:8px;border-bottom:1px solid var(--line)}
 
   .tabs{display:flex;gap:2px;flex-wrap:wrap;padding:0 20px;background:var(--panel);border-bottom:1px solid var(--line);
     position:sticky;top:53px;z-index:19}
-  .tab{padding:11px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;
+  .tab{appearance:none;background:none;border:none;margin:0;font-family:inherit;
+    padding:11px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;
     font-weight:500;font-size:13px;transition:color var(--dur,.18s) ease,border-color .18s ease}
   .tab:hover{color:var(--txt)}
   .tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .tab:focus-visible{outline:2px solid var(--accent2);outline-offset:-2px;border-radius:3px}
   .wrap{max-width:1180px;margin:0 auto;padding:24px}
   footer.legal{max-width:1180px;margin:8px auto 28px;padding:16px 24px;border-top:1px solid var(--line);
     color:var(--muted);font-size:11.5px;line-height:1.5;display:flex;flex-direction:column;gap:5px}
@@ -99,6 +102,43 @@
   .fgrid label{font-size:12px}
   .fgrid input[type=number]{width:72px}
   .fgrid .u{width:28px;font-size:10px}
+  /* ---- refined alignment for the Athlete & Activity forms (.tidy) ---- */
+  .tidy .fgrid{display:block}                       /* unstack 2-up so every field is its own aligned row */
+  .tidy .field{display:grid;grid-template-columns:1fr 92px 32px;align-items:center;column-gap:12px;margin:7px 0}
+  .tidy .field>label{font-size:12.5px;color:var(--muted);white-space:normal}
+  .tidy .field>input,.tidy .field>select{grid-column:2;width:100%;min-width:0;justify-self:end}
+  .tidy .field>.u{grid-column:3;width:auto;text-align:left;justify-self:start;font-size:11px}
+  /* in the (wide) Activity panel, cap row width so the control sits near its label instead of floating mid-panel */
+  .tidy.compact .field{max-width:340px}
+  /* (a) long-option select on its own: small-caps label above a full-width control */
+  .tidy .field:has(>select[style*="flex:1"]):not(:has(>input)){grid-template-columns:1fr;row-gap:5px;margin:11px 0}
+  .tidy .field:has(>select[style*="flex:1"]):not(:has(>input))>label{grid-column:1;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .tidy .field:has(>select[style*="flex:1"]):not(:has(>input))>select{grid-column:1;width:100%;justify-self:stretch}
+  /* (b) preset select + manual number input (+ unit): one flex row, full width */
+  .tidy .field:has(>select[style*="flex:1"]):has(>input){display:flex;justify-content:flex-start;align-items:center;grid-template-columns:none;gap:6px;max-width:none}
+  .tidy .field:has(>select[style*="flex:1"]):has(>input)>label{flex:0 0 auto;font-size:12px}
+  .tidy .field:has(>select[style*="flex:1"]):has(>input)>select{flex:1 1 auto;width:auto;min-width:0;justify-self:auto}
+  .tidy .field:has(>select[style*="flex:1"]):has(>input)>input{flex:0 0 auto;width:62px;justify-self:auto}
+  .tidy .field:has(>select[style*="flex:1"]):has(>input)>.u{flex:0 0 auto;width:auto}
+  /* (c) file-picker row: small-caps label above a full-width input */
+  .tidy .field:has(>input[type="file"]){grid-template-columns:1fr;row-gap:5px;max-width:none}
+  .tidy .field:has(>input[type="file"])>label{grid-column:1;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .tidy .field:has(>input[type="file"])>input{grid-column:1;width:100%}
+  /* (d) inline readout-with-override row (Critical power / W′): stay flexible, full width */
+  .tidy .field:has(>.v){display:flex;justify-content:flex-start;flex-wrap:wrap;align-items:center;grid-template-columns:none;gap:6px;max-width:none}
+  .tidy .field:has(>.v)>input{width:64px;justify-self:auto}
+  .tidy .field:has(>.v)>.u{width:auto}
+  /* keep compact segment rows (time | zone | grade) as their original flex layout */
+  .tidy .scroll .field{display:flex;justify-content:space-between;grid-template-columns:none;max-width:none}
+  .tidy .scroll .field>input,.tidy .scroll .field>select{width:auto}
+  /* let two-column tracks shrink so long-select rows don't push the panel wider than its grid */
+  .tidy .grid>div{min-width:0}
+  /* keep explainer copy to a readable measure instead of running edge-to-edge */
+  .tidy .note{max-width:680px}
+  /* hide number spinners so tight decimal fields (Crr, air density) don't clip */
+  .tidy input[type=number]{-moz-appearance:textfield;appearance:textfield}
+  .tidy input[type=number]::-webkit-inner-spin-button,
+  .tidy input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
   @media(max-width:560px){.fgrid{grid-template-columns:1fr}}
   .res{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line)}
   .res:last-child{border-bottom:none}
@@ -109,6 +149,12 @@
     font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em}
   .muted{color:var(--muted)}
   .note{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.45}
+  /* Sources tab — comfortable reading type: larger, darker, shorter line length, clearer sections */
+  .sources h2{font-size:16px}
+  .sources .note{font-size:14px;line-height:1.7;color:var(--txt)}
+  .sources .note .est{color:var(--accent2)}
+  .sources .sub-h{font-size:11.5px;color:var(--accent)}
+  .sources ul li{font-size:13.5px;line-height:1.65}
   table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
   th,td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
   th:first-child,td:first-child{text-align:left}
@@ -133,6 +179,8 @@
   table.fuelplan thead tr.grp th.grpsep{border-left:1px solid var(--line)}
   /* fuel-plan editor cell: pack rows to the left so labels/inputs/buttons line up */
   table.fuelplan .pf-row{display:flex;align-items:center;gap:8px;margin:3px 0;justify-content:flex-start}
+  /* light hairline separating the Drink block from each fuel row in the “Bottles & food” cell */
+  table.fuelplan .pf-fuel{border-top:1px solid var(--line);margin-top:7px;padding-top:7px}
   table.fuelplan .pf-row .lbl{min-width:48px;color:var(--muted);font-size:11px;
     font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.06em}
   .scroll{overflow:auto;max-height:560px;border-radius:8px;border:1px solid var(--line)}
@@ -183,7 +231,7 @@
   .gauge .mk{position:absolute;top:-4px;width:3px;height:18px;background:#0f1012;border-radius:2px;box-shadow:0 0 0 2px rgba(255,255,255,.9)}
   .hint{cursor:help;border-bottom:1px dotted var(--muted)}
   .row-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-  .sub-h{font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent2);margin:10px 0 3px}
+  .sub-h{font-family:var(--font-mono);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.14em;color:var(--accent2);margin:14px 0 4px}
   details.refbox{margin:2px 0}
   summary.sub-h{cursor:pointer;list-style:none}
   summary.sub-h::-webkit-details-marker{display:none}
@@ -192,7 +240,46 @@
   .est{color:var(--warn);font-size:11px}
   a{color:var(--accent2)}
   @media(prefers-reduced-motion:reduce){*{transition:none!important}}
-  @media(max-width:880px){.cols2,.cols3{grid-template-columns:1fr}.tabs{top:51px}}
+  @media(max-width:880px){.cols2,.cols3{grid-template-columns:1fr}.tabs{top:51px}
+    /* tab strip: scroll horizontally instead of wrapping into multiple rows */
+    .tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+    .tabs::-webkit-scrollbar{display:none}
+    .tab{flex:0 0 auto;white-space:nowrap}
+    /* wide data tables scroll within themselves rather than overflowing the page */
+    .wrap table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}}
+</style>
+<style id="dark-theme">
+  /* ===========================================================
+     DARK MODE — “Midnight Slate”. Toggled via .dark on <html>;
+     light is the default. Cool charcoal surfaces, brine-green accent.
+     =========================================================== */
+  html.dark{
+    --bg:#12151b; --panel:#1b1f28; --panel2:#252b37; --line:#333a48;
+    --txt:#e8eaf0; --muted:#a3aabb;
+    --accent:#83bd79; --accent-700:#6fa867; --accent2:#94aae0;
+    --warn:#dcb44e; --bad:#e0726a; --good:#83bd79;
+    --paper:#12151b; --shadow:0 2px 6px rgba(0,0,0,.4);
+    --chip-bg:rgba(18,21,27,.8);
+    color-scheme:dark;
+  }
+  html.dark .z1{background:#203026;color:#a4d0a3} html.dark .z2{background:#232d45;color:#b0c1e8}
+  html.dark .z3{background:#322e19;color:#dec380} html.dark .z4{background:#33271c;color:#daae88}
+  html.dark .z5{background:#321f23;color:#dfa0a7} html.dark .z6{background:#2a2434;color:#c4aed2}
+  html.dark td.st-w{background:transparent;color:var(--muted)}
+  html.dark td.st-g, html.dark .st-g{background:#203026;color:#a4d0a3}
+  html.dark td.st-y, html.dark .st-y{background:#322e19;color:#dec380}
+  html.dark td.st-o, html.dark .st-o{background:#33271c;color:#daae88}
+  html.dark td.st-r, html.dark .st-r{background:#321f23;color:#dfa0a7}
+  html.dark tr[style*="rgba(255,180,84"]{background:rgba(220,180,78,.12)!important}
+  /* nav-bar theme toggle — far right of the tab strip */
+  .theme-toggle{appearance:none;background:#1b1f28;border:1px solid #1b1f28;color:#e8eaf0;
+    font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+    cursor:pointer;border-radius:6px;padding:5px 11px;margin:7px 0 7px auto;display:inline-flex;
+    align-items:center;gap:6px;align-self:center;white-space:nowrap;
+    transition:background .16s ease,color .16s ease,border-color .16s ease}
+  .theme-toggle:hover{border-color:var(--accent)}
+  html.dark .theme-toggle{background:#eef0f3;border-color:#eef0f3;color:#181a1c}
+  .theme-toggle:focus-visible{outline:2px solid var(--accent2);outline-offset:1px}
 </style>
 </head>
 <body>
@@ -202,8 +289,8 @@
   <span class="toolname">Hydration · Fueling Calculator</span>
   <span class="sub">Power-based energy expenditure · bottle osmolality · sweat &amp; sodium · event fuel plan</span>
 </header>
-<div class="tabs" id="tabs"></div>
-<div class="wrap" id="app"></div>
+<div class="tabs" id="tabs" role="tablist" aria-label="Calculator sections"></div>
+<div class="wrap" id="app" role="tabpanel" aria-label="Section content"></div>
 <footer class="legal">
   <div>© 2026 Robert Pickels. Custom-built Hydration &amp; Osmolality Calculator. All rights reserved.</div>
   <div>Free for personal use. This calculator and its code may not be copied, redistributed, modified for redistribution, or used commercially without the owner's prior written permission.</div>
@@ -942,7 +1029,7 @@ function courseParamRow(label,key,unit,step,presets){
     <select onchange="window._setCourseParam('${key}',this.value)" style="flex:1;min-width:0">
       <option value="" disabled${match?'':' selected'}>Custom…</option>${opts}
     </select>
-    <input type="number" step="${step}" value="${S[key]}" data-k="${key}" data-obj="S" style="width:62px" title="Manual entry">
+    <input type="number" step="${step}" value="${S[key]}" data-k="${key}" data-obj="S" style="width:74px" title="Manual entry">
     <span class="u" style="width:auto">${unit}</span>
   </div>`;
 }
@@ -952,16 +1039,20 @@ const BUILTIN_COURSES = { leadville: {"name":"Leadville Trail 100 MTB","distM":1
 // intOpts is passed in from the caller (viewRider) so the avg-intensity + per-segment dropdowns share its zone list.
 function courseBody(intOpts){
   const run=isRun(), c=S.course;
-  const ref=`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Reference course</label>
-      <select onchange="window._loadBuiltin(this.value)" style="flex:1;min-width:0">
+  const ref=`<div class="sub-h" style="margin-top:0">Reference course</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:520px;margin-bottom:6px">
+      <select onchange="window._loadBuiltin(this.value)" style="flex:1;min-width:160px">
         <option value="">— choose a built-in course —</option>
         ${Object.keys(BUILTIN_COURSES).map(k=>`<option value="${k}"${c&&c.name===BUILTIN_COURSES[k].name?' selected':''}>${escHtml(BUILTIN_COURSES[k].name)}</option>`).join('')}
-      </select></div>`;
+      </select>
+      ${c&&!Object.values(BUILTIN_COURSES).some(b=>b.name===c.name)?`<span class="muted" style="font-size:11px;white-space:nowrap">📈 ${escHtml(c.name||'course')}</span>`:''}
+      ${c?`<button class="sm ghost" onclick="window._clearCourse()" style="flex:0 0 auto">Clear course</button>`:''}
+    </div>`;
   const fileRow=`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Upload track</label>
       <input type="file" id="courseFile" accept=".gpx,.tcx,application/gpx+xml,application/xml,text/xml" style="flex:1;min-width:0"></div>
     <div class="note">Pick a built-in <b>reference course</b> above, or drop in a <b>GPX</b>/<b>TCX</b> file exported from Strava, Garmin, Komoot, or Ride With GPS. We read distance, elevation &amp; grade to build your segment plan — parsing happens entirely in your browser; nothing is uploaded.</div>`;
   const loading = _courseLoading ? `<div class="note">⏳ Reading course… large files can take a few seconds.</div>` : '';
-  if(!c) return ref+loading+fileRow;
+  if(!c) return {controls: ref+loading+fileRow, profile:''};
   const mi=c.distM/M_PER_MI, t=S._ct||courseTime(), it=eventBaseIt();
   const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
   const strat=S.pacingStrategy||'even';
@@ -975,11 +1066,13 @@ function courseBody(intOpts){
       </div>`).join('')}
     </div>`;
   // avg intensity = selected zone + a manual fine-tune input (watts cyc · pace run) right beside the dropdown
-  const avgRow = `<div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg ${run?'pace':'intensity'} <span class="muted">(zone)</span></label>
+  const avgRow = `<div class="sub-h" style="margin-top:11px">Avg ${run?'pace':'intensity'} <span class="muted" style="text-transform:none;letter-spacing:0">(zone)</span></div>
+    <div style="display:flex;gap:6px;align-items:center;max-width:340px">
       <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select>
       <input type="${run?'text':'number'}"${run?'':' step="5"'} value="${run?paceFmt(it.pace):Math.round(it.watts)}" style="width:60px;${run?'text-align:center':''}" onchange="window._setEventIntensity(this.value)" title="Fine-tune the average ${run?'pace':'power'} up or down from the zone midpoint">
-      <span class="u" style="width:auto">${run?'/mi':'W'}</span></div>
-    ${S.eventIntPct!=100?`<div class="note" style="margin-top:0">Manually set to <b>${fmt(S.eventIntPct,0)}%</b> of the zone midpoint — <a onclick="window._setEventZone(${S.eventZone})" style="color:var(--accent2);cursor:pointer">reset to midpoint</a>.</div>`:''}`;
+      <span class="u" style="width:auto">${run?'/mi':'W'}</span>
+    </div>
+    ${S.eventIntPct!=100?`<div class="note" style="margin-top:2px">Manually set to <b>${fmt(S.eventIntPct,0)}%</b> of the zone midpoint — <a onclick="window._setEventZone(${S.eventZone})" style="color:var(--accent2);cursor:pointer">reset to midpoint</a>.</div>`:''}`;
   const pacingRow = `<div class="field"><label style="flex:0 0 auto;margin-right:8px">Pacing strategy</label>
       <select onchange="window._setPacing(this.value)" style="flex:1;min-width:0">${Object.keys(PACE_LABELS).map(k=>`<option value="${k}"${strat===k?' selected':''}>${PACE_LABELS[k]}</option>`).join('')}</select></div>
     <div class="row-actions" style="margin-top:8px;align-items:center">
@@ -1008,12 +1101,7 @@ function courseBody(intOpts){
         </div>
         <div class="note" style="margin-top:2px">${status}. ${srcLink(`how the ${R} reserve works →`)}</div>`;
     })();
-  const cyclingModel = run ? '' : `<div class="sub-h">Cycling time model</div>
-    ${courseParamRow('Bike weight','bikeLbs','lbs',0.5,BIKE_PRESETS)}
-    ${courseParamRow('CdA','cda','m²',0.01,CDA_PRESETS)}
-    ${courseParamRow('Crr','crr','',0.0001,CRR_PRESETS)}
-    ${courseParamRow('Air density','airRho','kg/m³',0.01,RHO_PRESETS)}
-    <div class="note">Pick a preset or type your own. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA) — override if you have a measured value. ${srcLink('cycling power & air-density model →')}</div>`;
+  // Cycling time model now lives in its own panel (cyclingModelBody) adjacent to Activity Information.
   // elevation sparkline + overlays: proposed avg watts/pace inside each band, time + cumulative distance under each divider
   const sparkAndLabels = (()=>{
       const dmax=c.profile[c.profile.length-1][0]||1, bs=(t&&t.bounds)||[];
@@ -1023,7 +1111,7 @@ function courseBody(intOpts){
       const wattLabs=edges.slice(0,-1).map((e0,i)=>{ if(i%step!==0 && i!==edges.length-2) return '';
         const mid=(e0+edges[i+1])/2, iv=segIv[i]; if(!(iv>0)) return '';
         const lab=run?paceFmt(speedToPace(iv))+'/mi':Math.round(iv)+'W';
-        return `<span style="position:absolute;left:${Math.min(97,Math.max(3,mid/dmax*100)).toFixed(2)}%;top:3px;transform:translateX(-50%);font-size:9px;font-weight:600;font-family:var(--font-mono);color:var(--txt);white-space:nowrap;background:rgba(241,242,243,.72);padding:0 2px;border-radius:2px">${lab}</span>`;
+        return `<span style="position:absolute;left:${Math.min(97,Math.max(3,mid/dmax*100)).toFixed(2)}%;top:3px;transform:translateX(-50%);font-size:9px;font-weight:600;font-family:var(--font-mono);color:var(--txt);white-space:nowrap;background:var(--chip-bg);padding:0 2px;border-radius:2px">${lab}</span>`;
       }).join('');
       // drop the last 30-min label if it crowds the finish (within ~7% of the end)
       const labs=bsf.map((d,i)=>((i%lstep===0) && d/dmax<0.9)
@@ -1033,23 +1121,22 @@ function courseBody(intOpts){
       const finishLine=`<span style="position:absolute;right:0;top:0;bottom:0;border-left:1px dashed var(--accent)"></span>`;
       return `<div style="position:relative;margin-top:10px">${courseSpark(c,t)}<div style="position:absolute;inset:0;pointer-events:none">${wattLabs}${finishLine}</div></div><div style="position:relative;height:26px;margin-top:1px">${labs}${finishLab}</div>`;
     })();
-  return ref+loading+`
-    <div class="row-actions" style="margin:6px 0 8px;align-items:center">
-      <span class="muted" style="font-size:12px">📈 ${escHtml(c.name||'course')}</span>
-      <button class="sm ghost" onclick="window._clearCourse()" style="margin-left:auto">Clear course</button>
-    </div>
-    ${run
-      ? `${avgRow}${pacingRow}${sustainBlock}`
-      : `<div class="grid cols2">
-          <div>${avgRow}${pacingRow}${sustainBlock}</div>
-          <div>${cyclingModel}</div>
-        </div>`}
+  return {
+    controls: ref+loading+`${avgRow}${pacingRow}${sustainBlock}`,
+    profile: `
     ${sparkAndLabels}
     <div class="muted" style="font-size:10px;margin-top:2px;display:flex;flex-wrap:wrap;gap:3px 10px;align-items:center">
       <span>Bands tinted by <b>effort vs your average</b>, labelled with the <b>proposed avg ${run?'pace':'power'}</b>; dashed dividers mark each <b>30-min segment</b> (time + distance below) at ${wlLbl} — climbs compress a segment, descents stretch it.</span>
-      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(34,92,184);display:inline-block"></span>easier</span>
-      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(178,184,196);border:1px solid rgba(73,83,109,.35);display:inline-block"></span>average</span>
-      <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(200,80,46);display:inline-block"></span>harder</span>
+      <span style="display:inline-flex;align-items:center;gap:10px;white-space:nowrap">
+        <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(34,92,184);display:inline-block"></span>easier</span>
+        <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(178,184,196);border:1px solid rgba(73,83,109,.35);display:inline-block"></span>average</span>
+        <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(200,80,46);display:inline-block"></span>harder</span>
+      </span>
+    </div>
+    <div style="text-align:center;margin-top:14px;padding:16px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:8px">
+      <div style="font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;font-size:12px;color:var(--accent2)">Est. moving time</div>
+      <div style="font-family:var(--font-display);font-size:44px;font-weight:700;color:var(--accent);line-height:1.05;font-variant-numeric:tabular-nums;margin:4px 0 3px">${t?hm(t.hours):'—'}</div>
+      <div class="muted" style="font-size:11.5px">@ ${wl} · ${PACE_LABELS[strat]}</div>
     </div>
     <div class="grid cols3" style="margin-top:10px">
       <div class="res"><span>Distance</span><span class="v">${fmt(mi,1)} mi · ${fmt(c.distM/1000,1)} km</span></div>
@@ -1058,10 +1145,20 @@ function courseBody(intOpts){
       <div class="res"><span>Avg grade</span><span class="v">${fmt(c.avgGrade,1)}%</span></div>
       <div class="res"><span>Max grade</span><span class="v">${fmt(c.maxGrade,1)}%</span></div>
       <div class="res"><span>Mean altitude</span><span class="v">${fmt((c.elevMeanM||0)*3.28084,0)} ft · ${fmt(c.elevMeanM||0,0)} m</span></div>
-      <div class="res"><span>Est. moving time <span class="muted">(@ ${wlLbl})</span></span><span class="v">${t?hm(t.hours):'—'}</span></div>
     </div>
     ${segEditor}
-    <div class="note">${run?'Pace drifts with grade at a held effort':'Duration and its 30-min split come straight off the course at constant power'} — ${srcLink('how course time is modelled →')}</div>`;
+    <div class="note">${run?'Pace drifts with grade at a held effort':'Duration and its 30-min split come straight off the course at constant power'} — ${srcLink('how course time is modelled →')}</div>`
+  };
+}
+
+// Cycling time model — rendered as its own panel adjacent to Activity Information (cycling + course only).
+function cyclingModelBody(){
+  const c=S.course; if(!c||isRun()) return '';
+  return `<div class="grid cols2">
+      <div>${courseParamRow('Bike weight','bikeLbs','lbs',0.5,BIKE_PRESETS)}${courseParamRow('CdA','cda','m²',0.01,CDA_PRESETS)}</div>
+      <div>${courseParamRow('Crr','crr','',0.0001,CRR_PRESETS)}${courseParamRow('Air density','airRho','kg/m³',0.01,RHO_PRESETS)}</div>
+    </div>
+    <div class="note" style="margin-top:8px">Pick a preset or type your own. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA) — override if you have a measured value. ${srcLink('cycling power & air-density model →')}</div>`;
 }
 
 /* ============================================================
@@ -1351,7 +1448,7 @@ function viewRider(){
     : numField('FTP','ftp','W',5);
   return `<div class="grid cols2">
     <div>
-      <div class="panel">
+      <div class="panel tidy">
         <h2>Athlete Profile</h2>
         <div class="sub-h">Sport</div>
         <div class="modeseg">
@@ -1457,14 +1554,24 @@ function viewRider(){
       <div class="note">${courseMode
         ? `A GPS track drives duration and auto-builds the 30-min plan from the course profile &amp; your average zone — this supersedes manual entry.`
         : `Enter the activity by hand, or switch to <b>Upload course</b> to drive it from a GPS track.`}</div>`;
-    return `<div class="panel" style="margin-top:16px">
+    const cb = courseMode ? courseBody(intOpts) : null;
+    return `<div class="panel tidy compact" style="margin-top:16px">
       <h2>Activity Information</h2>
       ${sourceToggle}
       ${courseMode
-        ? `${courseBody(intOpts)}
+        ? `${cb.controls}
            ${S.course?`<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">${totalsBlock}</div>`:''}`
-        : `<div class="grid cols2" style="margin-top:10px"><div>${manualInputs}</div><div>${totalsBlock}</div></div>`}
-    </div>`;
+        : `${manualInputs}
+           <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">${totalsBlock}</div>`}
+    </div>
+    ${courseMode && !isRun() && S.course ? `<div class="panel tidy compact" style="margin-top:16px">
+      <h2>Cycling Time Model</h2>
+      ${cyclingModelBody()}
+    </div>` : ''}
+    ${courseMode && S.course ? `<div class="panel tidy compact" style="margin-top:16px">
+      <h2>Course Profile</h2>
+      ${cb.profile}
+    </div>` : ''}`;
   })()}`;
 }
 
@@ -1492,6 +1599,7 @@ function viewHydration(){
       <div class="res"><span>This drink supplies</span><span class="v">${fmt((effComp().glucose+effComp().sucrose+effComp().malto+effComp().fructose+extrasCarbG())*S.bottlesPerHour,0)} g/hr carb</span></div>
     </div>
     <div class="note">Output only — shown so you can match the bottle's carbs toward your hourly fuel need. The full breakdown lives on the <b>Fueling Plan</b> tab.${ev.overGut?` <b style="color:var(--warn)">Capped at the ${carbCap()} g/hr gut limit (true need ~${fmt(ev.targetRateGRaw,0)} g/hr) — spread carbs across drink + food.</b>`:''}</div>
+    <div class="note" style="margin-top:6px">Carb-source mix by intake rate: <span class="st-g" style="padding:1px 6px;border-radius:4px">≤60</span> all glucose / whole foods · <span class="st-y" style="padding:1px 6px;border-radius:4px">60–90</span> 2:1 glucose:fructose · <span class="st-o" style="padding:1px 6px;border-radius:4px">90–${carbCap()}</span> 1:1 glucose:fructose · <span class="st-r" style="padding:1px 6px;border-radius:4px">above ${carbCap()}</span> exceeds your gut ceiling. Set <b>Gut adaptation</b> on the Athlete tab (unadapted 90 · adapted 120 · high-carb 150 g/hr).</div>
   </div>
 
   <div class="panel" style="margin-bottom:16px;border-color:var(--accent2)">
@@ -1828,13 +1936,6 @@ function viewCaloric(){
           <td style="text-align:center">${fmt(burnG,0)}</td>
           ${DURS.map(d=>{const g=suppG(m.choKcalHr,d);return `<td class="sc ${cls(g)}">${cell(g)}</td>`;}).join('')}
         </tr>`;}).join('')}</tbody></table></div>
-      <div class="note" style="margin-top:8px">
-        <span class="st-g" style="padding:1px 6px;border-radius:4px">≤60</span> all glucose / whole foods ·
-        <span class="st-y" style="padding:1px 6px;border-radius:4px">60–90</span> 2:1 glucose:fructose ·
-        <span class="st-o" style="padding:1px 6px;border-radius:4px">90–${cap}</span> 1:1 glucose:fructose ·
-        <span class="st-r" style="padding:1px 6px;border-radius:4px">✕</span> above ${cap} g/hr — exceeds your gut ceiling, not sustainable.
-        “—” = stored glycogen alone covers it. Set your <b>Gut adaptation</b> level on the Athlete tab (unadapted 90 · adapted 120 · high-carb 150 g/hr).
-      </div>
     </div>`;
   })()}`;
 }
@@ -1983,13 +2084,13 @@ function viewEventPlan(){
               + `<div class="row-actions" style="margin:2px 0 4px 18px"><button class="sm ghost" onclick="window._addMixItem(${r.h})">＋ Add to mix</button>
                  <span class="muted" style="font-size:11px">Base = plain water (0 carb / 0 Na); add supplements above.</span></div>`;
           })()}
-          ${items.map(it=>`<div class="pf-row">
+          ${items.map(it=>`<div class="pf-row pf-fuel">
             <select style="flex:1;min-width:0" onchange="window._setPlanItem('${it.id}','prodId',this.value)">${fuelOpts(it.prodId)}</select>
             <input type="number" step="0.5" value="${it.qty}" style="width:54px" onchange="window._setPlanItem('${it.id}','qty',this.value)" title="servings">
             <span class="u" style="width:auto">×</span>
             <button class="sm ghost" onclick="window._rmPlanItem('${it.id}')" title="remove">×</button>
           </div>`).join('')}
-          <div class="row-actions" style="margin-top:4px">
+          <div class="row-actions pf-fuel" style="margin-top:7px">
             <button class="sm ghost" onclick="window._addPlanItem(${r.h})">＋ Add fuel</button>
             ${gap>1?`<button class="sm" onclick="window._autoFill(${r.h})" title="add gels to close the gap">Auto-fill ${fmt(gap,0)}g</button>`:''}
           </div>
@@ -2089,17 +2190,18 @@ function viewLibrary(){
     <span class="pill" style="background:${ADMIN?'var(--accent2)':'var(--panel2)'};color:${ADMIN?'var(--paper)':'var(--muted)'}">${ADMIN?'Admin':'Viewer'}</span>
     <button class="sm ghost" onclick="window._adminToggle()">${ADMIN?'Exit admin':'Admin login'}</button>
     ${pend?`<span class="pill" style="background:var(--warn);color:var(--paper)">${pend} pending review</span>`:''}
-    <span style="display:flex;align-items:center;gap:6px;margin-left:auto">
-      <span class="muted" style="font-size:11px">Brand</span>
-      <select onchange="window._setLibBrand(this.value)" style="width:auto">
-        <option value=""${libBrandFilter?'':' selected'}>All brands</option>
-        ${brands.map(b=>`<option value="${esc(b)}"${b===libBrandFilter?' selected':''}>${esc(b)}</option>`).join('')}
-      </select></span>
-    <span class="muted" style="font-size:12px">Saved in this browser only</span>
   </div>
   <div class="note">Per-serving values are <span class="est">editable estimates</span> from public labels — verify against your products. Sodium feeds the Activity Plan and the Hydration Net Na⁺ balance. Canonical rows are editable in <b>Admin</b>; anyone can add a row (flagged <b>Pending</b> until approved). <b>Load</b> sends a drink/electrolyte into the bottle.</div>
 
   <div class="sub-h" style="margin-top:14px">Drinks <span class="muted" style="text-transform:none">— carbohydrate mixes</span></div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0">
+    <span class="muted" style="font-size:11px">Brand</span>
+    <select onchange="window._setLibBrand(this.value)" style="width:auto">
+      <option value=""${libBrandFilter?'':' selected'}>All brands</option>
+      ${brands.map(b=>`<option value="${esc(b)}"${b===libBrandFilter?' selected':''}>${esc(b)}</option>`).join('')}
+    </select>
+    <span class="muted" style="font-size:12px">· Saved in this browser only</span>
+  </div>
   <div class="scroll" style="margin-top:6px"><table class="tc">${dbHead}<tbody>${drinks.map(dbRow).join('')}</tbody></table></div>
   <div class="row-actions"><button class="sm" onclick="window._addDrink('drink')">＋ Add drink</button></div>
 
@@ -2143,11 +2245,11 @@ function viewSweatLog(){
 
 /* ---------- TAB: SOURCES (published bases for the models) ---------- */
 function viewSources(){
-  const ref=(a,y,t,w)=>`<li style="margin:0 0 9px;line-height:1.5"><span>${a} (${y}). <span style="font-style:italic">${t}</span> ${w}</span></li>`;
-  const sec=(title,note,items)=>`<div class="sub-h" style="margin-top:18px">${title}</div>
-    ${note?`<div class="note" style="margin:2px 0 8px">${note}</div>`:''}
-    <ul style="margin:0;padding-left:18px;font-size:13px">${items}</ul>`;
-  return `<div class="panel">
+  const ref=(a,y,t,w)=>`<li style="margin:0 0 12px;line-height:1.65"><span>${a} (${y}). <span style="font-style:italic">${t}</span> ${w}</span></li>`;
+  const sec=(title,note,items)=>`<div class="sub-h" style="margin-top:30px;border-top:1px solid var(--line);padding-top:18px">${title}</div>
+    ${note?`<div class="note" style="margin:8px 0 12px">${note}</div>`:''}
+    <ul style="margin:0;padding-left:20px;font-size:13.5px;line-height:1.65">${items}</ul>`;
+  return `<div class="panel sources">
   <h2>Sources &amp; Methods</h2>
   <div class="note">The calculations in this tool are built on established exercise-physiology and sports-nutrition methods; the works below are the published bases for each model. Per-product nutrition values are <span class="est">estimates</span> read from public labels and vary by batch and region. <b>For education and planning only — not medical or dietary advice.</b></div>
 
@@ -2253,7 +2355,8 @@ function render(){
     if(isNum) caret = (''+ae.value).length;
     else { try{ caret = ae.selectionStart; }catch(e){} }
   }
-  $('#tabs').innerHTML = TABS.map(t=>`<div class="tab ${t[0]===active?'active':''}" data-tab="${t[0]}">${t[1]}</div>`).join('');
+  $('#tabs').innerHTML = TABS.map(t=>`<button type="button" class="tab ${t[0]===active?'active':''}" role="tab" aria-selected="${t[0]===active?'true':'false'}" tabindex="${t[0]===active?'0':'-1'}" data-tab="${t[0]}">${t[1]}</button>`).join('')
+    + `<button type="button" class="theme-toggle" onclick="window._toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">${document.documentElement.classList.contains('dark')?'☀ Light':'☾ Dark'}</button>`;
   $('#app').innerHTML = TABS.find(t=>t[0]===active)[2]();
   bind();
   saveAthlete();   // persist the rider's inputs after every change
@@ -2275,7 +2378,18 @@ function refreshOutputs(){
   const p=$('#projPanel'); if(p) p.innerHTML=viewProjection();
 }
 function bind(){
-  document.querySelectorAll('[data-tab]').forEach(el=>el.onclick=()=>{active=el.dataset.tab;render();});
+  const tabEls=[...document.querySelectorAll('[data-tab]')];
+  tabEls.forEach((el,i)=>{
+    el.onclick=()=>{active=el.dataset.tab;render();};
+    el.onkeydown=(e)=>{
+      let j=null;
+      if(e.key==='ArrowRight'||e.key==='ArrowDown') j=(i+1)%tabEls.length;
+      else if(e.key==='ArrowLeft'||e.key==='ArrowUp') j=(i-1+tabEls.length)%tabEls.length;
+      else if(e.key==='Home') j=0;
+      else if(e.key==='End') j=tabEls.length-1;
+      if(j!==null){e.preventDefault();active=tabEls[j].dataset.tab;render();const t=document.querySelector('.tab.active');if(t)t.focus();}
+    };
+  });
   // GPS course file picker (Athlete & Activity tab)
   const cf=$('#courseFile'); if(cf) cf.onchange=(e)=>window._loadCourse(e);
   // generic numeric/text inputs bound to S — commit on blur (onchange) so the
@@ -2580,8 +2694,16 @@ window._addFuel=()=>{ FUEL_PRODUCTS.push({id:_xid('f'),brand:'',product:'New pro
 window._rmFuel=(id)=>{ FUEL_PRODUCTS=FUEL_PRODUCTS.filter(p=>p.id!==id);
   S.planItems=S.planItems.filter(it=>it.prodId!==id); render(); };
 window._resetAthlete=()=>{ if(confirm('Reset all saved inputs to defaults? This clears your saved athlete profile in this browser.')) resetAthlete(); };
+// Light/dark theme toggle (nav bar). Default light; choice persists in this browser.
+window._toggleTheme=()=>{
+  const dark=!document.documentElement.classList.contains('dark');
+  document.documentElement.classList.toggle('dark', dark);
+  try{ localStorage.setItem('hydra_theme', dark?'dark':'light'); }catch(e){}
+  render();
+};
 
 loadAthlete();                                   // restore last session's inputs (if any)
+try{ if(localStorage.getItem('hydra_theme')==='dark') document.documentElement.classList.add('dark'); }catch(e){}  // restore theme choice
 window.addEventListener('beforeunload', saveAthlete);  // belt-and-suspenders save
 // resilient first paint: a malformed restored object (e.g. an old/partial saved course) must never
 // blank the whole app. Drop the most fragile restored state and retry; if it still fails, offer a reset.
