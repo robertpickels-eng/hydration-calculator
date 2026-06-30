@@ -571,6 +571,18 @@ function productOsm(p){
 const GUT_LEVELS = { unadapted:90, adapted:120, highcarb:150 };   // g/hr carb-absorption ceiling by gut-training level
 function carbCap(){ return GUT_LEVELS[S.gutAdapt] || 120; }        // gut-absorption ceiling for the selected level
 function gutAdaptLabel(){ return {unadapted:'unadapted',adapted:'adapted',highcarb:'high-carb-adapted'}[S.gutAdapt] || ''; }
+// Specific carb-source recommendation for a given hourly carb target. One transporter (SGLT1) clears
+// ~60 g/hr of glucose; above that you add fructose (GLUT5) so a glucose:fructose blend keeps absorbing.
+function carbSourceRec(rate){
+  const r = Math.round(rate || 0);
+  if(r < 1) return null;                                            // no meaningful target yet
+  if(r <= 60) return { r, ratio:'glucose only (or whole foods)', glu:r, fru:0, cls:'st-g',
+    why:'A single glucose source is fully absorbed at this rate — one transporter (SGLT1) clears up to ~60 g/hr, so no fructose is needed.' };
+  if(r <= 90){ const glu=Math.round(r*2/3); return { r, ratio:'2:1 glucose : fructose', glu, fru:r-glu, cls:'st-y',
+    why:'Past ~60 g/hr you need fructose (GLUT5) alongside glucose to keep absorbing — a 2:1 blend adds capacity without overwhelming the gut.' }; }
+  const glu=Math.round(r/2); return { r, ratio:'1:1 glucose : fructose', glu, fru:r-glu, cls:'st-o',
+    why:'At this intake a 1:1 blend maximizes combined glucose + fructose transport (the ~90–120 g/hr range trained guts can reach).' };
+}
 function isRun(){ return S.activity==='running'; }
 // small pointer to the Sources tab — used where the science prose was moved off the feature pages
 const srcLink = (label='methods → Sources') => `<a onclick="active='sources';render()" style="color:var(--accent2);cursor:pointer">${label}</a>`;
@@ -1600,7 +1612,12 @@ function viewHydration(){
       <div class="res"><span>This drink supplies</span><span class="v">${fmt((effComp().glucose+effComp().sucrose+effComp().malto+effComp().fructose+extrasCarbG())*S.bottlesPerHour,0)} g/hr carb</span></div>
     </div>
     <div class="note">Output only — shown so you can match the bottle's carbs toward your hourly fuel need. The full breakdown lives on the <b>Fueling Plan</b> tab.${ev.overGut?` <b style="color:var(--warn)">Capped at the ${carbCap()} g/hr gut limit (true need ~${fmt(ev.targetRateGRaw,0)} g/hr) — spread carbs across drink + food.</b>`:''}</div>
-    <div class="note" style="margin-top:6px">Carb-source mix by intake rate: <span class="st-g" style="padding:1px 6px;border-radius:4px">≤60</span> all glucose / whole foods · <span class="st-y" style="padding:1px 6px;border-radius:4px">60–90</span> 2:1 glucose:fructose · <span class="st-o" style="padding:1px 6px;border-radius:4px">90–${carbCap()}</span> 1:1 glucose:fructose · <span class="st-r" style="padding:1px 6px;border-radius:4px">above ${carbCap()}</span> exceeds your gut ceiling. Set <b>Gut adaptation</b> on the Athlete tab (unadapted 90 · adapted 120 · high-carb 150 g/hr).</div>
+    ${(()=>{ const rec=carbSourceRec(ev.targetRateG); return rec ? `
+    <div style="margin-top:10px;padding:12px 14px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent2)">
+      <div style="font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;font-size:10.5px;color:var(--muted)">Recommended carb source</div>
+      <div style="font-size:15px;font-weight:700;color:var(--txt);margin-top:4px">At <span class="${rec.cls}" style="padding:1px 7px;border-radius:4px">${rec.r} g/hr</span> → use <span style="color:var(--accent)">${rec.ratio}</span>${rec.fru?` <span class="muted" style="font-weight:600;font-size:13px">≈ ${rec.glu} g glucose + ${rec.fru} g fructose / hr</span>`:''}</div>
+      <div class="muted" style="font-size:11.5px;line-height:1.55;margin-top:5px">${rec.why}${ev.overGut?` Your true need is ~${fmt(ev.targetRateGRaw,0)} g/hr, capped at the ${carbCap()} g/hr gut limit (${gutAdaptLabel()}) — raise it by training your gut and spreading carbs across drink + food.`:''} Set <b>Gut adaptation</b> on the Athlete tab (unadapted 90 · adapted 120 · high-carb 150 g/hr).</div>
+    </div>` : ''; })()}
   </div>
 
   <div class="panel" style="margin-bottom:16px;border-color:var(--accent2)">
