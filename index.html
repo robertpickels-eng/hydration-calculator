@@ -14,6 +14,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>Hydration & Osmolality Calculator</title>
+<script>try{if(localStorage.getItem('hydra_theme')!=='light')document.documentElement.classList.add('dark');}catch(e){}</script><!-- dark by default; honors an explicit light choice, no flash -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -2703,7 +2704,7 @@ window._toggleTheme=()=>{
 };
 
 loadAthlete();                                   // restore last session's inputs (if any)
-try{ if(localStorage.getItem('hydra_theme')==='dark') document.documentElement.classList.add('dark'); }catch(e){}  // restore theme choice
+try{ if(localStorage.getItem('hydra_theme')!=='light') document.documentElement.classList.add('dark'); }catch(e){}  // dark by default; honor explicit light choice
 window.addEventListener('beforeunload', saveAthlete);  // belt-and-suspenders save
 // resilient first paint: a malformed restored object (e.g. an old/partial saved course) must never
 // blank the whole app. Drop the most fragile restored state and retry; if it still fails, offer a reset.
