@@ -281,6 +281,13 @@
   .theme-toggle:hover{border-color:var(--accent)}
   html.dark .theme-toggle{background:#eef0f3;border-color:#eef0f3;color:#181a1c}
   .theme-toggle:focus-visible{outline:2px solid var(--accent2);outline-offset:1px}
+  .modeswitch{margin:7px 8px 7px auto;align-self:center;display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--panel2)}
+  .modebtn{appearance:none;background:none;border:none;margin:0;font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    cursor:pointer;padding:5px 12px;color:var(--muted);transition:background .16s ease,color .16s ease}
+  .modebtn:hover{color:var(--txt)}
+  .modebtn.on{background:var(--accent);color:#fff}
+  .modebtn:focus-visible{outline:2px solid var(--accent2);outline-offset:-2px}
+  .basic-wrap .grid.cols2{gap:16px}
 </style>
 </head>
 <body>
@@ -298,6 +305,21 @@
   <div><strong>Not medical advice.</strong> Provided for informational and educational use only. Hydration, sodium, and fueling needs vary by individual, and several inputs (notably product carbohydrate-source splits) are estimates. Consult a qualified medical or sports-nutrition professional before acting on these numbers. Use at your own risk.</div>
   <div><strong>Privacy.</strong> This tool uses GoatCounter, a privacy-friendly, cookieless analytics service, to count usage. No cookies are set and no personal information is collected, sold, or shared.</div>
 </footer>
+
+<!-- First-visit entry gate: disclaimer + work-in-progress notice. Shown until acknowledged (localStorage hydra_welcome_v1). -->
+<div id="welcomeGate" role="dialog" aria-modal="true" aria-label="Welcome and disclaimer" style="position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,0.78);display:none;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:24px;box-shadow:var(--shadow)">
+    <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)">ExtraPickels</div>
+    <h2 style="margin:6px 0 14px;font-size:20px">Hydration &amp; Fueling Calculator</h2>
+    <div style="background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13.5px;line-height:1.55">
+      <b>⚠ Work in progress.</b> This tool is under active development. Calculations, recommended products, and features are experimental and may change rapidly and without notice — double-check anything you rely on.
+    </div>
+    <div style="font-size:13.5px;line-height:1.6">
+      <b>Not medical advice.</b> Provided for informational and educational use only. Hydration, sodium, and fueling needs vary by individual, and several inputs (notably product carbohydrate-source splits) are estimates. Consult a qualified medical or sports-nutrition professional before acting on these numbers. <b>Use at your own risk.</b>
+    </div>
+    <button onclick="window._ackWelcome()" style="margin-top:18px;width:100%;padding:11px">I understand — enter the calculator</button>
+  </div>
+</div>
 
 <script>
 /* ============================================================
@@ -390,7 +412,7 @@ const S = {
   bodyLbs:145, pre:145, post:142, time:1.2,    // -> sweat rate
   manualSweat:null,                            // L/hr (used by estimate/manual methods)
   sweatMethod:'prepost',                       // 'prepost' | 'estimate' | 'manual'
-  bottleOz:33.8, bottlesPerHour:1,
+  bottleOz:24, bottlesPerHour:1,
   acceptLoss:2,                                // % acceptable weight loss
   acceptLossMode:'preset',                     // 'preset' | 'manual'
   sweatNa:1380,                                // mg/L
@@ -422,7 +444,13 @@ const S = {
   segZones:[],                                 // chosen intensity index per 30-min segment
   activityMode:'manual',                       // Activity Information source: 'manual' (enter duration/intensity) | 'course' (upload a GPS track → auto 30-min plan)
   reservePct:25,                               // % glycogen to keep in reserve at event end
-  gutAdapt:'adapted',                           // gut training level → carb cap: unadapted 90 · adapted 120 · highcarb 150 g/hr
+  gutAdapt:'unadapted',                         // gut training level → carb cap: unadapted 90 · adapted 120 · highcarb 150 g/hr (new users start conservative)
+  // --- Basic / Advanced UI mode ---
+  uiMode:'basic',                              // 'basic' (simplified) | 'advanced' (full tabs). New users start in Basic.
+  weeklyHours:8,                               // Basic: average training hrs/week → estimates fitness (FTP / threshold pace); matches a WEEKLY_HOURS bucket value
+  fitnessMode:'estimate',                      // 'estimate' (derive FTP/pace from weeklyHours) | 'manual' (user typed their own)
+  basicFuel:[],                                // Basic: a per-hour loadout that repeats every hour — [{id, prodId, qty}] (qty = servings/hr)
+  basicFuelStyle:null,                          // Basic: the currently selected Suggest style ('aio'|'water'|'light'|'whole'); null once the loadout is hand-edited
   // --- GPS course (uploaded track) ---
   course:null,                                 // parsed track: {name, distM, gainM, lossM, avgGrade, maxGrade, profile:[[d_m,ele_m],…]}
   pacingStrategy:'even',                        // performance-predictor pacing: even|climb5|climb10|neg|fade (off the selected average)
@@ -449,6 +477,35 @@ const SWEAT_GUESS = [
 const ACCEPT_LOSS = [
   [0,"I wouldn't recommend"], [1,"I don't like being thirsty"],
   [2,'Maximize Performance'], [4,'Things get ugly after this'],
+];
+/* ---- Basic-mode pickers: friendly labels + a one-line description ---- */
+// sweat rate (L/hr) — same anchor values as SWEAT_GUESS, warmer copy
+const SWEAT_BASIC = [
+  [0.4,'Barely glistening','A faint sheen, nothing drips.'],
+  [0.7,'A healthy glow','Warmed up and damp. One bottle keeps up just fine.'],
+  [1.0,'Properly sweaty',"Shirt's soaked through, drops rolling off the brow."],
+  [1.5,'Hosed down','Puddle forming under you. Sweat in the eyes territory.'],
+  [2.0,'Drowning in it','Did you go swimming?'],
+];
+// sweat sodium [mM, mg/L, label, description] — drops the 140 mM lab reference
+const SALT_BASIC = [
+  [20,460,'Barely salty','Tastes almost like water, no crusty residue anywhere.'],
+  [40,920,'A little salty',"Faint salt on the lips, nothing you'd really notice."],
+  [60,1380,'Average','Mild salty taste, the odd tingle when sweat hits the eyes.'],
+  [80,1840,'Salty','White streaks drying on your kit; eyes sting on hard days.'],
+  [100,2300,'Very salty','Salt-caked cap, gritty cheeks, eyes burning by the end.'],
+];
+// RPE picker → zone index (works for both 5-zone cycling and 6-zone running lists)
+const RPE_BASIC = [
+  [0,'Easy','Recovery spin — could do it all day.'],
+  [1,'Steady Base','A steady effort where you can talk, but couldn\'t sing.'],
+  [2,'Moderate','Can only get a few words at a time.'],
+  [3,'Hard',"Talking? I'd prefer not to."],
+];
+// average training time / week → representative hours used for the fitness estimate
+const WEEKLY_HOURS = [
+  [2,'Under 3 hrs / week'], [4.5,'3–6 hrs / week'], [8,'6–10 hrs / week'],
+  [12,'10–15 hrs / week'], [17,'15+ hrs / week'],
 ];
 function sweatRateLhr(){
   if((S.sweatMethod||'prepost')==='prepost')
@@ -530,11 +587,21 @@ let PRODUCTS = [
   ['Flow Formulas','Endurance (High Sodium)','1 scoop','drink',16,780,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
   ['NeverSecond','C30 Drink Mix','1 sachet','drink',17,20,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
   ['NeverSecond','C30 Fuel+Hydrate','1 sachet','drink',17,300,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
-  ['SiS','Beta Fuel','1 sachet','drink',17,200,320,{glucose:0,sucrose:0,malto:44,fructose:36},15,'est'],
+  ['SiS','Beta Fuel 80 Drink','1 sachet','drink',20,10,320,{glucose:0,sucrose:0,malto:44,fructose:36},15,'lbl'],
   ['Carbs Fuel','Energy Drink Mix','1 scoop','drink',16,100,200,{glucose:0,sucrose:0,malto:50,fructose:0},15,'est'],
   ['Precision Fuel & Hydration','PF 30 Drink Mix','1 sachet','drink',17,250,116,{glucose:0,sucrose:0,malto:16.7,fructose:13.3},15,'est'],
   ['Precision Fuel & Hydration','PF 60 Drink Mix','1 sachet','drink',17,500,232,{glucose:0,sucrose:0,malto:33,fructose:27},15,'est'],
   ['Precision Fuel & Hydration','PF 90 Drink Mix','1 sachet','drink',17,750,348,{glucose:0,sucrose:0,malto:50,fructose:40},15,'est'],
+  // --- added brand suites (per public labels; carb-source splits estimated) ---
+  ['NeverSecond','C30 Sports Drink','1 scoop','drink',17,200,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'lbl'],
+  ['NeverSecond','C90 High Carb Mix','1 sachet','drink',17,200,360,{glucose:0,sucrose:0,malto:60,fructose:30},15,'lbl'],
+  ['SiS','GO Electrolyte','2 scoops','drink',17,475,144,{glucose:0,sucrose:0,malto:36,fructose:0},15,'lbl'],
+  ['UnTapped','Mapleaid','1 packet','drink',12,250,80,{glucose:1,sucrose:18,malto:0,fructose:1},100,'lbl'],
+  ['Infinit Nutrition','Speed','2 scoops','drink',20,379,230,{glucose:15,sucrose:21,malto:21,fructose:0},15,'lbl'],
+  ['Infinit Nutrition','Jet Fuel','1 serving','drink',24,379,230,{glucose:15,sucrose:21,malto:21,fructose:0},15,'lbl'],
+  ['Infinit Nutrition','Premium Fructose Fuel (90)','1 packet','drink',25,500,360,{glucose:10,sucrose:0,malto:50,fructose:30},15,'lbl'],
+  ['Amacx','Energy Drink','2 scoops','drink',17,372,119,{glucose:0,sucrose:0,malto:20,fructose:10},15,'lbl'],
+  ['Amacx','Turbo Drink (80g)','2 scoops','drink',20,311,319,{glucose:0,sucrose:0,malto:44,fructose:36},15,'lbl'],
   // --- electrolyte solutions (low / no carb) --- trailing K, Mg, Ca (mg) are informative only; only Na feeds the math
   ['LMNT','Recharge','per stick (16 oz)','lyte',16,1000,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',200,60,0],
   ['Styrkr','SLT07 Hydration Tablet (1000mg)','per tablet (500 mL)','lyte',16.9,1000,11,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',100,25,15],
@@ -555,7 +622,18 @@ let PRODUCTS = [
   ['GU','Roctane Electrolyte Caps','per capsule','lyte',0,100,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',63,12,50],
   ['SaltStick','FastChews','per 2 chews','lyte',0,60,10,{glucose:1,sucrose:1,malto:0,fructose:0},100,'est',16,4,6],
   ['Precision Fuel & Hydration','PH Electrolyte Caps','per capsule','lyte',0,250,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',0,0,0],
-].map(p=>({brand:p[0],product:p[1],unit:p[2],cat:p[3],name:p[0]+' '+p[1],oz:p[4],sodium:p[5],kcal:p[6],split:p[7],de:p[8],conf:p[9],potassium:p[10]||0,magnesium:p[11]||0,calcium:p[12]||0}));
+  // --- added brand electrolytes (per public labels) ---
+  ['NeverSecond','S200 Sodium Booster','per capful','lyte',0,200,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',0,0,0,'mix'],
+  ['Honey Stinger','Rapid Hydration Perform','per stick (16 oz)','lyte',16,300,50,{glucose:6,sucrose:4,malto:0,fructose:4},100,'lbl',100,0,0],
+  ['Honey Stinger','Rapid Hydration Prepare','per stick (16 oz)','lyte',16,100,35,{glucose:3,sucrose:3,malto:0,fructose:2},100,'lbl',300,0,0],
+  ['SiS','GO Hydro Tablet','per tablet (500 mL)','lyte',17,345,7,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',65,8,102],
+  ['Amacx','Hydro Tabs','per tablet (500 mL)','lyte',17,205,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',70,56,9],
+].map(p=>({brand:p[0],product:p[1],unit:p[2],cat:p[3],name:p[0]+' '+p[1],oz:p[4],sodium:p[5],kcal:p[6],split:p[7],de:p[8],conf:p[9],potassium:p[10]||0,magnesium:p[11]||0,calcium:p[12]||0,
+  // electrolyte form: 'mix' = powder/tablet/drink mixed into water (has a serving volume) · 'cap' = capsule/chew swallowed dry. Override with p[13].
+  form:p[13]||((+p[4]||0)>0?'mix':'cap')}));
+// electrolyte helpers: drinks/powders/tablets you add to water vs capsules/chews you swallow
+function isElyteCap(p){ return p && p.cat==='lyte' && p.form==='cap'; }
+function isElyteMix(p){ return p && p.cat==='lyte' && p.form!=='cap'; }
 
 function productCarb(p){ const s=p.split; return s.glucose+s.sucrose+s.malto+s.fructose; }
 function productOsm(p){
@@ -623,6 +701,22 @@ function miToKmPace(secMi){ return secMi/MI_PER_KM; }
 function kmToMiPace(secKm){ return secKm*MI_PER_KM; }
 
 function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
+
+/* ---- Basic mode: estimate fitness from weekly training time ----
+   Most casual users don't know their FTP or threshold pace, so we infer a
+   reasonable fitness level from average weekly training hours (a decent proxy
+   for trained capacity) and write it into the SAME S.ftp / S.runThreshold the
+   rest of the engine reads. Directional, not lab-grade — the Basic screen
+   offers an "I know my numbers" override (fitnessMode='manual') for accuracy. */
+const _clampNum=(x,a,b)=>Math.min(b,Math.max(a,x));
+function estWkg(hours){ return _clampNum(2.3+(hours-2)*(4.3-2.3)/(17-2), 2.0, 4.8); }      // cycling W/kg, ~2.3 @2h → ~4.3 @17h
+function estRunPaceSec(hours){ return _clampNum(540-(hours-2)*(540-360)/(17-2), 345, 555); } // run threshold sec/mi, 9:00 @2h → 6:00 @17h
+function applyFitnessEstimate(){
+  if(S.fitnessMode!=='estimate') return;            // user typed their own FTP/pace — leave it alone
+  const h=+S.weeklyHours||6;
+  S.ftp = Math.round(estWkg(h)*(S.bodyLbs/2.2)/5)*5;  // nearest 5 W
+  S.runThreshold = Math.round(estRunPaceSec(h));
+}
 
 /* ---- critical power / critical speed + anaerobic reserve (W′ cyc · D′ run) ----
    CP/CS = the sustainable boundary (≈30-min power/pace) above which VO₂ & lactate rise without
@@ -1248,7 +1342,7 @@ let FUEL_PRODUCTS = [
   ['SiS','GO Isotonic Gel','Each',                           87, 10, {glucose:0,  fructose:0,    sucrose:0,  malto:22  }, 15],
   ['GU','Energy Gel','Each',                                100, 60, {glucose:0,  fructose:7,    sucrose:0,  malto:15  }, 15],
   ['GU','Roctane Gel','Each',                               100,125, {glucose:0,  fructose:7,    sucrose:0,  malto:14  }, 15],
-  ['Neversecond','C30 Gel','Each',                          120,  8, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
+  ['Neversecond','C30 Gel','Each',                          120,200, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
   ['Styrkr','GEL30 Dual-Carb Gel','Each',                   128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
   ['Styrkr','GEL30 Caffeine Gel','Each',                    128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
   ['Styrkr','BAR50 Rice Energy Bar','Each',                 260,603, {glucose:0,  fructose:0,    sucrose:10, malto:40  }, 20],
@@ -1260,11 +1354,33 @@ let FUEL_PRODUCTS = [
   ['Clif','Bar','Each',                                     250,150, {glucose:20, fructose:10,   sucrose:14, malto:0   }, 15],
   ['Gatorade','Endurance Carb Gel','Each',                   80, 90, {glucose:0,  fructose:6,    sucrose:0,  malto:14  }, 15],
   ['Carbs Fuel','Energy Gel','Each',                        200,100, {glucose:0,  fructose:0,    sucrose:0,  malto:50  }, 15],
-  ['UnTapped','Maple Syrup Gel','Each',                     100, 30, {glucose:3,  fructose:0,    sucrose:18, malto:0   }, 15],
+  ['UnTapped','Maple Syrup Gel','Each',                     100,  5, {glucose:1,  fructose:1,    sucrose:24, malto:0   }, 100],
   ['UnTapped','Waffle','Each',                              170, 70, {glucose:7,  fructose:0,    sucrose:14, malto:0   }, 15],
   ['GU','Stroopwafel','Each',                               130, 65, {glucose:3,  fructose:0,    sucrose:14, malto:5   }, 15],
   ['GU','Liquid Energy Gel','Each',                          90, 65, {glucose:0,  fructose:7,    sucrose:0,  malto:14  }, 15],
   ['ProBar','Bolt Chews','Pack',                            100, 50, {glucose:8,  fructose:5,    sucrose:12, malto:0   }, 15],
+  // --- added brand suites (per public labels; carb-source splits estimated) ---
+  ['NeverSecond','C30 Energy Gel + Caffeine','Each',        120,200, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
+  ['NeverSecond','C30 Fuel Bar','Each',                     180, 30, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
+  ['Honey Stinger','Energy Gel + Caffeine','Each',          100, 50, {glucose:12, fructose:12,   sucrose:0,  malto:0   }, 15],
+  ['Honey Stinger','Energy Chews','Pack',                   160, 65, {glucose:14, fructose:13,   sucrose:12, malto:0   }, 15],
+  ['Honey Stinger','Energy Chews + Caffeine','Pack',        170,130, {glucose:15, fructose:14,   sucrose:12, malto:0   }, 15],
+  ['Honey Stinger','Gluten-Free Waffle','Each',             140,150, {glucose:7,  fructose:0,    sucrose:14, malto:0   }, 15],
+  ['Honey Stinger','Cracker N Nut Butter Bar','Each',       220,125, {glucose:4,  fructose:4,    sucrose:8,  malto:7   }, 20],
+  ['Honey Stinger','Protein Bar','Each',                    200, 75, {glucose:5,  fructose:5,    sucrose:8,  malto:0   }, 20],
+  ['SiS','GO Energy + Caffeine Gel','Each',                  89, 16, {glucose:0,  fructose:0,    sucrose:0,  malto:22  }, 15],
+  ['SiS','GO Energy + Electrolyte Gel','Each',               87,118, {glucose:0,  fructose:0,    sucrose:0,  malto:22  }, 15],
+  ['SiS','Beta Fuel Chews','Pack',                          180, 40, {glucose:0,  fructose:20,   sucrose:0,  malto:25  }, 15],
+  ['SiS','Turbo+ Gel','Each',                                88, 20, {glucose:0,  fructose:0,    sucrose:0,  malto:22  }, 15],
+  ['UnTapped','Coffee Maple Gel','Each',                    100, 11, {glucose:1,  fructose:1,    sucrose:24, malto:0   }, 100],
+  ['UnTapped','Salted Maple Gel','Each',                    100, 60, {glucose:1,  fructose:1,    sucrose:24, malto:0   }, 100],
+  ['Amacx','Energy Drink Gel','Each',                       120,200, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
+  ['Amacx','Energy Gel + Caffeine','Each',                  120,200, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
+  ['Amacx','Turbo Gel','Each',                              160,200, {glucose:0,  fructose:18,   sucrose:0,  malto:22  }, 15],
+  ['Amacx','Turbo Gel + Caffeine','Each',                   160,200, {glucose:0,  fructose:18,   sucrose:0,  malto:22  }, 15],
+  ['Amacx','Energy Fruit Chew','Pack',                      123,100, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
+  ['Amacx','Turbo Fruit Chew','Pack',                       162,100, {glucose:0,  fructose:18,   sucrose:0,  malto:22  }, 15],
+  ['Amacx','Turbo Chew Bar','Each',                         163, 39, {glucose:0,  fructose:18,   sucrose:0,  malto:22  }, 20],
   // --- whole / real foods ---
   ['Whole Food','Banana (medium)','Each',                   105,  1, {glucose:5,  fructose:6,    sucrose:6,  malto:10  }, 20],
   ['Whole Food','PB&J Sandwich','Each',                     380,400, {glucose:5,  fructose:8,    sucrose:10, malto:27  }, 20],
@@ -1278,9 +1394,20 @@ function sortFuel(){ FUEL_PRODUCTS.sort(byBrand); }
 sortFuel();
 // snapshot of factory foods so new default products can be merged into a user's saved list
 const FUEL_DEFAULTS = FUEL_PRODUCTS.map(p=>({...p, split:{...p.split}}));
+// Bump this when the factory food list changes (new items OR corrections to existing ones) so saved
+// profiles refresh their factory foods on next load while keeping any custom foods the user added.
+const FUEL_LIB_VERSION = 2;
 function fuelById(id){ return FUEL_PRODUCTS.find(p=>p.id===id); }
 function fuelCarbG(p){ const s=(p&&p.split)||{}; return (+s.glucose||0)+(+s.fructose||0)+(+s.sucrose||0)+(+s.malto||0); }
 function fuelLabel(p){ return p ? `${p.brand?p.brand+' ':''}${p.product||''}${p.unit?' ('+p.unit+')':''}`.trim() : ''; }
+// Basic fuel item → per-serving carb (g), sodium (mg), fluid (oz). Foods/gels carry no fluid; drinks/electrolytes use their mix volume.
+function basicFuelProd(id){
+  const f=FUEL_PRODUCTS.find(p=>p.id===id);
+  if(f) return {label:fuelLabel(f), carbG:fuelCarbG(f), sodium:+f.sodium||0, oz:0};
+  const e=allProducts().find(p=>p._id===id);
+  if(e) return {label:e.name, carbG:productCarb(e), sodium:+e.sodium||0, oz:+e.oz||0};
+  return null;
+}
 // effective glucose:fructose ratio — maltodextrin counts as glucose; sucrose splits 50/50
 function fuelGF(p){ const s=(p&&p.split)||{};
   const glu=(+s.glucose||0)+(+s.malto||0)+(+s.sucrose||0)/2, fru=(+s.fructose||0)+(+s.sucrose||0)/2;
@@ -1325,7 +1452,7 @@ const ATH_KEY = 'hydra_athlete_v1';
 let _suppressSave = false;                        // set during reset so the unload save can't re-create the key
 function saveAthlete(){
   if(_suppressSave) return;
-  try{ localStorage.setItem(ATH_KEY, JSON.stringify({ v:1, S, fuel:FUEL_PRODUCTS, sweat:SWEATLOG })); }catch(e){}
+  try{ localStorage.setItem(ATH_KEY, JSON.stringify({ v:1, fuelV:FUEL_LIB_VERSION, S, fuel:FUEL_PRODUCTS, sweat:SWEATLOG })); }catch(e){}
 }
 function loadAthlete(){
   try{
@@ -1346,9 +1473,17 @@ function loadAthlete(){
     // keep a saved fuel list only if it's the new brand/split schema; legacy generic lists
     // are dropped so the curated defaults (with sodium + sugar splits) take over
     if(Array.isArray(raw.fuel) && raw.fuel.length && raw.fuel.every(p=>p && p.split!==undefined && p.product!==undefined)){
-      FUEL_PRODUCTS=raw.fuel;
-      // bring in any factory foods added since this profile was saved (matched by brand+product)
-      FUEL_DEFAULTS.forEach(d=>{ if(!FUEL_PRODUCTS.some(p=>p.brand===d.brand && p.product===d.product)) FUEL_PRODUCTS.push({...d, split:{...d.split}}); });
+      const isFactory = p => FUEL_DEFAULTS.some(d=>d.brand===p.brand && d.product===p.product);
+      if((+raw.fuelV||1) < FUEL_LIB_VERSION){
+        // migration: refresh every factory food to the current library (picks up new items AND corrections),
+        // while preserving any custom foods the user added themselves
+        const customs = raw.fuel.filter(p=>!isFactory(p));
+        FUEL_PRODUCTS = FUEL_DEFAULTS.map(d=>({...d, split:{...d.split}})).concat(customs);
+      } else {
+        FUEL_PRODUCTS=raw.fuel;
+        // bring in any factory foods added since this profile was saved (matched by brand+product)
+        FUEL_DEFAULTS.forEach(d=>{ if(!FUEL_PRODUCTS.some(p=>p.brand===d.brand && p.product===d.product)) FUEL_PRODUCTS.push({...d, split:{...d.split}}); });
+      }
       sortFuel();
     }
     if(Array.isArray(raw.sweat) && raw.sweat.length) SWEATLOG=raw.sweat;
@@ -1363,7 +1498,7 @@ function allProducts(){
     const merged = ov ? {...p, ...ov, split:{...p.split, ...(ov.split||{})}} : p;
     return {...merged, _id:'c:'+p.name, _kind:'canonical', _status:'approved', _edited:!!ov};
   });
-  const user = DB.userItems.map(u=>({...u, _id:u.id, _kind:'user', _status:u.status||'pending'}));
+  const user = DB.userItems.map(u=>({...u, _id:u.id, _kind:'user', _status:u.status||'pending', form:u.form||((+u.oz||0)>0?'mix':'cap')}));
   return canon.concat(user).sort(byBrand);
 }
 // sort products/foods alphabetically by manufacturer (brand), then product name — case-insensitive
@@ -1495,6 +1630,215 @@ function sweatSodiumPanel(){
         ${S.acceptLossMode==='manual'?`<div class="field"><label class="muted">↳ manual</label>
           <input type="number" step="0.5" value="${S.acceptLoss}" data-k="acceptLoss" data-obj="S"><span class="u">%</span></div>`:''}
       </div>`;
+}
+
+// Per-hour Basic targets (carb g/hr · fluid oz/hr · sodium mg/hr) — one source for the bars + the Suggest options
+function basicTargets(){
+  const ev=eventTotals(), sr=sweatRateLhr(), hrs=Math.max(0.001,+S.eventHours||0);
+  const sweatLossL=sr*hrs, accFluidL=(S.acceptLoss/100)*bodyKg();
+  return {
+    carb: ev.targetRateG,
+    fluidOz: Math.max(0,(sweatLossL-accFluidL))/hrs*OZ_PER_L,
+    naMg:  Math.max(0,(S.sweatNa*sweatLossL - S.sweatNa*accFluidL))/hrs,
+  };
+}
+
+/* ============================================================
+   BASIC MODE — a simplified flow over the SAME engine. Hides ~80% of the
+   inputs, picks safe defaults, estimates fitness from weekly training hours,
+   and hard-wires climb-+5% / ease-descents pacing. Reads & writes the same S,
+   so flipping to Advanced shows the identical numbers with every knob exposed.
+   ============================================================ */
+function viewBasic(){
+  // pin the engine to a Basic-safe configuration
+  S.intensityMode='zone'; S.segBreakdown=false; S.pacingStrategy='climb5';
+  S.sweatMethod='estimate'; S.sweatNaMode='preset'; S.acceptLossMode='preset';
+  if(S.manualSweat==null||S.manualSweat==='') S.manualSweat=1.0;
+  applyFitnessEstimate(); clampIntensityIdx();
+
+  const run=isRun(), courseMode=S.activityMode==='course';
+  const rpeIdx=Math.max(0,Math.min(RPE_BASIC.length-1,S.eventZone));
+  const sr=sweatRateLhr(), ev=eventTotals();
+  const hrs=Math.max(0.001,+S.eventHours||0);
+  const _t=basicTargets(); const fluidOzHr=_t.fluidOz, naMgHr=_t.naMg;
+  const rec=carbSourceRec(ev.targetRateG);
+
+  const sweatRow=SWEAT_BASIC.find(r=>+S.manualSweat===r[0])||SWEAT_BASIC[2];
+  const saltRow=SALT_BASIC.find(r=>S.sweatNa==r[1])||SALT_BASIC[2];
+  const fitReadout = S.fitnessMode==='manual'
+    ? `Using your own ${run?paceFmt(S.runThreshold)+'/mi threshold pace':S.ftp+' W FTP'}.`
+    : `<i class="muted">→ we estimate ${run?'~'+paceFmt(S.runThreshold)+'/mi threshold pace':'~'+fmt(ftpPerKg(),1)+' W/kg · '+S.ftp+' W'}</i>`;
+
+  // ---------- Screen 1: About you ----------
+  const screen1=`<div class="panel tidy" style="margin-top:16px">
+    <h2>About you</h2>
+    <div class="sub-h">Sport</div>
+    <div class="modeseg">
+      <button class="sm ${run?'ghost':''}" onclick="window._setActivity('cycling')">Bike</button>
+      <button class="sm ${run?'':'ghost'}" onclick="window._setActivity('running')">Run</button>
+    </div>
+    <div class="fgrid" style="margin-top:10px">
+      ${numField('Body weight','bodyLbs','lbs')}
+      <div class="field"><label>Sex</label>
+        <select id="genderSel" style="width:86px">
+          <option value="male"${S.gender==='male'?' selected':''}>Male</option>
+          <option value="female"${S.gender==='female'?' selected':''}>Female</option>
+        </select><span class="u">&nbsp;</span></div>
+    </div>
+    <div class="sub-h">Average training time / week</div>
+    <div class="field"><label style="flex:0 0 auto;margin-right:8px">Typical week</label>
+      <select id="weeklyHoursSel" style="flex:1;min-width:0">
+        ${WEEKLY_HOURS.map(([h,l])=>`<option value="${h}"${S.weeklyHours==h?' selected':''}>${l}</option>`).join('')}
+      </select></div>
+    <div class="note">${fitReadout}</div>
+    ${S.fitnessMode==='manual'
+      ? `${run
+          ? `<div class="field"><label style="flex:0 0 auto;margin-right:8px">Threshold pace</label>
+               <input type="text" value="${paceFmt(S.runThreshold)}" id="thrMi" style="width:72px;text-align:center" title="mm:ss per mile"><span class="u">/mi</span></div>`
+          : numField('FTP','ftp','W',5)}
+         <div class="note"><a onclick="window._setFitnessMode('estimate')" style="color:var(--accent);cursor:pointer">↺ use the estimate from my training hours instead</a></div>`
+      : `<div class="note"><a onclick="window._setFitnessMode('manual')" style="color:var(--accent);cursor:pointer">I already know my ${run?'threshold pace':'FTP'} →</a></div>`}
+    <div class="sub-h">How sweaty do you get?</div>
+    <div class="field"><label style="flex:0 0 auto;margin-right:8px">Sweat rate</label>
+      <select id="basicSweatSel" style="flex:1;min-width:0">
+        ${SWEAT_BASIC.map(([v,l])=>`<option value="${v}"${+S.manualSweat===v?' selected':''}>${l}</option>`).join('')}
+      </select></div>
+    <div class="note">${sweatRow[2]}</div>
+    <div class="sub-h">How salty is your sweat?</div>
+    <div class="field"><label style="flex:0 0 auto;margin-right:8px">Sweat salt</label>
+      <select id="basicSaltSel" style="flex:1;min-width:0">
+        ${SALT_BASIC.map(([mM,mg,l])=>`<option value="${mg}"${S.sweatNa==mg?' selected':''}>${l}</option>`).join('')}
+      </select></div>
+    <div class="note">${saltRow[3]}</div>
+  </div>`;
+
+  // ---------- Screen 2: Your activity ----------
+  const rpeBlock=`<div class="sub-h">How hard? (RPE)</div>
+    <div class="modeseg" style="flex-wrap:wrap;display:flex">
+      ${RPE_BASIC.map(([zi,l])=>`<button class="sm ${rpeIdx===zi?'':'ghost'}" onclick="window._setEventZone(${zi})">${l}</button>`).join('')}
+    </div>
+    <div class="note">${(RPE_BASIC[rpeIdx]||RPE_BASIC[2])[2]}</div>`;
+  const pacingNote=`<div class="note" style="margin-top:12px"><i class="ti ti-mountain" aria-hidden="true"></i> <b>Pacing set for you:</b> +5% effort on the climbs, ease off on the descents.</div>`;
+  const courseInputs=`<div class="field" style="margin-top:8px"><label style="flex:0 0 auto;margin-right:8px">Reference course</label>
+      <select onchange="window._loadBuiltin(this.value)" style="flex:1;min-width:0">
+        <option value="">— choose a built-in course —</option>
+        ${Object.keys(BUILTIN_COURSES).map(k=>`<option value="${k}"${S.course&&S.course.name===BUILTIN_COURSES[k].name?' selected':''}>${escHtml(BUILTIN_COURSES[k].name)}</option>`).join('')}
+      </select>
+      ${S.course?`<button class="sm ghost" onclick="window._clearCourse()" style="flex:0 0 auto">Clear</button>`:''}</div>
+    <div class="field"><label style="flex:0 0 auto;margin-right:8px">Upload track</label>
+      <input type="file" id="courseFile" accept=".gpx,.tcx,.fit,application/gpx+xml,application/xml,text/xml,application/octet-stream" style="flex:1;min-width:0"></div>
+    <div class="note">Drop in a <b>GPX</b>/<b>TCX</b>/<b>FIT</b> file from Strava, Garmin, Komoot, or Ride With GPS — read in your browser, nothing uploaded.${S.course?` Loaded: <b>${escHtml(S.course.name||'course')}</b> · ${fmt(S.course.distM/M_PER_MI,1)} mi · ${fmt(S.eventHours,1)} hr predicted.`:''}</div>`;
+  const manualInputs=`${numField('How long?','manualHours','hrs',0.5)}
+    ${rpeBlock}
+    ${run?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg grade</label>
+      <input type="number" step="0.5" value="${S.eventGrade}" style="width:72px" onchange="window._setEventGrade(this.value)"><span class="u">%</span></div>`:''}`;
+  const screen2=`<div class="panel tidy" style="margin-top:16px">
+    <h2>Your activity</h2>
+    <div class="sub-h">What are you doing?</div>
+    <div class="modeseg">
+      <button class="sm ${courseMode?'ghost':''}" onclick="window._setActivityMode('manual')">Describe it</button>
+      <button class="sm ${courseMode?'':'ghost'}" onclick="window._setActivityMode('course')">Upload a course</button>
+    </div>
+    ${courseMode?`${courseInputs}${S.course?rpeBlock:''}`:manualInputs}
+    ${courseMode&&S.course?pacingNote:''}
+  </div>`;
+
+  // ---------- Result: Your plan ----------
+  const card=(label,val,unit)=>`<div style="flex:1;min-width:110px;background:var(--panel2);border-radius:8px;padding:12px">
+    <div class="muted" style="font-size:12px">${label}</div>
+    <div style="font-size:24px;font-weight:600;line-height:1.2">${val} <span class="muted" style="font-size:13px;font-weight:400">${unit}</span></div></div>`;
+  const sentence = ev.targetRateG>0
+    ? `For your <b>${fmt(hrs,1)}-hr ${run?'run':'ride'}</b>, aim for about <b style="color:var(--accent)">${fmt(ev.targetRateG,0)} g</b> of carbs, <b>${fmt(fluidOzHr,0)} oz</b> of fluid, and <b>${fmt(naMgHr,0)} mg</b> of sodium each hour.${rec?` At that rate, <b>${rec.ratio}</b> works well.`:''} That holds your glycogen reserve to the finish.`
+    : `Add a bit more duration or intensity and we'll build your hourly fuel, fluid, and sodium targets here.`;
+  const result=`<div class="panel" style="margin-top:16px">
+    <h2>Your plan</h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 14px">
+      ${card('Carbs',fmt(ev.targetRateG,0),'g/hr')}
+      ${card('Fluid',fmt(fluidOzHr,0),'oz/hr')}
+      ${card('Sodium',fmt(naMgHr,0),'mg/hr')}
+    </div>
+    <div class="note" style="font-size:13.5px;line-height:1.6">${sentence}</div>
+    ${ev.overGut?`<div class="note" style="color:var(--warn)">Your true carb need is ~${fmt(ev.targetRateGRaw,0)} g/hr, above the ${carbCap()} g/hr most guts absorb — the target above is held there. Spread carbs across drink and food.</div>`:''}
+    <div style="margin-top:14px"><button class="sm" onclick="window._setMode('advanced')">Fine-tune everything in Advanced <i class="ti ti-arrow-right" aria-hidden="true"></i></button></div>
+  </div>`;
+
+  // ---------- Build your fuel: one per-hour loadout that repeats every hour ----------
+  let perHrCarb=0, perHrNa=0;
+  S.basicFuel.forEach(it=>{ const p=basicFuelProd(it.prodId), q=+it.qty||0; if(p&&q>0){ perHrCarb+=p.carbG*q; perHrNa+=p.sodium*q; } });
+  const perHrFluidOz=(+S.bottleOz||0)*(+S.bottlesPerHour||0);   // fluid comes from the bottle, not the mixed-in products
+  const carbNeedEv=ev.targetRateG*hrs, fluidNeedEv=fluidOzHr*hrs, naNeedEv=naMgHr*hrs;
+  const fuelOpts=(sel)=>{
+    const opt=(id,label,carb,na,oz)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na${oz?` · ${fmt(oz,0)}oz`:''}</option>`;
+    const drinks=allProducts().filter(p=>p.cat==='drink').map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
+    const lyteMix=allProducts().filter(isElyteMix).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
+    const lyteCap=allProducts().filter(isElyteCap).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
+    const foods =FUEL_PRODUCTS.map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium,0)).join('');
+    return `<optgroup label="Drinks">${drinks}</optgroup><optgroup label="Electrolyte mixes &amp; tablets">${lyteMix}</optgroup><optgroup label="Electrolyte capsules">${lyteCap}</optgroup><optgroup label="Foods &amp; gels">${foods}</optgroup>`;
+  };
+  const bar=(label,supplied,need,unit,kind)=>{
+    const pct=need>0?supplied/need:0, fill=Math.max(0,Math.min(100,pct*100));
+    const col = kind==='carb'
+      ? ((pct>=0.9&&pct<=1.15)?'var(--good)':(pct>=0.6&&pct<=1.4)?'var(--warn)':'var(--bad)')
+      : (pct>=0.85?'var(--good)':pct>=0.5?'var(--warn)':'var(--bad)');
+    return `<div style="margin:10px 0 0">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px">
+        <span class="muted">${label}</span><span><b style="color:${col}">${fmt(supplied,0)}</b> / ${fmt(need,0)} ${unit}</span>
+      </div>
+      <div style="position:relative;height:14px;background:var(--panel2);border-radius:7px;overflow:hidden">
+        <div style="position:absolute;top:0;bottom:0;left:0;width:${fill}%;background:${col}"></div>
+      </div></div>`;
+  };
+  const fuelRows=S.basicFuel.map(it=>`<div class="pf-row" style="display:flex;gap:6px;align-items:center;margin:5px 0">
+      <select style="flex:1;min-width:0" onchange="window._setBasicFuel('${it.id}','prodId',this.value)">${fuelOpts(it.prodId)}</select>
+      <input type="number" step="0.5" min="0" value="${it.qty}" style="width:54px" onchange="window._setBasicFuel('${it.id}','qty',this.value)" title="servings per hour">
+      <span class="u" style="width:auto">/hr</span>
+      <button class="sm ghost" onclick="window._rmBasicFuel('${it.id}')" title="remove">×</button>
+    </div>`).join('');
+  const perHrSummary=S.basicFuel.filter(it=>{const p=basicFuelProd(it.prodId);return p&&(+it.qty||0)>0;})
+    .map(it=>`${qtyStr(it.qty)}× ${basicFuelProd(it.prodId).label}`).join(' + ');
+  const fuelPanel=`<div class="panel" style="margin-top:16px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <h2 style="margin:0">Build your fuel</h2>
+      ${(S.basicFuel.length||S.bottlesPerHour!==1)?`<button class="sm" style="margin-left:auto" onclick="window._clearBasicFuel()" title="Empty the loadout and reset bottles/hr">✕ Clear plan</button>`:''}
+    </div>
+    <div class="note">Set your bottle, then pick what you'll take <b>each hour</b> — it repeats for the whole ${fmt(hrs,1)}-hr ${run?'run':'ride'}. The bars fill toward your event totals.</div>
+    <div class="sub-h">Suggest a starting point</div>
+    <div class="modeseg" style="display:flex;flex-wrap:wrap;gap:6px">
+      ${FUEL_OPTIONS.map(o=>`<button class="sm ${S.basicFuelStyle===o.key?'':'ghost'}" onclick="window._applyFuelOption('${o.key}')" title="${o.desc}">${recFuelOption()===o.key?'★ ':''}${o.title}</button>`).join('')}
+    </div>
+    ${(()=>{
+      const o=S.basicFuelStyle&&FUEL_OPTIONS.find(x=>x.key===S.basicFuelStyle);
+      if(!o){ const r=FUEL_OPTIONS.find(x=>x.key===recFuelOption()); return `<div class="note" style="font-size:12px">Click a style to load it and compare coverage. <span style="color:var(--accent)">★</span> <b>${r.title}</b> best covers your targets.</div>`; }
+      const b=buildFuelOption(o.key);
+      return `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
+          ${coverageChips(b.carbHr,b.naHr,b.fluidHr)}
+          ${recFuelOption()===o.key?`<span style="font-size:10px;color:var(--accent);border:1px solid var(--accent);border-radius:10px;padding:1px 8px">Recommended</span>`:''}
+          ${b.gelCount>=4?`<span class="muted" style="font-size:11px;color:var(--warn)">${b.gelCount} gels/hr</span>`:''}
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:5px">${o.desc} — <b>${o.tag}</b>.</div>`;
+    })()}
+    <div class="sub-h">Your bottle</div>
+    <div class="fgrid">
+      ${numField('Bottle size','bottleOz','oz',0.1)}
+      ${numField('Bottles / hour','bottlesPerHour','/hr',0.25)}
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:4px">Fluid is your bottle: <b>${fmt(perHrFluidOz,0)} oz/hr</b>. Add drink mix or food below for carbs &amp; sodium.</div>
+    <div class="sub-h">Food &amp; drink each hour</div>
+    ${S.basicFuel.length?fuelRows:`<div class="note" style="margin-top:8px">Nothing added yet — pick a <b>starting point</b> above, or add your own.</div>`}
+    <div class="row-actions" style="margin-top:7px"><button class="sm ghost" onclick="window._addBasicFuel()">＋ Add food or drink</button></div>
+    ${perHrSummary?`<div class="muted" style="font-size:12px;margin-top:8px">Per hour: <b>${perHrSummary}</b> · repeated over ${fmt(hrs,1)} hr</div>`:''}
+    ${bar('Carbs', perHrCarb*hrs, carbNeedEv, 'g', 'carb')}
+    ${bar('Fluid', perHrFluidOz*hrs, fluidNeedEv, 'oz', 'fluid')}
+    ${bar('Sodium', perHrNa*hrs, naNeedEv, 'mg', 'na')}
+    <div class="note" style="margin-top:10px;font-size:12px">Carbs aim for full (green); fluid and sodium can run a little short — they're green once you're close, since a small deficit stays within a safe body-mass loss.</div>
+  </div>`;
+
+  return `<div class="basic-wrap">
+    <div class="note" style="margin-top:4px">A quick plan in two steps. Want every dial? <a onclick="window._setMode('advanced')" style="color:var(--accent);cursor:pointer">Switch to Advanced</a>.</div>
+    <div class="grid cols2">${screen1}${screen2}</div>
+    ${result}
+    ${fuelPanel}
+  </div>`;
 }
 
 /* ---------- TAB: ATHLETE  (shared core profile + activity) ---------- */
@@ -2063,15 +2407,16 @@ function viewEventPlan(){
   const fuelOpts=(sel)=>{
     const opt=(id,label,carb,na)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
     const foods=FUEL_PRODUCTS.map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium)).join('');
-    const lytes=allProducts().filter(p=>p.cat==='lyte').map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
-    return `<optgroup label="Foods">${foods}</optgroup><optgroup label="Electrolytes">${lytes}</optgroup>`;
+    const lyteMix=allProducts().filter(isElyteMix).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    const lyteCap=allProducts().filter(isElyteCap).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    return `<optgroup label="Foods">${foods}</optgroup><optgroup label="Electrolyte mixes &amp; tablets">${lyteMix}</optgroup><optgroup label="Electrolyte capsules">${lyteCap}</optgroup>`;
   };
   // dropdown for a per-hour drink-mix supplement: every DB drink + electrolyte, per-serving carb & Na
   const mixOpts=(sel)=>{
     const opt=(id,label,carb,na)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
     const drinks=allProducts().filter(p=>p.cat==='drink').map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
-    const lytes =allProducts().filter(p=>p.cat==='lyte').map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
-    return `<option value=""${sel?'':' selected'}>— pick a product —</option><optgroup label="Carb drinks">${drinks}</optgroup><optgroup label="Electrolytes">${lytes}</optgroup>`;
+    const lyteMix=allProducts().filter(isElyteMix).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    return `<option value=""${sel?'':' selected'}>— pick a product —</option><optgroup label="Carb drinks">${drinks}</optgroup><optgroup label="Electrolyte mixes">${lyteMix}</optgroup>`;
   };
   // event roll-ups
   let totTarget=0, totDrink=0, totFood=0, totBottles=0;
@@ -2280,9 +2625,13 @@ function viewLibrary(){
   <div class="scroll" style="margin-top:6px"><table class="tc">${dbHead}<tbody>${drinks.map(dbRow).join('')}</tbody></table></div>
   <div class="row-actions"><button class="sm" onclick="window._addDrink('drink')">＋ Add drink</button></div>
 
-  <div class="sub-h" style="margin-top:18px">Electrolytes <span class="muted" style="text-transform:none">— K / Mg / Ca shown for reference; only Na is used in the calculations</span></div>
-  <div class="scroll" style="margin-top:6px"><table class="tc">${lyteHead}<tbody>${lytes.map(lyteRow).join('')}</tbody></table></div>
-  <div class="row-actions"><button class="sm" onclick="window._addDrink('lyte')">＋ Add electrolyte</button></div>
+  <div class="sub-h" style="margin-top:18px">Electrolyte drinks, powders &amp; tablets <span class="muted" style="text-transform:none">— mixed into water; K / Mg / Ca for reference, only Na is used</span></div>
+  <div class="scroll" style="margin-top:6px"><table class="tc">${lyteHead}<tbody>${lytes.filter(isElyteMix).map(lyteRow).join('')}</tbody></table></div>
+  <div class="row-actions"><button class="sm" onclick="window._addDrink('lyte','mix')">＋ Add electrolyte mix</button></div>
+
+  <div class="sub-h" style="margin-top:18px">Electrolyte capsules &amp; chews <span class="muted" style="text-transform:none">— swallowed dry, add no fluid</span></div>
+  <div class="scroll" style="margin-top:6px"><table class="tc">${lyteHead}<tbody>${lytes.filter(isElyteCap).map(lyteRow).join('')}</tbody></table></div>
+  <div class="row-actions"><button class="sm" onclick="window._addDrink('lyte','cap')">＋ Add electrolyte capsule</button></div>
 
   <div class="sub-h" style="margin-top:18px">Foods <span class="muted" style="text-transform:none">— gels / chews / bars / whole food</span></div>
   <div class="scroll" style="margin-top:6px"><table class="tc foods">${foodHead}<tbody>${foods.map(foodRow).join('')}</tbody></table></div>
@@ -2430,9 +2779,16 @@ function render(){
     if(isNum) caret = (''+ae.value).length;
     else { try{ caret = ae.selectionStart; }catch(e){} }
   }
-  $('#tabs').innerHTML = TABS.map(t=>`<button type="button" class="tab ${t[0]===active?'active':''}" role="tab" aria-selected="${t[0]===active?'true':'false'}" tabindex="${t[0]===active?'0':'-1'}" data-tab="${t[0]}">${t[1]}</button>`).join('')
-    + `<button type="button" class="theme-toggle" onclick="window._toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">${document.documentElement.classList.contains('dark')?'☀ Light':'☾ Dark'}</button>`;
-  $('#app').innerHTML = TABS.find(t=>t[0]===active)[2]();
+  const themeBtn = `<button type="button" class="theme-toggle" onclick="window._toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">${document.documentElement.classList.contains('dark')?'☀ Light':'☾ Dark'}</button>`;
+  const modeBtns = `<span class="modeswitch" role="group" aria-label="Detail level"><button type="button" class="modebtn ${S.uiMode==='basic'?'on':''}" onclick="window._setMode('basic')">Basic</button><button type="button" class="modebtn ${S.uiMode==='advanced'?'on':''}" onclick="window._setMode('advanced')">Advanced</button></span>`;
+  if(S.uiMode==='basic'){
+    $('#tabs').innerHTML = modeBtns + themeBtn;
+    $('#app').innerHTML = viewBasic();
+  } else {
+    $('#tabs').innerHTML = TABS.map(t=>`<button type="button" class="tab ${t[0]===active?'active':''}" role="tab" aria-selected="${t[0]===active?'true':'false'}" tabindex="${t[0]===active?'0':'-1'}" data-tab="${t[0]}">${t[1]}</button>`).join('')
+      + modeBtns + themeBtn;
+    $('#app').innerHTML = TABS.find(t=>t[0]===active)[2]();
+  }
   bind();
   saveAthlete();   // persist the rider's inputs after every change
   if(sig){
@@ -2525,6 +2881,10 @@ function bind(){
     else { S.sweatNaMode='preset'; S.sweatNa=+ss.value; }
     render();
   };
+  // Basic-mode pickers
+  const wh=$('#weeklyHoursSel'); if(wh) wh.onchange=()=>{ S.weeklyHours=+wh.value; applyFitnessEstimate(); render(); };
+  const bsw=$('#basicSweatSel'); if(bsw) bsw.onchange=()=>{ S.manualSweat=+bsw.value; render(); };
+  const bsa=$('#basicSaltSel'); if(bsa) bsa.onchange=()=>{ S.sweatNa=+bsa.value; render(); };
   // product table edits (role-aware)
   document.querySelectorAll('input[data-id]').forEach(el=>el.onchange=()=>{
     const f=el.dataset.f, sub=el.dataset.sub;
@@ -2562,11 +2922,12 @@ window._adminToggle=()=>{
   if(p===ADMIN_PASS){ ADMIN=true; sessionStorage.setItem('hydra_admin','1'); render(); }
   else alert('Incorrect passphrase.');
 };
-window._addDrink=(cat='drink')=>{
+window._addDrink=(cat='drink',form)=>{
   const id='u:'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
-  DB.userItems.push({id, brand:'', product:'New '+(cat==='lyte'?'electrolyte':'drink'), unit:'per serving', cat,
-    name:'New '+(cat==='lyte'?'electrolyte':'drink'), oz:16, sodium:0, kcal:0,
-    split:{glucose:0,sucrose:0,malto:0,fructose:0}, de:18, potassium:0, magnesium:0, calcium:0, status:'pending'});
+  const isCap = cat==='lyte' && form==='cap';
+  DB.userItems.push({id, brand:'', product:'New '+(cat==='lyte'?(isCap?'electrolyte capsule':'electrolyte'):'drink'), unit:isCap?'per capsule':'per serving', cat,
+    name:'New '+(cat==='lyte'?'electrolyte':'drink'), oz:isCap?0:16, sodium:0, kcal:0,
+    split:{glucose:0,sucrose:0,malto:0,fructose:0}, de:18, potassium:0, magnesium:0, calcium:0, status:'pending', form:cat==='lyte'?(isCap?'cap':'mix'):undefined});
   saveDB(); render();
 };
 window._approve=(id)=>{ const it=DB.userItems.find(u=>u.id===id); if(it){ it.status='approved'; saveDB(); render(); } };
@@ -2589,6 +2950,117 @@ window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'
 window._setActivity=(a)=>{ if(S.activity===a) return; S.activity=a; S.eventIntPct=100; clampIntensityIdx(); render(); };
 window._setGlyState=(v)=>{ if(S.glyState===v||!GLY_CONC[v]) return; S.glyState=v; render(); };
 window._setGutAdapt=(level)=>{ if(S.gutAdapt===level) return; S.gutAdapt=level; render(); };
+/* --- Basic / Advanced mode --- */
+window._setMode=(m)=>{ if(S.uiMode===m||(m!=='basic'&&m!=='advanced')) return; S.uiMode=m; if(m==='advanced') active='rider'; render(); window.scrollTo(0,0); };
+window._setFitnessMode=(m)=>{ if(S.fitnessMode===m) return; S.fitnessMode=m; if(m==='estimate') applyFitnessEstimate(); render(); };
+/* --- Basic: per-hour fuel loadout --- */
+// hand-editing the loadout means you're off a pristine Suggest style → drop the style indicator
+window._addBasicFuel=()=>{ const d=allProducts().find(p=>p.cat==='drink'); S.basicFuel.push({id:_xid('bf'),prodId:d?d._id:FUEL_PRODUCTS[0].id,qty:1}); S.basicFuelStyle=null; render(); };
+window._setBasicFuel=(id,f,v)=>{ const it=S.basicFuel.find(x=>x.id===id); if(!it) return; it[f]= f==='qty'?(+v||0):v; S.basicFuelStyle=null; render(); };
+window._rmBasicFuel=(id)=>{ S.basicFuel=S.basicFuel.filter(x=>x.id!==id); S.basicFuelStyle=null; render(); };
+// Four "Suggest" strategies. buildFuelOption is PURE (no mutation) so the picker cards can preview
+// coverage; _applyFuelOption commits it. Each hits the carb (and where relevant sodium) target and
+// sizes bottles/hr to cover fluid.
+function buildFuelOption(opt){
+  const T=basicTargets(), carbT=T.carb, naT=T.naMg;
+  const drinks=allProducts().filter(p=>p.cat==='drink'&&productCarb(p)>0);
+  const lytes =allProducts().filter(p=>p.cat==='lyte'&&(+p.sodium||0)>0);
+  let gels=FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&fuelCarbG(p)>0&&/gel/i.test(p.product));
+  if(!gels.length) gels=FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&fuelCarbG(p)>0);
+  const foods =FUEL_PRODUCTS.filter(p=>p.brand==='Whole Food'&&fuelCarbG(p)>0);
+  const closest=(arr,fn,t)=>arr.slice().sort((a,b)=>Math.abs(fn(a)-t)-Math.abs(fn(b)-t))[0];
+  // count (in `step` increments) that covers ≥90% of `need`, preferring slightly UNDER over over
+  const fitQty=(need,per,step=1)=>{
+    if(per<=0||need<=0) return 0;
+    let n=Math.round(need/per/step)*step;
+    if(n*per>need && n-step>0 && (n-step)*per>=0.9*need) n-=step;       // step down when the under value still clears 90%
+    while(n*per<0.9*need) n+=step;                                       // but never sit below 90% if a step fixes it
+    return +n.toFixed(2);
+  };
+  const items=[];   // {prodId, qty}
+  const naIn=()=>{ let na=0; items.forEach(it=>{ const p=basicFuelProd(it.prodId); if(p) na+=p.sodium*it.qty; }); return na; };
+  // close the sodium gap with a CARB-FREE electrolyte, choosing the source+count that best fits the target —
+  // prefer slightly under, never over-salt, and prefer fewer units (so no 36-chews-an-hour plans)
+  const fillSodium=()=>{
+    const na=naIn(); if(na>=0.9*naT || items.length>=2) return;          // covered, or no product slot left (≤2 total)
+    const pool=lytes.filter(s=>(+s.sodium||0)>0 && productCarb(s)<=3);   // electrolytes that won't blow the carb target
+    let best=null, bestErr=Infinity;
+    pool.forEach(src=>{ const u=+src.sodium||0;
+      let n=Math.floor((naT-na)/u); if((na+n*u)<0.9*naT) n+=1; if(n<=0) return;
+      const total=na+n*u, err=Math.abs(total-naT) + (total>naT?(total-naT)*0.6:0) + n*40;   // prefer under + fewer units
+      if(err<bestErr){ bestErr=err; best={id:src._id, n}; }
+    });
+    if(best) items.push({prodId:best.id, qty:best.n});
+  };
+  // DYNAMIC drink pick within a carb ceiling: saltiest drink whose sodium is still ≤ target (don't over-salt a
+  // low-sodium athlete), else the lowest-sodium drink. → low need lands on Gatorade; high need on EFS/Skratch/Styrkr.
+  // pick a carb drink scaled to the carb target, accounting for the fact that sodium scales with servings:
+  // prefer the drink carrying the most sodium that's still ≤ target (electrolyte only tops up, never over-salts),
+  // else the one with the least overshoot. Returns {id, q}.
+  const bestCarbDrink=(pool)=>{
+    const cands=(pool.length?pool:drinks).map(d=>{ const q=fitQty(carbT,productCarb(d),0.5); return {id:d._id, q, na:q*(+d.sodium||0)}; });
+    const under=cands.filter(c=>c.na<=naT).sort((a,b)=>b.na-a.na);
+    return under[0] || cands.slice().sort((a,b)=>a.na-b.na)[0];
+  };
+  // each style = ONE carb vehicle (scaled to the carb target) + an electrolyte to finish sodium → ≤2 products, all three hit
+  if(opt==='aio'){                                                         // one high-carb electrolyte drink (+ a salt top-up only if very salty)
+    const b=bestCarbDrink(drinks.filter(d=>productCarb(d)>=40));
+    if(b) items.push({prodId:b.id, qty:b.q});
+    fillSodium();
+  } else if(opt==='water'){                                                // plain water + gels for carbs + an electrolyte for sodium
+    const g=closest(gels,fuelCarbG,23); if(g) items.push({prodId:g.id, qty:fitQty(carbT,fuelCarbG(g),1)});
+    fillSodium();
+  } else if(opt==='light'){                                                // a light sports drink (carbs + fluid) + an electrolyte for sodium
+    const b=bestCarbDrink(drinks.filter(d=>productCarb(d)<=30));
+    if(b) items.push({prodId:b.id, qty:b.q});
+    fillSodium();
+  } else if(opt==='whole'){                                                // real food for carbs + an electrolyte for sodium (e.g. bananas + Precision PH)
+    const mild=foods.filter(f=>(+f.sodium||0)<100); const f=closest(mild.length?mild:foods, fuelCarbG, 25);
+    if(f) items.push({prodId:f.id, qty:fitQty(carbT,fuelCarbG(f),1)});
+    fillSodium();
+  }
+  const bottlesPerHour=(S.bottleOz>0 && T.fluidOz>0) ? Math.max(0.25, fitQty(T.fluidOz, S.bottleOz, 0.25)) : S.bottlesPerHour;
+  let carbHr=0, naHr=0; items.forEach(it=>{ const p=basicFuelProd(it.prodId); if(p){ carbHr+=p.carbG*it.qty; naHr+=p.sodium*it.qty; } });
+  const gelCount=items.reduce((s,it)=>s+(FUEL_PRODUCTS.some(p=>p.id===it.prodId)&&/gel/i.test((FUEL_PRODUCTS.find(p=>p.id===it.prodId)||{}).product||'')?it.qty:0),0);
+  return { items, bottlesPerHour, carbHr, naHr, fluidHr:(+S.bottleOz||0)*bottlesPerHour, gelCount,
+    summary: items.map(it=>`${qtyStr(it.qty)}× ${(basicFuelProd(it.prodId)||{}).label||''}`).join(' + ') };
+}
+// coverage rating: ≥90% and ≤110% is good; a bit under/over is close; far off is poor. Prefer landing slightly under.
+function covMark(cov){ return (cov>=0.90&&cov<=1.10)?'good':((cov>=0.75&&cov<=1.30)?'close':'off'); }
+// "Recommended" = the option that best covers ALL THREE targets (carbs, fluid, sodium weighted equally), with a
+// small penalty for overshoot so a slightly-under plan is preferred over a slightly-over one.
+function fuelCoverScore(opt){
+  const T=basicTargets(), b=buildFuelOption(opt);
+  const parts=[[b.carbHr,T.carb],[b.fluidHr,T.fluidOz],[b.naHr,T.naMg]];
+  let s=0, over=0;
+  parts.forEach(([sup,need])=>{ const c=need>0?sup/need:1; const m=covMark(c); s+=(m==='good'?1:m==='close'?0.6:0); over+=Math.max(0,c-1); });
+  return s - 0.15*over;
+}
+function recFuelOption(){ return FUEL_OPTIONS.map(o=>({k:o.key,s:fuelCoverScore(o.key)})).sort((a,b)=>b.s-a.s)[0].k; }
+const FUEL_OPTIONS=[
+  {key:'aio',   title:'All-in-one drink',          tag:'Simplest',            desc:'One high-carb electrolyte mix in the bottle — carbs, fluid and sodium from a single product.'},
+  {key:'water', title:'Gels + electrolyte',         tag:'Most sodium control', desc:'Plain-water bottle, gels for carbs, and a dedicated electrolyte to dial in sodium.'},
+  {key:'light', title:'Light drink + electrolyte',  tag:'Familiar',            desc:'A light sports drink for carbs and fluid, with an electrolyte to top up sodium.'},
+  {key:'whole', title:'Whole foods + electrolyte',  tag:'Most natural',        desc:'Real food for carbs (e.g. bananas) plus an electrolyte for sodium.'},
+];
+// three coverage chips (Carbs / Fluid / Sodium) — ✓ on target, ≈ a bit off, ✕ well short/over
+function coverageChips(carbHr,naHr,fluidHr){
+  const T=basicTargets();
+  const chip=(label,sup,need)=>{
+    const m=covMark(need>0?sup/need:1);
+    const col= m==='good'?'good':m==='close'?'warn':'bad', mark=m==='good'?'✓':m==='close'?'≈':'✕';
+    return `<span style="display:inline-flex;gap:4px;align-items:center;font-size:11.5px;border:1px solid var(--line);border-radius:6px;padding:2px 7px;color:var(--${col})">${mark} ${label} ${fmt(sup,0)}</span>`;
+  };
+  return chip('Carbs',carbHr,T.carb)+chip('Fluid',fluidHr,T.fluidOz)+chip('Sodium',naHr,T.naMg);
+}
+window._applyFuelOption=(opt)=>{
+  const b=buildFuelOption(opt);
+  S.basicFuel=b.items.map(it=>({id:_xid('bf'),prodId:it.prodId,qty:it.qty}));
+  S.bottlesPerHour=b.bottlesPerHour;
+  S.basicFuelStyle=opt;
+  render();
+};
+window._clearBasicFuel=()=>{ S.basicFuel=[]; S.bottlesPerHour=1; S.basicFuelStyle=null; render(); };   // empty the loadout + reset bottles/hr
 /* --- running: pre-set pace rows --- */
 window._setPace=(i,v)=>{ S.runPaces[i]=parsePace(v); render(); };
 window._addPace=()=>{ const last=S.runPaces[S.runPaces.length-1]; S.runPaces.push(Math.max(120,(+last||435)-15)); render(); };
@@ -2798,6 +3270,9 @@ catch(e){
   }
 }
 _booted=true;                                    // initial render done — count real usage from here on
+// First-visit entry gate: show the disclaimer / work-in-progress notice until acknowledged (bump the key to re-show)
+window._ackWelcome=()=>{ try{ localStorage.setItem('hydra_welcome_v1','1'); }catch(e){} const g=document.getElementById('welcomeGate'); if(g) g.style.display='none'; };
+try{ if(!localStorage.getItem('hydra_welcome_v1')){ const g=document.getElementById('welcomeGate'); if(g) g.style.display='flex'; } }catch(e){}
 </script>
 <!-- GoatCounter analytics (privacy-friendly, cookieless) -->
 <script data-goatcounter="https://extrapickels.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
