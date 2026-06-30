@@ -843,11 +843,64 @@ function trackPointsRegex(text){
   }
   return pts;
 }
+// extract trackpoints from a binary Garmin FIT file (ArrayBuffer). Reads only `record`
+// messages (global msg 20): position_lat/long (semicircles → degrees) + altitude. No CRC check.
+// FIT layout: 12/14-byte header (".FIT" sig at bytes 8–11, data size at 4–7), then a stream of
+// records — each prefixed by a header byte that flags definition vs data and a local message type.
+function trackPointsFIT(buf){
+  const dv=new DataView(buf), n=dv.byteLength;
+  if(n<14) throw new Error('file too small to be a FIT');
+  if(!(dv.getUint8(8)===0x2E && dv.getUint8(9)===0x46 && dv.getUint8(10)===0x49 && dv.getUint8(11)===0x54))
+    throw new Error('not a FIT file');                       // ".FIT" signature
+  const hdrSize=dv.getUint8(0), dataSize=dv.getUint32(4,true);
+  const end=Math.min(n, hdrSize+dataSize);
+  const SEMI=180/2147483648;                                 // semicircles → degrees
+  const defs={};                                             // local msg type → field definition
+  const pts=[];
+  const readData=(pos,def)=>{
+    if(!def) throw new Error('FIT data before its definition');
+    if(def.gmsg===20){                                        // record message
+      let lat=null,lon=null,alt=null,ealt=null;
+      for(const f of def.fields){ const o=pos+f.off;
+        if(f.fnum===0){ const v=dv.getInt32(o,def.le); if(v!==0x7FFFFFFF) lat=v*SEMI; }       // position_lat
+        else if(f.fnum===1){ const v=dv.getInt32(o,def.le); if(v!==0x7FFFFFFF) lon=v*SEMI; }  // position_long
+        else if(f.fnum===2){ const v=dv.getUint16(o,def.le); if(v!==0xFFFF) alt=v/5-500; }    // altitude
+        else if(f.fnum===78){ const v=dv.getUint32(o,def.le); if(v!==0xFFFFFFFF) ealt=v/5-500; } } // enhanced_altitude (preferred)
+      if(lat!=null && lon!=null){ const ele = ealt!=null?ealt : (alt!=null?alt:null); pts.push({lat,lon,ele}); }
+    }
+    return pos+def.size;
+  };
+  let pos=hdrSize;
+  while(pos<end){
+    const rh=dv.getUint8(pos++);
+    if(rh & 0x80){ pos=readData(pos, defs[(rh>>5)&0x3]); continue; }   // compressed-timestamp header → data msg
+    const lt=rh & 0x0F;
+    if(rh & 0x40){                                            // definition message
+      const le=dv.getUint8(pos+1)===0;                        // byte0 reserved, byte1 architecture (0=LE)
+      const gmsg=dv.getUint16(pos+2,le), nf=dv.getUint8(pos+4);
+      let p=pos+5, size=0; const fields=[];
+      for(let i=0;i<nf;i++){ fields.push({fnum:dv.getUint8(p),off:size,fsize:dv.getUint8(p+1)}); size+=dv.getUint8(p+1); p+=3; }
+      if(rh & 0x20){ const ndf=dv.getUint8(p); p++; for(let i=0;i<ndf;i++){ size+=dv.getUint8(p+1); p+=3; } } // skip dev fields, count bytes
+      defs[lt]={gmsg,le,size,fields};
+      pos=p;
+    } else pos=readData(pos, defs[lt]);                       // data message
+  }
+  return pts;
+}
 function parseTrack(text){
   const big = text.length > 8388608;                       // ~8 MB+ → skip the DOM (memory), stream with regex
   let pts = big ? trackPointsRegex(text) : trackPointsDOM(text);
   if(pts.length<2 && !big) pts = trackPointsRegex(text);    // DOM found nothing → regex fallback
   if(pts.length<2) throw new Error('no track points found (need a GPX or TCX with a track)');
+  return buildProfile(pts);
+}
+function parseTrackFIT(buf){
+  const pts=trackPointsFIT(buf);
+  if(pts.length<2) throw new Error('no track points found (need a FIT with GPS records)');
+  return buildProfile(pts);
+}
+// shared: trackpoints {lat,lon,ele} → smoothed, evenly-spaced elevation profile + course stats
+function buildProfile(pts){
   // cumulative distance along the track
   let cum=0; const raw=[{d:0,ele:pts[0].ele}];
   for(let i=1;i<pts.length;i++){ cum+=haversine(pts[i-1].lat,pts[i-1].lon,pts[i].lat,pts[i].lon); raw.push({d:cum,ele:pts[i].ele}); }
@@ -1066,8 +1119,8 @@ function courseBody(intOpts){
       ${c?`<button class="sm ghost" onclick="window._clearCourse()" style="flex:0 0 auto">Clear course</button>`:''}
     </div>`;
   const fileRow=`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Upload track</label>
-      <input type="file" id="courseFile" accept=".gpx,.tcx,application/gpx+xml,application/xml,text/xml" style="flex:1;min-width:0"></div>
-    <div class="note">Pick a built-in <b>reference course</b> above, or drop in a <b>GPX</b>/<b>TCX</b> file exported from Strava, Garmin, Komoot, or Ride With GPS. We read distance, elevation &amp; grade to build your segment plan — parsing happens entirely in your browser; nothing is uploaded.</div>`;
+      <input type="file" id="courseFile" accept=".gpx,.tcx,.fit,application/gpx+xml,application/xml,text/xml,application/octet-stream" style="flex:1;min-width:0"></div>
+    <div class="note">Pick a built-in <b>reference course</b> above, or drop in a <b>GPX</b>/<b>TCX</b>/<b>FIT</b> file exported from Strava, Garmin, Komoot, or Ride With GPS. We read distance, elevation &amp; grade to build your segment plan — parsing happens entirely in your browser; nothing is uploaded.</div>`;
   const loading = _courseLoading ? `<div class="note">⏳ Reading course… large files can take a few seconds.</div>` : '';
   if(!c) return {controls: ref+loading+fileRow, profile:''};
   const mi=c.distM/M_PER_MI, t=S._ct||courseTime(), it=eventBaseIt();
@@ -2573,20 +2626,21 @@ window._loadCourse=(e)=>{
   if(MB>25 && !confirm(`This track is ${MB.toFixed(0)} MB. Large files take a few seconds to read and use a lot of memory (especially on phones). Continue?`)){
     if(inp) inp.value=''; return;
   }
+  const isFit=/\.fit$/i.test(f.name);                      // FIT is binary → read as bytes, not text
   _courseLoading=true; render();                           // paint the "Reading…" state before the synchronous parse
   const rd=new FileReader();
-  rd.onload=()=>{ const text=String(rd.result);
+  rd.onload=()=>{
     setTimeout(()=>{                                       // yield so the indicator paints before parsing
-      try{ const c=parseTrack(text); c.name=f.name; c.appliedAt=null; S.course=c;
+      try{ const c = isFit ? parseTrackFIT(rd.result) : parseTrack(String(rd.result)); c.name=f.name; c.appliedAt=null; S.course=c;
         S.activityMode='course';                           // a loaded course drives the Activity Information panel
         S.airRho=+isaDensity(c.elevMeanM).toFixed(3);      // pull air density from the course's mean altitude
         applyCourseToPlan(); }                             // auto-fill the 30-min segment grade/intensity profile on load
-      catch(err){ alert('Could not read this file: '+err.message+'.\n\nExport a GPX or TCX track from Strava, Garmin, Komoot, or Ride With GPS.'); }
+      catch(err){ alert('Could not read this file: '+err.message+'.\n\nExport a GPX, TCX, or FIT track from Strava, Garmin, Komoot, or Ride With GPS.'); }
       finally{ _courseLoading=false; if(inp) inp.value=''; render(); }
     }, 20);
   };
   rd.onerror=()=>{ _courseLoading=false; render(); alert('Could not read the file.'); };
-  rd.readAsText(f);
+  if(isFit) rd.readAsArrayBuffer(f); else rd.readAsText(f);
 };
 // push the course onto the 30-min plan: grades + per-segment ZONE (duration syncs separately via syncDuration).
 // the predictor stays zone-based — each segment's predicted effort snaps to the nearest zone (effort = that
