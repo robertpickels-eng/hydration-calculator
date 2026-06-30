@@ -1537,8 +1537,7 @@ function viewRider(){
       <div class="res"><span>Total energy</span><span class="v">${fmt(ev.kcal,0)} kcal · ${fmt(ev.kcalHr,0)}/hr</span></div>
       <div class="res"><span>Carbohydrate burned</span><span class="v">${fmt(ev.choG,0)} g · ${fmt(ev.choKcal,0)} kcal</span></div>
       <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
-      <div class="res"><span>Carb fuel target <span class="muted">(keep ${S.reservePct}% reserve)</span></span>
-        <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
+      <div class="res" style="display:block;line-height:1.5">Carb fuel target <span class="muted">(keep ${S.reservePct}% reserve)</span>: <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
       ${ev.overGut?`<div class="note" style="color:var(--warn)">Capped at the ${carbCap()} g/hr gut-absorption limit (${gutAdaptLabel()}) — fully holding your reserve would take ~${fmt(ev.targetRateGRaw,0)} g/hr, so you'll dip into reserves. Spread carbs across drink + food and train your gut.</div>`:''}`;
     const manualInputs = `
         ${numField('Activity duration','manualHours','hr',0.5)}
