@@ -576,12 +576,13 @@ function gutAdaptLabel(){ return {unadapted:'unadapted',adapted:'adapted',highca
 function carbSourceRec(rate){
   const r = Math.round(rate || 0);
   if(r < 1) return null;                                            // no meaningful target yet
+  const cap = carbCap();                                           // this athlete's trained absorption ceiling
   if(r <= 60) return { r, ratio:'glucose only (or whole foods)', glu:r, fru:0, cls:'st-g',
     why:'A single glucose source is fully absorbed at this rate — one transporter (SGLT1) clears up to ~60 g/hr, so no fructose is needed.' };
   if(r <= 90){ const glu=Math.round(r*2/3); return { r, ratio:'2:1 glucose : fructose', glu, fru:r-glu, cls:'st-y',
     why:'Past ~60 g/hr you need fructose (GLUT5) alongside glucose to keep absorbing — a 2:1 blend adds capacity without overwhelming the gut.' }; }
   const glu=Math.round(r/2); return { r, ratio:'1:1 glucose : fructose', glu, fru:r-glu, cls:'st-o',
-    why:'At this intake a 1:1 blend maximizes combined glucose + fructose transport (the ~90–120 g/hr range trained guts can reach).' };
+    why:`At this intake a 1:1 blend maximizes combined glucose + fructose transport — effective all the way up to your ~${cap} g/hr ${gutAdaptLabel()} ceiling.` };
 }
 function isRun(){ return S.activity==='running'; }
 // small pointer to the Sources tab — used where the science prose was moved off the feature pages
@@ -1616,7 +1617,8 @@ function viewHydration(){
     <div style="margin-top:10px;padding:12px 14px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--accent2)">
       <div style="font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;font-size:10.5px;color:var(--muted)">Recommended carb source</div>
       <div style="font-size:15px;font-weight:700;color:var(--txt);margin-top:4px">At <span class="${rec.cls}" style="padding:1px 7px;border-radius:4px">${rec.r} g/hr</span> → use <span style="color:var(--accent)">${rec.ratio}</span>${rec.fru?` <span class="muted" style="font-weight:600;font-size:13px">≈ ${rec.glu} g glucose + ${rec.fru} g fructose / hr</span>`:''}</div>
-      <div class="muted" style="font-size:11.5px;line-height:1.55;margin-top:5px">${rec.why}${ev.overGut?` Your true need is ~${fmt(ev.targetRateGRaw,0)} g/hr, capped at the ${carbCap()} g/hr gut limit (${gutAdaptLabel()}) — raise it by training your gut and spreading carbs across drink + food.`:''} Set <b>Gut adaptation</b> on the Athlete tab (unadapted 90 · adapted 120 · high-carb 150 g/hr).</div>
+      <div class="muted" style="font-size:11.5px;line-height:1.55;margin-top:5px">${rec.why} Set <b>Gut adaptation</b> on the Athlete tab (unadapted 90 · adapted 120 · high-carb 150 g/hr).</div>
+      ${ev.overGut?`<div class="st-r" style="margin-top:9px;padding:9px 12px;border-radius:6px;font-size:12.5px;font-weight:600;line-height:1.5"><b>⚠ Over your predicted gut limit.</b> Your true need is ~${fmt(ev.targetRateGRaw,0)} g/hr, above your ${carbCap()} g/hr ${gutAdaptLabel()} ceiling — you can't absorb the difference, so the target above is held at ${carbCap()} g/hr. Train your gut to raise the ceiling, spread carbs across drink + food, and expect a glycogen deficit.</div>`:''}
     </div>` : ''; })()}
   </div>
 
