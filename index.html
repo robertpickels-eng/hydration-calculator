@@ -364,11 +364,14 @@ function tonicity(mosm){
 
 /* Conditional-format colors — copied from the workbook's rules */
 const CF = {
-  green:{bg:'#e4eadd',fg:'#3e4b32'},   // in range — brine
-  amber:{bg:'#f1e8d2',fg:'#6f561f'},   // low — gold
-  red:  {bg:'#f1ddda',fg:'#86413b'},   // high / out of band — rose
+  // light: subtle tints. dark (d*): solid fills using the theme's semantic accents with dark text,
+  // so the cells/boxes read as vivid chips like the +4/+8 buttons instead of pale near-white in dark mode.
+  green:{bg:'#e4eadd',fg:'#3e4b32', dbg:'#83bd79', dfg:'#12151b'},   // in range — brine (== --accent / --paper)
+  amber:{bg:'#f1e8d2',fg:'#6f561f', dbg:'#dcb44e', dfg:'#1c1505'},   // low — gold (== --warn)
+  red:  {bg:'#f1ddda',fg:'#86413b', dbg:'#e0726a', dfg:'#1c0e0c'},   // high / out of band — rose (== --bad)
 };
-const cfStyle = c => c ? `style="background:${c.bg};color:${c.fg};font-weight:700;border-radius:4px"` : '';
+const cfColors = c => document.documentElement.classList.contains('dark') ? {bg:c.dbg,fg:c.dfg} : {bg:c.bg,fg:c.fg};
+const cfStyle = c => { if(!c) return ''; const k=cfColors(c); return `style="background:${k.bg};color:${k.fg};font-weight:700;border-radius:4px"`; };
 // Body Na+ (mM): green 135–146, amber <135, red >146   (sheet column P)
 function naCF(mM){ return cfStyle(mM<135?CF.amber : mM>146?CF.red : CF.green); }
 // Body weight: green within [start*(1-loss%), start], red below floor   (sheet column K)
@@ -1799,8 +1802,8 @@ function recoFor(x){
   return {cls, html:parts.join('<br>')};
 }
 // colored box (bg + text) for the recommendation cell — sits on the blue table background
-const recoBoxStyle = cls => { const c = cls==='warn'?CF.amber : cls==='bad'?CF.red : CF.green;
-  return `style="background:${c.bg};color:${c.fg}"`; };
+const recoBoxStyle = cls => { const c = cls==='warn'?CF.amber : cls==='bad'?CF.red : CF.green; const k=cfColors(c);
+  return `style="background:${k.bg};color:${k.fg}"`; };
 function viewProjection(){
   const evHour=Math.max(1,Math.ceil(+S.eventHours||0));      // projection row where the event finishes
   const hrs=Math.min(36,Math.max(S.projHours||8, evHour+2)); // always show ≥2 hours past the event
