@@ -462,6 +462,7 @@ const S = {
   cda:0.32,                                    // aerodynamic drag area CdA (m²) — road hoods default
   crr:0.0045,                                  // rolling-resistance coefficient — Recreation road preset (Michelin Power Road, butyl)
   airRho:1.225,                                // air density (kg/m³) — standard sea level, 15°C (preset-aligned)
+  maxDescentKmh:65,                            // rider's max descent speed (braking/cornering ceiling); coast physics govern below it
   // --- event fuel plan ---
   planItems:[],                                // per-hour product picks: [{hour, prodId, qty}]
   planBottles:{},                              // per-hour bottle override {hour: bottles}; unset = bottles/hr × dur
@@ -1033,10 +1034,11 @@ function cycSpeedMS(P, grade){
   const A=0.5*(+S.airRho||1.2)*(+S.cda||0.32);            // aero coefficient
   const Pw=0.97*Math.max(0,P);                            // power at wheel (drivetrain η≈0.97)
   const f=v=>A*v*v*v + Gf*v - Pw;                         // = 0 at the steady-state speed
+  const capMs = (grade<0 && +S.maxDescentKmh>0) ? (+S.maxDescentKmh)/3.6 : 35;  // descent braking/cornering ceiling (else the 35 m/s backstop)
   let lo=0.01, hi=40;
-  if(f(hi)<0) return 35;                                  // steep descent → terminal-ish, clamp
+  if(f(hi)<0) return Math.min(35, capMs);                // steep descent → terminal-ish; hold to the descent cap
   for(let k=0;k<60;k++){ const mid=(lo+hi)/2; if(f(mid)>0) hi=mid; else lo=mid; }
-  return Math.max(1.0, Math.min(35,(lo+hi)/2));           // floor ~3.6 km/h (walk the bike)
+  return Math.max(1.0, Math.min(35, capMs, (lo+hi)/2));  // floor ~3.6 km/h; ceiling = descent cap (or 35 m/s)
 }
 // speed (m/s) at a grade for a base intensity item, scaled by a pacing multiplier m (m=1 → hold).
 // cycling scales watts; running scales the flat-equivalent speed then solves iso-effort at grade.
@@ -1055,20 +1057,35 @@ function solveSpeedScaled(grade, m, it){
 function courseSolveSpeed(grade, zi){ return solveSpeedScaled(grade, 1, intItem(zi==null?S.eventZone:zi)); }
 
 // pacing-strategy intensity multiplier around the rider's selected average.
-// climb* scale by grade (full effect at ±PACE_GREF, proportional between, flat = 1);
-// neg/fade ramp over the course by distance fraction. Normalized later so the average holds.
+// CLIMB side (grade ≥ 0): climb* surge (full effect at PACE_GREF); neg/fade ramp by distance; even = 1.
+// DESCENT side (grade < 0): workload rolls off to full coast (0) by DESCENT_COAST grade — steeper roll-off
+// for stronger climb strategies (a rider who saved it on the climb pedals more on the descent).
+// Normalized later so the time-weighted average still holds.
 const PACE_GREF=0.06;                                       // grade (6%) at which climb strategies reach full effect
-function paceMult(strat, grade, frac){
-  const gn=Math.max(-1,Math.min(1,(grade||0)/PACE_GREF));
+const DESCENT_COAST=0.05;                                   // grade (−5%) at which the rider fully coasts (0 workload)
+const STRAT_K={climb5:0.05, climb10:0.10, climb15:0.15};    // climb coefficient (0 for even/neg/fade)
+function paceMult(strat, grade, frac){                      // climb/flat SURGE only (grade ≥ 0); descents neutral here
+  const g=grade||0;
+  if(g<0) return 1;                                         // descent workload is handled by coastFactor, applied separately
+  const gn=Math.max(0,Math.min(1,g/PACE_GREF));             // climb / flat
   switch(strat){
     case 'climb5':  return 1+0.05*gn;
     case 'climb10': return 1+0.10*gn;
+    case 'climb15': return 1+0.15*gn;
     case 'neg':     return 1+0.06*(2*(frac||0)-1);          // start easier → finish harder
     case 'fade':    return 1-0.06*(2*(frac||0)-1);          // start harder → fade
     default:        return 1;                                // even
   }
 }
-const PACE_LABELS={ even:'Even (hold average)', climb5:'Climb +5% / ease descents', climb10:'Climb +10% / ease descents', neg:'Negative split', fade:'Fast start / fade' };
+// descent workload roll-off → full coast (0) by DESCENT_COAST grade; steeper roll-off for stronger climb
+// strategies (a rider who saved it on the climb pedals more on the descent). NOT normalized — coasting a
+// descent lowers your overall average (you rest there) rather than forcing harder climbs.
+function coastFactor(strat, grade){
+  if((grade||0)>=0) return 1;
+  const d=Math.min(1,(-(grade||0))/DESCENT_COAST), p=1+10*(STRAT_K[strat]||0);   // even p=1 (linear); climb5/10/15 → 1.5/2.0/2.5
+  return Math.pow(Math.max(0,1-d), p);
+}
+const PACE_LABELS={ even:'Even (hold average)', climb5:'Climb +5% / ease descents', climb10:'Climb +10% / ease descents', climb15:'Climb +15% / ease descents', neg:'Negative split', fade:'Fast start / fade' };
 // integrate the course at the selected workload → total time + per-30-min grade profile
 // snap a representative intensity (W cyc · m/min run) to the nearest training zone — for the 30-min block labels
 function nearestZoneForIv(iv){ const run=isRun(), zv=intensities().map(z=> run?(z.speed||0):(z.watts||0));
@@ -1107,7 +1124,8 @@ function courseTime(){
   for(let i=1;i<pr.length;i++){
     const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
     const grade=(pr[i][1]-pr[i-1][1])/dd;
-    const m = (stratOn ? paceMult(strat,grade,pr[i-1][0]/totalD)*scale : 1) * sc(Math.floor(T/SEG)); // strategy shape × this block's effort
+    const surge = stratOn ? paceMult(strat,grade,pr[i-1][0]/totalD)*scale : 1;              // climb/flat surge (normalized)
+    const m = surge * coastFactor(strat,grade) * sc(Math.floor(T/SEG));                      // × descent coast × this block's effort
     let v=solveSpeedScaled(grade,m,baseIt), iv=baseIv*m;   // iv = representative intensity (W cyc · flat-speed m/min run)
     if(v<=0) continue;
     let dt=dd/v;
@@ -1396,7 +1414,10 @@ function cyclingModelBody(){
       <div>${courseParamRow('Bike weight','bikeLbs','lbs',0.5,BIKE_PRESETS)}${courseParamRow('CdA','cda','m²',0.01,CDA_PRESETS)}</div>
       <div>${courseParamRow('Crr','crr','',0.0001,CRR_PRESETS)}${courseParamRow('Air density','airRho','kg/m³',0.01,RHO_PRESETS)}</div>
     </div>
-    <div class="note" style="margin-top:8px">Pick a preset or type your own. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA) — override if you have a measured value. ${srcLink('cycling power & air-density model →')}</div>`;
+    <div class="field" style="gap:6px;margin-top:6px"><label style="flex:0 0 auto;margin-right:8px">Max descent speed</label>
+      <input type="number" step="1" value="${fmt(S.maxDescentKmh,0)}" data-k="maxDescentKmh" data-obj="S" style="width:74px" title="Your braking/cornering ceiling on descents"><span class="u" style="width:auto">km/h</span>
+      <span class="muted" style="font-size:11px;margin-left:6px">${fmt((+S.maxDescentKmh||0)/1.609,0)} mph · raise for open descents, lower for technical</span></div>
+    <div class="note" style="margin-top:8px">Pick a preset or type your own. Below <b>−5% grade the rider coasts</b> (0 W) and speed is set by gravity vs. drag &amp; rolling, then held to your <b>max descent speed</b>. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA). ${srcLink('cycling power & air-density model →')}</div>`;
 }
 
 /* ============================================================
@@ -1539,7 +1560,6 @@ function loadAthlete(){
       delete s.highCarbAdapted;
       if(s.glyState===undefined && s.carbLoaded!==undefined) s.glyState = s.carbLoaded ? 'loaded' : 'rested'; // migrate old boolean
       delete s.carbLoaded;
-      if(s.pacingStrategy==='climb15') s.pacingStrategy='climb10'; // +15% strategy retired (unsustainable over 30-min segments)
       if(s.manualHours===undefined) s.manualHours = (s.eventHours!==undefined ? +s.eventHours : S.manualHours); // seed manual entry from old saves
       if(s.activityMode===undefined) s.activityMode = s.course ? 'course' : 'manual'; // seed the source toggle from old saves
       Object.assign(S, s);
