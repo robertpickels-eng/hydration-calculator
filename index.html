@@ -440,8 +440,9 @@ const S = {
   workloads:[100,125,150,175,200],             // pre-set wattage rows (Pre-Set Workload mode)
   eventZone:1,                                 // default avg-intensity index for the whole ride (into the active intensity list)
   eventIntPct:100,                             // manual fine-tune of the average intensity, as % of the selected zone's midpoint (predictor)
-  segBreakdown:false,                          // show per-30-min-segment intensity editor
-  segZones:[],                                 // chosen intensity index per 30-min segment
+  segBreakdown:false,                          // show per-30-min-segment intensity editor (MANUAL mode)
+  segZones:[],                                 // chosen intensity index per 30-min segment (MANUAL mode)
+  segScale:[],                                 // course mode: per-30-min effort multiplier (1 = hold your average; sparse, missing = 1)
   activityMode:'manual',                       // Activity Information source: 'manual' (enter duration/intensity) | 'course' (upload a GPS track → auto 30-min plan)
   reservePct:25,                               // % glycogen to keep in reserve at event end
   gutAdapt:'unadapted',                         // gut training level → carb cap: unadapted 90 · adapted 120 · highcarb 150 g/hr (new users start conservative)
@@ -846,19 +847,22 @@ function segments(){
 const VO2_SLOW_FRAC = 0.06;
 // roll the segments up into event totals + the carbohydrate fueling target
 function eventTotals(){
-  const segs=segments();
-  let kcal=0, choKcal=0, fatKcal=0;
-  segs.forEach(s=>{ const m=intMetricsByIdx(s.zi, s.grade);
-    kcal+=m.kcalHr*s.dur; choKcal+=m.choKcalHr*s.dur; fatKcal+=m.fatKcalHr*s.dur; });
+  const ct=S._ct, onCourse = S.activityMode==='course' && ct;
   const hrs=Math.max(0.001,+S.eventHours||0);
-  // physiological cost of working above CP/CS on a loaded course: anaerobic work is ~all glycolytic
-  // (charge as carbohydrate), plus a VO₂ slow-component surcharge over the time spent above the boundary.
-  let anaerKcal=0, slowKcal=0; const ct=S._ct;
-  if(ct){ const kg=S.bodyLbs/2.2;
-    anaerKcal = isRun() ? ct.anaerWork*(1.04/1000)*kg     // D′ metres × running energy cost (~1.04 kcal/kg/km)
-                        : ct.anaerWork/0.24/4184;          // W′ joules (mechanical) ÷ gross efficiency ÷ 4184
-    slowKcal  = VO2_SLOW_FRAC * (kcal/hrs) * (ct.supraSec/3600);
-    choKcal += anaerKcal + slowKcal; kcal += anaerKcal + slowKcal; }  // both draw on carbohydrate
+  let segs, kcal=0, choKcal=0, fatKcal=0, anaerKcal=0, slowKcal=0;
+  if(onCourse){
+    // COURSE mode: energy integrates straight off the single terrain-fine pass — CHO already includes the
+    // supra-threshold surcharge (anaerobic glycolysis + VO₂ slow component) accumulated grade-by-grade.
+    kcal=ct.kcal; choKcal=ct.choKcal; fatKcal=ct.fatKcal;
+    anaerKcal=ct.anaerKcal; slowKcal=ct.slowKcal;
+    segs = ct.blocks.map(b=>({idx:b.idx, dur:b.dur, zi:b.zi, grade:b.grade, iv:b.iv, scale:b.scale,
+      kcal:b.kcal, choKcal:b.choKcal, fatKcal:b.fatKcal}));
+  } else {
+    // MANUAL mode: sum the user's per-30-min zone plan (no terrain, no reserve surcharge).
+    segs=segments();
+    segs.forEach(s=>{ const m=intMetricsByIdx(s.zi, s.grade);
+      kcal+=m.kcalHr*s.dur; choKcal+=m.choKcalHr*s.dur; fatKcal+=m.fatKcalHr*s.dur; });
+  }
   const gly=glycogenKcal(), usableGly=gly*(1-S.reservePct/100);
   // carbohydrate that must be eaten so endogenous glycogen stays above the reserve to the finish
   const reqSuppKcal=Math.max(0, choKcal-usableGly);
@@ -1066,15 +1070,23 @@ function paceMult(strat, grade, frac){
 }
 const PACE_LABELS={ even:'Even (hold average)', climb5:'Climb +5% / ease descents', climb10:'Climb +10% / ease descents', neg:'Negative split', fade:'Fast start / fade' };
 // integrate the course at the selected workload → total time + per-30-min grade profile
+// snap a representative intensity (W cyc · m/min run) to the nearest training zone — for the 30-min block labels
+function nearestZoneForIv(iv){ const run=isRun(), zv=intensities().map(z=> run?(z.speed||0):(z.watts||0));
+  let best=0, bd=Infinity; zv.forEach((v,zi)=>{ const d=Math.abs(v-iv); if(d<bd){bd=d;best=zi;} }); return best; }
+// THE course engine (single source of truth). Walks the GPS profile grade-by-grade holding the athlete's
+// selected average, shaped by the pacing strategy (surge on climbs / ease on descents) and by any per-30-min
+// effort override (S.segScale). Integrates time, W′/D′ reserve dynamics, substrate split & glycogen depletion,
+// and bins energy into 30-min blocks. Everything downstream (duration, fuel plan, chart) derives from this.
 function courseTime(){
   const c=S.course; if(!c||!c.profile||c.profile.length<2) return null;
   const pr=c.profile, SEG=SEG_LEN*3600, totalD=pr[pr.length-1][0]||1;
-  const strat=S.pacingStrategy||'even';
-  const useStrat = !S.segBreakdown && strat!=='even';      // strategy drives pacing unless manual segments are on
+  const strat=S.pacingStrategy||'even', stratOn=strat!=='even';
   const baseIt=eventBaseIt();                              // adjusted average (selected zone × manual fine-tune)
-  // normalize a strategy so its time-weighted average intensity equals the selected average (redistribute, don't inflate)
+  const baseIv = isRun()?(baseIt.speed||0):(baseIt.watts||0);
+  const sc = b => (S.segScale && S.segScale[b]!=null) ? +S.segScale[b] : 1;   // this block's effort multiplier (1 = average)
+  // normalize the strategy SHAPE so its time-weighted average equals the selected average (redistribute, don't inflate)
   let scale=1;
-  if(useStrat){
+  if(stratOn){
     let sw=0, st=0;
     for(let i=1;i<pr.length;i++){ const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
       const grade=(pr[i][1]-pr[i-1][1])/dd, m=paceMult(strat,grade,pr[i-1][0]/totalD);
@@ -1090,16 +1102,13 @@ function courseTime(){
       : 546*Math.exp(-0.01*Math.max(0,CP-iv)) + 316;                // cycling: Skiba 2012 (DCP in watts)
   let T=0, D=0, nextBound=SEG; const segDist=[], segGr=[], segIv=[], bounds=[];
   let wbal=Wp, wMin=Wp, anaerWork=0, supraSec=0, capSec=0; // reserve state + anaerobic work done above the boundary
-  const kg=S.bodyLbs/2.2, gly0=glycogenKcal(); let cumCho=0; const series=[]; // depletion series: [distM, sec, W′%, glyc%, CHO%] at the predicted workload
+  const kg=S.bodyLbs/2.2, gly0=glycogenKcal(); let cumCho=0; const series=[]; // [distM, sec, W′%, glyc%, CHO%]
+  const blkKcal=[], blkCho=[], blkFat=[], blkDur=[]; let totKcal=0, totCho=0, totFat=0, totAnaer=0, totSlow=0; // energy binned per 30-min + totals
   for(let i=1;i<pr.length;i++){
     const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
     const grade=(pr[i][1]-pr[i-1][1])/dd;
-    let v, iv;                                             // iv = representative intensity (W cyc · flat-speed m/min run)
-    if(useStrat){ const m=paceMult(strat,grade,pr[i-1][0]/totalD)*scale; v=solveSpeedScaled(grade,m,baseIt);
-      iv=(isRun()?(baseIt.speed||0):(baseIt.watts||0))*m; }
-    else { let it2; if(S.segBreakdown){ const zi=S.segZones[Math.floor(T/SEG)]??S.eventZone; it2=intItem(zi); }
-      else { it2=baseIt; }                                 // even strategy holds the (adjusted) average
-      v=solveSpeedScaled(grade,1,it2); iv=isRun()?(it2.speed||0):(it2.watts||0); }
+    const m = (stratOn ? paceMult(strat,grade,pr[i-1][0]/totalD)*scale : 1) * sc(Math.floor(T/SEG)); // strategy shape × this block's effort
+    let v=solveSpeedScaled(grade,m,baseIt), iv=baseIv*m;   // iv = representative intensity (W cyc · flat-speed m/min run)
     if(v<=0) continue;
     let dt=dd/v;
     // ---- reserve dynamics: deplete above CP/CS (clamp the effort if it would run the reserve dry),
@@ -1125,29 +1134,35 @@ function courseTime(){
     const b=Math.floor((T+dt/2)/SEG);                      // bucket by the pair's midpoint time
     segDist[b]=(segDist[b]||0)+dd; segGr[b]=(segGr[b]||0)+dd*grade; segIv[b]=(segIv[b]||0)+iv*dd;
     T+=dt; D+=dd;
-    { // per-step energy → CHO/fat split + endogenous-glycogen depletion at the predicted workload
+    { // per-step energy → CHO/fat split, 30-min bins & endogenous-glycogen depletion at the predicted workload
       const hrStep=dt/3600;
       const em = isRun()? imetrics({speed:v*60}, grade*100) : imetrics({watts:iv}, 0);
       const anaerK = spent>0 ? (isRun()? spent*(1.04/1000)*kg : spent/0.24/4184) : 0;   // glycolytic work — charged to CHO
       const slowK  = supraStep ? VO2_SLOW_FRAC*em.kcalHr*hrStep : 0;                     // VO₂ slow-component surcharge
-      const stepKcal=em.kcalHr*hrStep+anaerK+slowK, stepCho=em.choKcalHr*hrStep+anaerK+slowK;
+      const stepKcal=em.kcalHr*hrStep+anaerK+slowK, stepCho=em.choKcalHr*hrStep+anaerK+slowK, stepFat=em.fatKcalHr*hrStep;
       cumCho+=stepCho; const glyRem=Math.max(0,gly0-cumCho);
+      totKcal+=stepKcal; totCho+=stepCho; totFat+=stepFat; totAnaer+=anaerK; totSlow+=slowK;
+      blkKcal[b]=(blkKcal[b]||0)+stepKcal; blkCho[b]=(blkCho[b]||0)+stepCho; blkFat[b]=(blkFat[b]||0)+stepFat; blkDur[b]=(blkDur[b]||0)+dt;
       series.push([D, T, Wp>0?Math.max(0,wbal)/Wp*100:100, gly0>0?glyRem/gly0*100:0, stepKcal>0?Math.min(100,stepCho/stepKcal*100):0]);
     }
   }
-  const nSeg=Math.max(1, Math.ceil(T/SEG)), grades=[], ivs=[];
-  for(let b=0;b<nSeg;b++){ const w=segDist[b]||0; grades.push(+(((w>0?segGr[b]/w:0))*100).toFixed(1)); ivs.push(w>0?segIv[b]/w:0); }
-  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds, distM:D, scale, strat:useStrat?strat:(S.segBreakdown?'manual':'even'),
+  const nSeg=Math.max(1, Math.ceil(T/SEG)), grades=[], ivs=[], blocks=[];
+  for(let b=0;b<nSeg;b++){ const w=segDist[b]||0, gr=+(((w>0?segGr[b]/w:0))*100).toFixed(1), iv=w>0?segIv[b]/w:0;
+    grades.push(gr); ivs.push(iv);
+    blocks.push({ idx:b, dur:(blkDur[b]||0)/3600, grade:gr, iv, zi:nearestZoneForIv(iv), scale:sc(b),
+      kcal:blkKcal[b]||0, choKcal:blkCho[b]||0, fatKcal:blkFat[b]||0 }); }
+  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds, distM:D, scale, strat,
     cpBound:CP, wpFull:Wp, wbalMin:wMin, wbalMinPct:Wp>0?Math.max(0,wMin)/Wp*100:100,
     anaerWork, supraSec, capSec, capped:capSec>0.5,       // reserve diagnostics (W′/D′ units; capSec/supraSec in s)
-    series, gly0 };                                       // per-step depletion series for the course chart
+    series, gly0, blocks, kcal:totKcal, choKcal:totCho, fatKcal:totFat, anaerKcal:totAnaer, slowKcal:totSlow };
 }
 // keep the EFFECTIVE activity duration (S.eventHours, used everywhere downstream) in sync with the
 // source of truth: the Performance-Predictor estimate while a course is loaded, else the user's
 // manual entry (S.manualHours). Called at the top of render() so every tab reflects it.
 function syncDuration(){
-  const t = (S.activityMode==='course' && S.course) ? courseTime() : null;   // only a course-source activity drives duration
-  S._ct = t;                                              // cache for eventTotals (fuel coupling) + the predictor readout
+  const onCourse = S.activityMode==='course' && S.course;
+  const t = onCourse ? courseTime() : null;               // single terrain-fine pass drives everything
+  S._ct = t; S._ctFine = t;                               // _ctFine kept as an alias for the chart/sustainability call sites
   S.eventHours = t ? +t.hours.toFixed(2) : (+S.manualHours||0);
 }
 // diverging colour for a segment's effort relative to the rider's average (cool=easier, warm=harder)
@@ -1189,7 +1204,8 @@ function courseSpark(c, t){
 // depletion chart under the course — W′/D′ reserve, endogenous glycogen, and CHO/fat energy share
 // along the course at the predicted per-segment workloads. Shares the elevation profile's x=distance
 // so it lines up beneath it. All four traces are 0–100% (see legend for what each % references).
-function courseEnergyChart(c, t){
+function courseEnergyChart(c, t, tc){
+  tc=tc||t;                                                     // t = fine pass (series/W′); tc = committed pass (divider alignment)
   const ser=t&&t.series; if(!ser||ser.length<2) return '';
   const run=isRun(), W=600, H=150, dmax=c.profile[c.profile.length-1][0]||1;
   const MAXP=200, k=Math.max(1,Math.ceil(ser.length/MAXP));      // thin the series so the DOM stays light
@@ -1200,7 +1216,7 @@ function courseEnergyChart(c, t){
   const grid=[0,50,100].map(v=>`<line x1="0" y1="${Y(v)}" x2="${W}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke" opacity="${v===50?0.45:0.3}"></line>`).join('');
   const rp=+S.reservePct||0;
   const resLine=rp>0?`<line x1="0" y1="${Y(rp)}" x2="${W}" y2="${Y(rp)}" stroke="#e0703a" stroke-width="1" stroke-dasharray="5 3" vector-effect="non-scaling-stroke" opacity="0.75"></line>`:'';
-  const bs=((t&&t.bounds)||[]).filter(d=>d>0&&d<dmax-1e-6);
+  const bs=((tc&&tc.bounds)||[]).filter(d=>d>0&&d<dmax-1e-6);
   const divs=bs.map(d=>`<line x1="${X(d)}" y1="0" x2="${X(d)}" y2="${H}" stroke="rgba(120,132,156,0.30)" stroke-width="1" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"></line>`).join('');
   const R=run?'D′':'W′', CW='#6c8cff', CG='var(--accent)', CC='#e0a13a', CF='#3fb2a4';
   const svg=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:150px;display:block;background:var(--panel2);border-radius:6px">
@@ -1274,14 +1290,20 @@ function courseBody(intOpts){
   const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
   const strat=S.pacingStrategy||'even';
   const wlLbl = strat==='even' ? wl : `${wl}, ${PACE_LABELS[strat].toLowerCase()}`;   // strategy redistributes the average
-  const segEditor = `<div class="sub-h" style="margin-top:12px">30-min segments <span class="muted" style="text-transform:none">(auto from the course — adjust any zone up/down)</span></div>
+  const anyScaled = (S.segScale||[]).some(x=>x!=null && x!==1);
+  const segEditor = `<div class="sub-h" style="margin-top:12px">30-min blocks <span class="muted" style="text-transform:none">(derived from your effort on the terrain — nudge any block harder / easier)</span></div>
     <div class="scroll" style="max-height:240px;margin-top:6px">
-      ${(eventTotals().segs).map((s,i)=>`<div class="field" style="gap:6px">
-        <span class="u" style="width:${run?78:96}px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
-        <select data-seg="z${i}" style="flex:1;min-width:0" onchange="window._setSegZone(${i}, this.value)">${intOpts(s.zi)}</select>
-        ${run?`<input type="number" data-seg="g${i}" step="0.5" value="${s.grade}" style="width:50px" onchange="window._setSegGrade(${i},this.value)" title="% grade"><span class="u" style="width:auto">%</span>`:''}
-      </div>`).join('')}
-    </div>`;
+      ${(eventTotals().segs).map((s,i)=>{ const z=intensities()[s.zi]||{}, scv=s.scale||1;
+        const wlb = run ? paceFmt(speedToPace(s.iv||0))+'/mi' : Math.round(s.iv||0)+' W';
+        return `<div class="field" style="gap:6px;align-items:center">
+        <span class="u" style="width:${run?70:84}px">${hm(i*SEG_LEN)}–${hm(i*SEG_LEN+s.dur)}</span>
+        <span style="flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b style="color:var(--accent2)">${z.label||''}</b> · ${wlb}${run?` · ${fmt(s.grade,1)}%`:''}</span>
+        <button class="sm ghost" style="padding:2px 9px" title="Ease this 30-min block" onclick="window._setSegScale(${i},-1)">–</button>
+        <span class="u" style="width:36px;text-align:center;${scv!==1?'color:var(--accent)':''}">${scv===1?'·':(scv>1?'+':'')+Math.round((scv-1)*100)+'%'}</span>
+        <button class="sm ghost" style="padding:2px 9px" title="Push this 30-min block" onclick="window._setSegScale(${i},1)">+</button>
+      </div>`; }).join('')}
+    </div>
+    ${anyScaled?`<div class="note" style="margin-top:4px"><a onclick="window._resetBlocks()" style="color:var(--accent2);cursor:pointer">↺ Reset all blocks to your average effort</a></div>`:''}`;
   // avg intensity = selected zone + a manual fine-tune input (watts cyc · pace run) right beside the dropdown
   const avgRow = `<div class="sub-h" style="margin-top:11px">Avg ${run?'pace':'intensity'} <span class="muted" style="text-transform:none;letter-spacing:0">(zone)</span></div>
     <div style="display:flex;gap:6px;align-items:center;max-width:340px">
@@ -1292,19 +1314,17 @@ function courseBody(intOpts){
     ${S.eventIntPct!=100?`<div class="note" style="margin-top:2px">Manually set to <b>${fmt(S.eventIntPct,0)}%</b> of the zone midpoint — <a onclick="window._setEventZone(${S.eventZone})" style="color:var(--accent2);cursor:pointer">reset to midpoint</a>.</div>`:''}`;
   const pacingRow = `<div class="field"><label style="flex:0 0 auto;margin-right:8px">Pacing strategy</label>
       <select onchange="window._setPacing(this.value)" style="flex:1;min-width:0">${Object.keys(PACE_LABELS).map(k=>`<option value="${k}"${strat===k?' selected':''}>${PACE_LABELS[k]}</option>`).join('')}</select></div>
-    <div class="row-actions" style="margin-top:8px;align-items:center">
-      <span class="muted" style="font-size:11px">Distributes your <b>${wl}</b> average across the course; each 30-min segment snaps to the nearest <b>zone</b>. <b>Re-apply</b> rebuilds them, then fine-tune any segment below. ${srcLink('how pacing works →')}</span>
-      <button class="sm" onclick="window._applyCourse()" style="margin-left:auto">Re-apply to 30-min plan →</button>
-    </div>`;
+    <div class="note" style="margin-top:6px">Holds your <b>${wl}</b> average and reshapes it across the terrain — the blocks, time, fuel &amp; depletion chart all update live. Nudge individual 30-min blocks below to fine-tune. ${srcLink('how pacing works →')}</div>`;
   const sustainBlock = (()=>{
       const cpLbl = run ? paceFmt(speedToPace(csSpeed()))+'/mi' : Math.round(cpWatts())+' W';
       const reserveKey = run ? 'dPrimeM' : 'wPrimeKJ';
       const reserveEff = run ? dPrimeMeters() : wPrimeKJeff();
       const overridden = run ? (S.dPrimeM!=null) : (S.wPrimeKJ!=null);
-      const minPct = t? t.wbalMinPct : 100, capped = t && t.capped;
+      const tf = S._ctFine||t;                             // judge the reserve on the terrain-surging pass — matches the chart
+      const minPct = tf? tf.wbalMinPct : 100, capped = tf && tf.capped;
       const R = run?'D′':'W′';
       const status = capped
-        ? `<span style="color:var(--bad)">⚠ unsustainable — clamped ${hm(t.capSec/3600)} of pacing down to your ${R} limit (time above is honest)</span>`
+        ? `<span style="color:var(--bad)">⚠ unsustainable — clamped ${hm(tf.capSec/3600)} of pacing down to your ${R} limit (time above is honest)</span>`
         : (minPct<15 ? `<span style="color:#b8860b">sustainable but tight — ${R} dips to ${fmt(minPct,0)}% of capacity</span>`
                      : `<span style="color:var(--good)">✓ sustainable — ${R} stays ≥ ${fmt(minPct,0)}% of capacity</span>`);
       return `<div class="sub-h" style="margin-top:12px">Sustainability — anaerobic reserve</div>
@@ -1350,7 +1370,7 @@ function courseBody(intOpts){
         <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(200,80,46);display:inline-block"></span>harder</span>
       </span>
     </div>
-    ${courseEnergyChart(c,t)}
+    ${courseEnergyChart(c, S._ctFine||t, t)}
     <div style="text-align:center;margin-top:14px;padding:16px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:8px">
       <div style="font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;font-size:12px;color:var(--accent2)">Est. moving time</div>
       <div style="font-family:var(--font-display);font-size:44px;font-weight:700;color:var(--accent);line-height:1.05;font-variant-numeric:tabular-nums;margin:4px 0 3px">${t?hm(t.hours):'—'}</div>
@@ -1365,7 +1385,7 @@ function courseBody(intOpts){
       <div class="res"><span>Mean altitude</span><span class="v">${fmt((c.elevMeanM||0)*3.28084,0)} ft · ${fmt(c.elevMeanM||0,0)} m</span></div>
     </div>
     ${segEditor}
-    <div class="note">${run?'Pace drifts with grade at a held effort':'Duration and its 30-min split come straight off the course at constant power'} — ${srcLink('how course time is modelled →')}</div>`
+    <div class="note">Time, energy, fuel &amp; the depletion chart all integrate ${run?'grade-by-grade at your held effort':'grade-by-grade from your effort'} — ${srcLink('how course time is modelled →')}</div>`
   };
 }
 
@@ -3130,13 +3150,13 @@ window._setWorkload=(i,v)=>{ S.workloads[i]=+v||0; render(); };
 window._addWorkload=()=>{ const last=S.workloads[S.workloads.length-1]; S.workloads.push((+last||75)+25); render(); };
 window._rmWorkload=(i)=>{ if(S.workloads.length<=1) return; S.workloads.splice(i,1); clampIntensityIdx(); render(); };
 /* --- caloric: event intensity + 30-min segments --- */
-window._setEventZone=(v)=>{ S.eventZone=+v; S.eventIntPct=100; render(); };  // a new zone resets the manual fine-tune to its midpoint
+window._setEventZone=(v)=>{ S.eventZone=+v; S.eventIntPct=100; render(); };  // a new zone resets the manual fine-tune to its midpoint (course engine reads it live)
 // manual fine-tune of the average intensity (watts cyc · pace run) — stored as % of the selected zone's midpoint
 window._setEventIntensity=(val)=>{
   const it=intItem(S.eventZone);
   if(isRun()){ const base=it.speed||0, sp=paceToSpeed(parsePace(val)); if(base>0&&sp>0) S.eventIntPct=+(sp/base*100).toFixed(1); }
   else { const base=it.watts||0, w=+val||0; if(base>0&&w>0) S.eventIntPct=+(w/base*100).toFixed(1); }
-  render();
+  render();   // course engine reads the new average live
 };
 window._setSegMode=(on)=>{
   if(S.segBreakdown===on) return;
@@ -3144,7 +3164,11 @@ window._setSegMode=(on)=>{
   if(on){ const n=segCount(); S.segZones=Array.from({length:n},(_,i)=> S.segZones[i]??S.eventZone); }
   render();
 };
-window._setSegZone=(i,v)=>{ S.segZones[i]=+v; render(); };
+window._setSegZone=(i,v)=>{ S.segZones[i]=+v; render(); };                          // MANUAL-mode per-block zone
+window._setSegScale=(i,dir)=>{ if(!S.segScale) S.segScale=[];                         // COURSE-mode per-block effort nudge (±5%, clamp 0.55–1.6)
+  const cur=(S.segScale[i]!=null)?+S.segScale[i]:1; let nv=Math.round((cur+dir*0.05)*100)/100;
+  S.segScale[i]=Math.max(0.55, Math.min(1.6, nv)); render(); };
+window._resetBlocks=()=>{ S.segScale=[]; render(); };                                 // drop all COURSE-mode effort overrides
 
 /* --- GPS course: load / apply / clear --- */
 let _courseLoading=false;                                  // shows a "Reading course…" state during a big parse
@@ -3159,10 +3183,10 @@ window._loadCourse=(e)=>{
   const rd=new FileReader();
   rd.onload=()=>{
     setTimeout(()=>{                                       // yield so the indicator paints before parsing
-      try{ const c = isFit ? parseTrackFIT(rd.result) : parseTrack(String(rd.result)); c.name=f.name; c.appliedAt=null; S.course=c;
+      try{ const c = isFit ? parseTrackFIT(rd.result) : parseTrack(String(rd.result)); c.name=f.name; S.course=c;
         S.activityMode='course';                           // a loaded course drives the Activity Information panel
         S.airRho=+isaDensity(c.elevMeanM).toFixed(3);      // pull air density from the course's mean altitude
-        applyCourseToPlan(); }                             // auto-fill the 30-min segment grade/intensity profile on load
+        initCourse(); }                                    // start at your average effort over the whole course
       catch(err){ alert('Could not read this file: '+err.message+'.\n\nExport a GPX, TCX, or FIT track from Strava, Garmin, Komoot, or Ride With GPS.'); }
       finally{ _courseLoading=false; if(inp) inp.value=''; render(); }
     }, 20);
@@ -3170,40 +3194,27 @@ window._loadCourse=(e)=>{
   rd.onerror=()=>{ _courseLoading=false; render(); alert('Could not read the file.'); };
   if(isFit) rd.readAsArrayBuffer(f); else rd.readAsText(f);
 };
-// push the course onto the 30-min plan: grades + per-segment ZONE (duration syncs separately via syncDuration).
-// the predictor stays zone-based — each segment's predicted effort snaps to the nearest zone (effort = that
-// zone's midpoint), so the rider can then nudge any segment up/down a zone. returns false if no course.
-function applyCourseToPlan(){
+// initialise a freshly-loaded course: keep the predictor zone-based and start with no per-block effort
+// overrides (the whole course held at your selected average). Everything else derives live via courseTime().
+function initCourse(){
   if(!S.course) return false;
-  const run=isRun();
   S.intensityMode='zone';            // keep the predictor zone-based (never spawn raw-watt/pace rows)
-  S.segBreakdown=false;              // recompute the profile from the pacing strategy, not stale segments
+  S.segScale=[];                     // no block-level effort overrides yet
   clampIntensityIdx();               // eventZone may have indexed a longer workload list before
-  const r=courseTime(); if(!r) return false;
-  S.eventHours=+r.hours.toFixed(2);
-  S.segGrades=r.segGrades.slice();
-  // snap each 30-min segment's predicted effort to the nearest zone (representative effort per zone)
-  const zoneIv=intensities().map(z=> run ? (z.speed||0) : (z.watts||0));
-  const nearestZone=iv=>{ let best=0,bd=Infinity; zoneIv.forEach((zv,zi)=>{const d=Math.abs(zv-iv); if(d<bd){bd=d;best=zi;}}); return best; };
-  S.segZones=r.segIv.map(nearestZone);
-  S.segBreakdown=true;
-  if(S.course) S.course.appliedAt=S.eventZone;
   return true;
 }
-// manual "Apply to 30-min plan" button — re-bakes the segments (e.g. after changing pacing strategy)
-window._applyCourse=()=>{ if(!applyCourseToPlan()){ alert('Upload a course first.'); return; } render(); };
-window._clearCourse=()=>{ S.course=null; render(); };
+window._clearCourse=()=>{ S.course=null; S.segScale=[]; render(); };
 // load a built-in reference course (deep-copied so the constant isn't mutated); air density from its altitude
 window._loadBuiltin=(key)=>{
   const src=key&&BUILTIN_COURSES[key]; if(!src) return;
-  const c=JSON.parse(JSON.stringify(src)); c.appliedAt=null;
+  const c=JSON.parse(JSON.stringify(src));
   S.course=c;
   S.activityMode='course';                            // a loaded course drives the Activity Information panel
   S.airRho=+isaDensity(c.elevMeanM||0).toFixed(3);
-  applyCourseToPlan();                                // auto-fill the 30-min segment grade/intensity profile on load
+  initCourse();                                       // start at your average effort over the whole course
   render();
 };
-window._setPacing=(v)=>{ S.pacingStrategy=v; render(); };
+window._setPacing=(v)=>{ S.pacingStrategy=v; render(); };   // course engine reshapes to the strategy live
 // Activity Information source toggle — Manual entry vs Upload course (the course supersedes manual entry)
 window._setActivityMode=(m)=>{
   if(S.activityMode===m) return;
