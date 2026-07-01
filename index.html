@@ -203,6 +203,21 @@
   .stat-pill .sp-l{font-size:11px;color:var(--muted);margin-top:3px}
   .bonk-item{display:flex;justify-content:space-between;align-items:center;padding:7px 11px;border-radius:6px;margin:4px 0;font-size:13px}
   .bonk-item .zn{font-weight:600} .bonk-item .bv{font-weight:600;font-family:var(--font-mono)}
+  /* Preferred-brands multi-select (fuel library) — native <details> popover */
+  .brandms{position:relative;display:inline-block}
+  .brandms>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+    background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 11px;font-size:13px;user-select:none}
+  .brandms>summary::-webkit-details-marker{display:none}
+  .brandms>summary::after{content:'▾';color:var(--muted);font-size:11px}
+  .brandms[open]>summary{border-color:var(--accent2)}
+  .brandms-pop{position:absolute;z-index:30;top:calc(100% + 4px);left:0;min-width:220px;max-width:320px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px;
+    box-shadow:0 8px 26px rgba(0,0,0,.28)}
+  .brandms-actions{display:flex;gap:6px;padding:2px 2px 8px;border-bottom:1px solid var(--line);margin-bottom:6px}
+  .brandms-list{max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:1px}
+  .brandms-item{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;font-size:13px;cursor:pointer}
+  .brandms-item:hover{background:var(--panel2)}
+  .brandms-item input{margin:0}
   /* Training-zone chips — muted categorical palette derived from brand hues
      (brine · slate · gold · clay · rose · plum), soft tints w/ readable ink */
   .z1{background:#e4eadd;color:#3e4b32}   /* brine green */
@@ -419,6 +434,7 @@ const S = {
   sweatNaMode:'preset',                        // 'preset' (acclimatization dropdown) | 'manual'
   bodyNaConc:140,                              // mmol/L (locked physiological constant)
   maltoDE:18,
+  preferredBrands:null,                        // Fuel Library "preferred brands" filter — null = all (incl. future), [] = none, [..] = explicit
   projHours:8,                                 // hour-by-hour table length (expandable)
   loadedProduct:null,                          // name of last-loaded product (cleared on manual edit)
   // bottle composition (grams per bottle)
@@ -632,6 +648,16 @@ let PRODUCTS = [
   ['Honey Stinger','Rapid Hydration Prepare','per stick (16 oz)','lyte',16,100,35,{glucose:3,sucrose:3,malto:0,fructose:2},100,'lbl',300,0,0],
   ['SiS','GO Hydro Tablet','per tablet (500 mL)','lyte',17,345,7,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',65,8,102],
   ['Amacx','Hydro Tabs','per tablet (500 mL)','lyte',17,205,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',70,56,9],
+  // --- Gas Station Finds: ready-to-drink convenience-store bottles/cans (totals from public labels; sugar sodas ≈ HFCS glucose:fructose, so they read hypertonic — accurate). Caffeine noted in the name only (not tracked). ---
+  ['Gas Station','Coca-Cola (12 oz, 34mg caf)','12 oz can','drink',12,45,140,{glucose:18,sucrose:0,malto:0,fructose:21},100,'lbl'],
+  ['Gas Station','Coca-Cola (20 oz, 57mg caf)','20 oz bottle','drink',20,75,240,{glucose:30,sucrose:0,malto:0,fructose:35},100,'lbl'],
+  ['Gas Station','Mountain Dew (20 oz, 91mg caf)','20 oz bottle','drink',20,105,290,{glucose:35,sucrose:0,malto:0,fructose:42},100,'lbl'],
+  ['Gas Station','Gatorade Thirst Quencher (20 oz)','20 oz bottle','drink',20,270,140,{glucose:20,sucrose:16,malto:0,fructose:0},100,'lbl'],
+  ['Gas Station','Powerade (20 oz)','20 oz bottle','drink',20,250,130,{glucose:20,sucrose:0,malto:0,fructose:15},100,'lbl'],
+  ['Gas Station','Red Bull (8.4 oz, 80mg caf)','8.4 oz can','drink',8.4,105,110,{glucose:13,sucrose:14,malto:0,fructose:0},100,'lbl'],
+  ['Gas Station','Monster Energy (16 oz, 160mg caf)','16 oz can','drink',16,370,210,{glucose:27,sucrose:27,malto:0,fructose:0},100,'lbl'],
+  ['Gas Station','Chocolate Milk (8 oz)','8 oz','drink',8,150,130,{glucose:11,sucrose:13,malto:0,fructose:0},100,'lbl'],
+  ['Gas Station','Orange Juice (12 oz)','12 oz','drink',12,5,165,{glucose:12,sucrose:15,malto:0,fructose:12},100,'lbl'],
 ].map(p=>({brand:p[0],product:p[1],unit:p[2],cat:p[3],name:p[0]+' '+p[1],oz:p[4],sodium:p[5],kcal:p[6],split:p[7],de:p[8],conf:p[9],potassium:p[10]||0,magnesium:p[11]||0,calcium:p[12]||0,
   // electrolyte form: 'mix' = powder/tablet/drink mixed into water (has a serving volume) · 'cap' = capsule/chew swallowed dry. Override with p[13].
   form:p[13]||((+p[4]||0)>0?'mix':'cap')}));
@@ -793,7 +819,7 @@ function imetrics(item, grade=0){
     frac = vThreshold()>0 ? v/vThreshold() : 0;
   } else {
     const w=item.watts||0;
-    vo2 = ((1.8*w*6/kg)+7)*kg/1000;             // ACSM cycling ergometry → L/min
+    vo2 = ((1.8*w*6.12/kg)+7)*kg/1000;          // ACSM cycling ergometry (6.12 kgm/min per W) → L/min
     frac = S.ftp>0 ? w/S.ftp : 0;
   }
   const rq=rqFromFrac(frac);
@@ -1588,7 +1614,7 @@ let FUEL_PRODUCTS = [
   ['SiS','GO Isotonic Gel','Each',                           87, 10, {glucose:0,  fructose:0,    sucrose:0,  malto:22  }, 15],
   ['GU','Energy Gel','Each',                                100, 60, {glucose:0,  fructose:7,    sucrose:0,  malto:15  }, 15],
   ['GU','Roctane Gel','Each',                               100,125, {glucose:0,  fructose:7,    sucrose:0,  malto:14  }, 15],
-  ['Neversecond','C30 Gel','Each',                          120,200, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
+  ['NeverSecond','C30 Gel','Each',                          120,200, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
   ['Styrkr','GEL30 Dual-Carb Gel','Each',                   128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
   ['Styrkr','GEL30 Caffeine Gel','Each',                    128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
   ['Styrkr','BAR50 Rice Energy Bar','Each',                 260,603, {glucose:0,  fructose:0,    sucrose:10, malto:40  }, 20],
@@ -1634,6 +1660,21 @@ let FUEL_PRODUCTS = [
   ['Whole Food','Boiled Potato (salted)','Medium',          130,250, {glucose:0,  fructose:0,    sucrose:1,  malto:29  }, 20],
   ['Whole Food','Pretzels','1 oz',                          110,350, {glucose:0,  fructose:0,    sucrose:1,  malto:22  }, 20],
   ['Whole Food','Orange (medium)','Each',                    62,  0, {glucose:6,  fructose:6,    sucrose:3,  malto:0   }, 100],
+  // --- Gas Station Finds: pre-packaged convenience-store snacks (totals from public labels; carb-source splits estimated). No overlap with Whole Food rows (pretzels already live there). ---
+  ['Gas Station','Snickers Bar','Each (52g)',               250,120, {glucose:5,  fructose:2,    sucrose:24, malto:2   }, 100],
+  ['Gas Station','Twix (2 bars)','Package',                 250,115, {glucose:4,  fructose:0,    sucrose:26, malto:4   }, 100],
+  ['Gas Station','Peanut M&M’s','1.74 oz bag',         250, 25, {glucose:2,  fructose:0,    sucrose:26, malto:2   }, 100],
+  ['Gas Station','Skittles','2.17 oz bag',                  250, 20, {glucose:8,  fructose:8,    sucrose:40, malto:0   }, 100],
+  ['Gas Station','Sour Patch Kids','2 oz bag',              200, 25, {glucose:12, fructose:10,   sucrose:25, malto:0   }, 100],
+  ['Gas Station','Pop-Tarts (2, frosted)','Package',        370,340, {glucose:12, fructose:12,   sucrose:20, malto:24  }, 20 ],
+  ['Gas Station','Rice Krispies Treat','Each',               90,105, {glucose:4,  fructose:0,    sucrose:8,  malto:5   }, 20 ],
+  ['Gas Station','Fig Newtons (2)','Package',               110,125, {glucose:4,  fructose:4,    sucrose:10, malto:4   }, 20 ],
+  ['Gas Station','Honey Bun','Each',                        330,240, {glucose:8,  fructose:7,    sucrose:15, malto:10  }, 20 ],
+  ['Gas Station','Welch’s Fruit Snacks','1 pouch',      80, 20, {glucose:7,  fructose:6,    sucrose:6,  malto:0   }, 100],
+  ['Gas Station','Salted Peanuts','1 oz',                   160,120, {glucose:1,  fructose:0,    sucrose:2,  malto:4   }, 20 ],
+  ['Gas Station','Potato Chips','1 oz',                     160,170, {glucose:1,  fructose:0,    sucrose:0,  malto:14  }, 20 ],
+  ['Gas Station','PayDay Bar','Each',                       240,120, {glucose:5,  fructose:0,    sucrose:18, malto:4   }, 20 ],
+  ['Gas Station','Beef Jerky','1 oz',                        80,500, {glucose:1,  fructose:0,    sucrose:4,  malto:0   }, 100],
 ].map((p,i)=>({id:'f'+i, brand:p[0], product:p[1], unit:p[2], kcal:p[3], sodium:p[4], split:{...p[5]}, de:p[6]}));
 // keep the food library alphabetical by manufacturer (ids are stored on each object, so reordering is lookup-safe)
 function sortFuel(){ FUEL_PRODUCTS.sort(byBrand); }
@@ -1642,7 +1683,7 @@ sortFuel();
 const FUEL_DEFAULTS = FUEL_PRODUCTS.map(p=>({...p, split:{...p.split}}));
 // Bump this when the factory food list changes (new items OR corrections to existing ones) so saved
 // profiles refresh their factory foods on next load while keeping any custom foods the user added.
-const FUEL_LIB_VERSION = 2;
+const FUEL_LIB_VERSION = 4;
 function fuelById(id){ return FUEL_PRODUCTS.find(p=>p.id===id); }
 function fuelCarbG(p){ const s=(p&&p.split)||{}; return (+s.glucose||0)+(+s.fructose||0)+(+s.sucrose||0)+(+s.malto||0); }
 function fuelLabel(p){ return p ? `${p.brand?p.brand+' ':''}${p.product||''}${p.unit?' ('+p.unit+')':''}`.trim() : ''; }
@@ -1687,7 +1728,24 @@ function loadDB(){
 let DB = loadDB();
 function saveDB(){ try{ localStorage.setItem(DB_KEY, JSON.stringify(DB)); }catch(e){} }
 let ADMIN = sessionStorage.getItem('hydra_admin')==='1';
-let libBrandFilter = '';   // Fuel Library brand filter (transient UI state)
+// Fuel Library "preferred brands" filter (persisted in S.preferredBrands).
+// null = all brands (default; auto-includes brands added later) · [] = none · [..] = explicit set.
+function libBrandList(){ const all=allProducts();
+  return [...new Set([...all.map(p=>p.brand), ...FUEL_PRODUCTS.map(p=>p.brand)].filter(Boolean))].sort((a,b)=>a.localeCompare(b)); }
+function isBrandPreferred(b){ const p=S.preferredBrands; return p==null || p.includes(b); }
+// blank-brand rows (freshly added, mid-edit) always pass so nothing vanishes while typing
+function brandPasses(p){ return !p.brand || isBrandPreferred(p.brand); }
+// "explicit set" = the athlete has narrowed to specific brands (not the null=all default, not []=cleared).
+// Pickers & Suggest only narrow when a set is explicit; null/[] leave them full so a dropdown is never empty.
+function brandActive(){ const p=S.preferredBrands; return Array.isArray(p) && p.length>0; }
+// product-picker filter: keep preferred brands (+ any blank-brand row + the CURRENTLY-SELECTED id, so a
+// pick is never silently dropped when its brand isn't preferred).
+function brandPickKeep(p, id, sel){ if(id===sel) return true; if(!brandActive()) return true;
+  return !p.brand || S.preferredBrands.includes(p.brand); }
+// Suggest candidate pool: narrow to preferred brands, but fall back to the full pool if that empties it
+// (e.g. a preferred brand makes gels but no electrolyte) so a starting point can always be built.
+function prefPool(arr){ if(!brandActive()) return arr;
+  const f=arr.filter(p=>!p.brand || S.preferredBrands.includes(p.brand)); return f.length?f:arr; }
 
 /* ------------------------------------------------------------
    ATHLETE PERSISTENCE  — remember the rider's last inputs across
@@ -1718,7 +1776,8 @@ function loadAthlete(){
     // keep a saved fuel list only if it's the new brand/split schema; legacy generic lists
     // are dropped so the curated defaults (with sodium + sugar splits) take over
     if(Array.isArray(raw.fuel) && raw.fuel.length && raw.fuel.every(p=>p && p.split!==undefined && p.product!==undefined)){
-      const isFactory = p => FUEL_DEFAULTS.some(d=>d.brand===p.brand && d.product===p.product);
+      const _norm=s=>(''+(s||'')).trim().toLowerCase();   // case/space-insensitive so a corrected brand spelling matches (no dup)
+      const isFactory = p => FUEL_DEFAULTS.some(d=>_norm(d.brand)===_norm(p.brand) && _norm(d.product)===_norm(p.product));
       if((+raw.fuelV||1) < FUEL_LIB_VERSION){
         // migration: refresh every factory food to the current library (picks up new items AND corrections),
         // while preserving any custom foods the user added themselves
@@ -2014,10 +2073,10 @@ function viewBasic(){
   const carbNeedEv=ev.targetRateG*hrs, fluidNeedEv=fluidOzHr*hrs, naNeedEv=naMgHr*hrs;
   const fuelOpts=(sel)=>{
     const opt=(id,label,carb,na,oz)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na${oz?` · ${fmt(oz,0)}oz`:''}</option>`;
-    const drinks=allProducts().filter(p=>p.cat==='drink').map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
-    const lyteMix=allProducts().filter(isElyteMix).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
-    const lyteCap=allProducts().filter(isElyteCap).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
-    const foods =FUEL_PRODUCTS.map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium,0)).join('');
+    const drinks=allProducts().filter(p=>p.cat==='drink'&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
+    const lyteMix=allProducts().filter(p=>isElyteMix(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
+    const lyteCap=allProducts().filter(p=>isElyteCap(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
+    const foods =FUEL_PRODUCTS.filter(p=>brandPickKeep(p,p.id,sel)).map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium,0)).join('');
     return `<optgroup label="Drinks">${drinks}</optgroup><optgroup label="Electrolyte mixes &amp; tablets">${lyteMix}</optgroup><optgroup label="Electrolyte capsules">${lyteCap}</optgroup><optgroup label="Foods &amp; gels">${foods}</optgroup>`;
   };
   const bar=(label,supplied,need,unit,kind)=>{
@@ -2652,16 +2711,16 @@ function viewEventPlan(){
   const ev=eventTotals(), rows=planHours();
   const fuelOpts=(sel)=>{
     const opt=(id,label,carb,na)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
-    const foods=FUEL_PRODUCTS.map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium)).join('');
-    const lyteMix=allProducts().filter(isElyteMix).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
-    const lyteCap=allProducts().filter(isElyteCap).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    const foods=FUEL_PRODUCTS.filter(p=>brandPickKeep(p,p.id,sel)).map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium)).join('');
+    const lyteMix=allProducts().filter(p=>isElyteMix(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    const lyteCap=allProducts().filter(p=>isElyteCap(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
     return `<optgroup label="Foods">${foods}</optgroup><optgroup label="Electrolyte mixes &amp; tablets">${lyteMix}</optgroup><optgroup label="Electrolyte capsules">${lyteCap}</optgroup>`;
   };
   // dropdown for a per-hour drink-mix supplement: every DB drink + electrolyte, per-serving carb & Na
   const mixOpts=(sel)=>{
     const opt=(id,label,carb,na)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
-    const drinks=allProducts().filter(p=>p.cat==='drink').map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
-    const lyteMix=allProducts().filter(isElyteMix).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    const drinks=allProducts().filter(p=>p.cat==='drink'&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    const lyteMix=allProducts().filter(p=>isElyteMix(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
     return `<option value=""${sel?'':' selected'}>— pick a product —</option><optgroup label="Carb drinks">${drinks}</optgroup><optgroup label="Electrolyte mixes">${lyteMix}</optgroup>`;
   };
   // event roll-ups
@@ -2771,11 +2830,12 @@ function viewEventPlan(){
 /* ---------- TAB: FUEL LIBRARY (drinks + electrolytes + foods) ---------- */
 function viewLibrary(){
   const all=allProducts(), pend=pendingCount();
-  // brand filter — unique brands across drinks/electrolytes/foods
-  const brands=[...new Set([...all.map(p=>p.brand), ...FUEL_PRODUCTS.map(p=>p.brand)].filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-  if(libBrandFilter && !brands.includes(libBrandFilter)) libBrandFilter='';
-  const bf=p=>!libBrandFilter || p.brand===libBrandFilter;
-  const drinks=all.filter(p=>p.cat!=='lyte' && bf(p)), lytes=all.filter(p=>p.cat==='lyte' && bf(p)), foods=FUEL_PRODUCTS.filter(bf);
+  // preferred-brands filter — unique brands across drinks/electrolytes/foods
+  const brands=libBrandList();
+  const bf=brandPasses;
+  const isGas=p=>p.brand==='Gas Station';
+  const drinks=all.filter(p=>p.cat!=='lyte' && !isGas(p) && bf(p)), lytes=all.filter(p=>p.cat==='lyte' && bf(p)), foods=FUEL_PRODUCTS.filter(p=>!isGas(p) && bf(p));
+  const gasDrinks=all.filter(p=>p.cat!=='lyte' && isGas(p) && bf(p)), gasFoods=FUEL_PRODUCTS.filter(p=>isGas(p) && bf(p));
   const esc=s=>(''+(s||'')).replace(/"/g,'&quot;');
   // one editable row for a drink/electrolyte product
   const dbRow=p=>{
@@ -2859,15 +2919,26 @@ function viewLibrary(){
   </div>
   <div class="note">Per-serving values are <span class="est">editable estimates</span> from public labels — verify against your products. Sodium feeds the Activity Plan and the Hydration Net Na⁺ balance. Canonical rows are editable in <b>Admin</b>; anyone can add a row (flagged <b>Pending</b> until approved). <b>Load</b> sends a drink/electrolyte into the bottle.</div>
 
+  ${(()=>{ const pb=S.preferredBrands;
+    const label = pb==null ? 'All brands' : (pb.length===0 ? 'None selected' : `${pb.filter(b=>brands.includes(b)).length} of ${brands.length}`);
+    return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 4px">
+    <span class="muted" style="font-size:11px">Preferred brands</span>
+    <details class="brandms">
+      <summary>${esc(label)}</summary>
+      <div class="brandms-pop">
+        <div class="brandms-actions">
+          <button class="sm ghost" onclick="window._prefBrandsAll()">Select all</button>
+          <button class="sm ghost" onclick="window._prefBrandsNone()">Select none</button>
+        </div>
+        <div class="brandms-list">
+          ${brands.map(b=>`<label class="brandms-item"><input type="checkbox" value="${esc(b)}"${isBrandPreferred(b)?' checked':''} onchange="window._toggleBrand(this.value,this.checked)"> ${esc(b)}</label>`).join('')}
+        </div>
+      </div>
+    </details>
+    <span class="muted" style="font-size:12px">· filters every table below · saved in this browser only</span>
+  </div>${pb&&pb.length===0?`<div class="note" style="margin:2px 0 8px">No preferred brands selected — nothing shown. Use <b>Select all</b> or pick brands above.</div>`:''}`; })()}
+
   <div class="sub-h" style="margin-top:14px">Drinks <span class="muted" style="text-transform:none">— carbohydrate mixes</span></div>
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0">
-    <span class="muted" style="font-size:11px">Brand</span>
-    <select onchange="window._setLibBrand(this.value)" style="width:auto">
-      <option value=""${libBrandFilter?'':' selected'}>All brands</option>
-      ${brands.map(b=>`<option value="${esc(b)}"${b===libBrandFilter?' selected':''}>${esc(b)}</option>`).join('')}
-    </select>
-    <span class="muted" style="font-size:12px">· Saved in this browser only</span>
-  </div>
   <div class="scroll" style="margin-top:6px"><table class="tc">${dbHead}<tbody>${drinks.map(dbRow).join('')}</tbody></table></div>
   <div class="row-actions"><button class="sm" onclick="window._addDrink('drink')">＋ Add drink</button></div>
 
@@ -2882,6 +2953,11 @@ function viewLibrary(){
   <div class="sub-h" style="margin-top:18px">Foods <span class="muted" style="text-transform:none">— gels / chews / bars / whole food</span></div>
   <div class="scroll" style="margin-top:6px"><table class="tc foods">${foodHead}<tbody>${foods.map(foodRow).join('')}</tbody></table></div>
   <div class="row-actions"><button class="ghost sm" onclick="window._addFuel()">＋ Add food</button></div>
+${(gasDrinks.length||gasFoods.length)?`
+  <div class="sub-h" style="margin-top:24px">⛽ Gas Station Finds <span class="muted" style="text-transform:none">— pre-packaged, grab-and-go convenience fuel; ready-to-drink bottles &amp; snacks</span></div>
+  <div class="note" style="margin-top:4px">Improvised fuel for when you're raiding a mini-mart mid-ride. Sugar sodas run very hypertonic (great quick hit, not a sole bottle); caffeine noted in a name isn't tracked. Values from public labels — verify your own. Excluded from <b>Suggest</b>; toggle the <b>Gas Station</b> brand off in Preferred brands to hide these everywhere.</div>
+  ${gasDrinks.length?`<div class="scroll" style="margin-top:8px"><table class="tc">${dbHead}<tbody>${gasDrinks.map(dbRow).join('')}</tbody></table></div>`:''}
+  ${gasFoods.length?`<div class="scroll" style="margin-top:10px"><table class="tc foods">${foodHead}<tbody>${gasFoods.map(foodRow).join('')}</tbody></table></div>`:''}`:''}
   </div>`;
 }
 
@@ -3287,6 +3363,8 @@ function elSig(el){
 // GoatCounter: count one "calculation run" event per visit — fired the first time the
 // user triggers a re-render after initial boot (avoids inflating on every keystroke)
 let _booted=false, _calcCounted=false;
+let _reopenBrandms=false;   // keep the preferred-brands popover open across a re-render (checkbox toggles)
+let basicPage='main';       // Basic-mode sub-page: 'main' (planner) | 'library' (Fuel Library)
 function trackCalcUse(){
   if(_calcCounted || !_booted) return;
   if(window.goatcounter && typeof goatcounter.count==='function'){
@@ -3310,8 +3388,9 @@ function render(){
   const themeBtn = `<button type="button" class="theme-toggle" onclick="window._toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">${document.documentElement.classList.contains('dark')?'☀ Light':'☾ Dark'}</button>`;
   const modeBtns = `<span class="modeswitch" role="group" aria-label="Detail level"><button type="button" class="modebtn ${S.uiMode==='basic'?'on':''}" onclick="window._setMode('basic')">Basic</button><button type="button" class="modebtn ${S.uiMode==='advanced'?'on':''}" onclick="window._setMode('advanced')">Advanced</button></span>`;
   if(S.uiMode==='basic'){
-    $('#tabs').innerHTML = modeBtns + themeBtn;
-    $('#app').innerHTML = viewBasic();
+    const basicNav = `<span class="modeswitch" role="group" aria-label="Basic section"><button type="button" class="modebtn ${basicPage==='library'?'':'on'}" onclick="window._basicPage('main')">Planner</button><button type="button" class="modebtn ${basicPage==='library'?'on':''}" onclick="window._basicPage('library')">Fuel Library</button></span>`;
+    $('#tabs').innerHTML = basicNav + modeBtns + themeBtn;
+    $('#app').innerHTML = basicPage==='library' ? viewLibrary() : viewBasic();
   } else {
     $('#tabs').innerHTML = TABS.map(t=>`<button type="button" class="tab ${t[0]===active?'active':''}" role="tab" aria-selected="${t[0]===active?'true':'false'}" tabindex="${t[0]===active?'0':'-1'}" data-tab="${t[0]}">${t[1]}</button>`).join('')
       + modeBtns + themeBtn;
@@ -3327,6 +3406,7 @@ function render(){
       if(caret!=null && el.type!=='number'){ try{ el.setSelectionRange(caret,caret); }catch(e){} }
     }
   }
+  if(_reopenBrandms){ _reopenBrandms=false; const d=$('#app').querySelector('.brandms'); if(d){ d.open=true; } }
   window.scrollTo(sx,sy);   // re-rendering #app can reset scroll to top — put the reader back where they were
 }
 // live-refresh ONLY the output panels (osmolality + projection) — leaves inputs untouched,
@@ -3444,7 +3524,12 @@ window._loadProd=(id)=>{
   S.loadedProduct = p.name;
   active='hydr'; render();   // S.bottleOz deliberately unchanged
 };
-window._setLibBrand=(v)=>{ libBrandFilter=v||''; render(); };
+window._basicPage=(p)=>{ basicPage=(p==='library'?'library':'main'); render(); };
+// preferred-brands filter: null = all (incl. future) · [] = none · [..] = explicit
+window._toggleBrand=(b,on)=>{ const set=new Set(S.preferredBrands==null?libBrandList():S.preferredBrands);
+  on?set.add(b):set.delete(b); S.preferredBrands=[...set]; _reopenBrandms=true; render(); };
+window._prefBrandsAll=()=>{ S.preferredBrands=null; _reopenBrandms=true; render(); };
+window._prefBrandsNone=()=>{ S.preferredBrands=[]; _reopenBrandms=true; render(); };
 window._adminToggle=()=>{
   if(ADMIN){ ADMIN=false; sessionStorage.removeItem('hydra_admin'); render(); return; }
   const p=prompt('Admin passphrase:');
@@ -3493,11 +3578,14 @@ window._rmBasicFuel=(id)=>{ S.basicFuel=S.basicFuel.filter(x=>x.id!==id); S.basi
 // sizes bottles/hr to cover fluid.
 function buildFuelOption(opt){
   const T=basicTargets(), carbT=T.carb, naT=T.naMg;
-  const drinks=allProducts().filter(p=>p.cat==='drink'&&productCarb(p)>0);
-  const lytes =allProducts().filter(p=>p.cat==='lyte'&&(+p.sodium||0)>0);
-  let gels=FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&fuelCarbG(p)>0&&/gel/i.test(p.product));
-  if(!gels.length) gels=FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&fuelCarbG(p)>0);
-  const foods =FUEL_PRODUCTS.filter(p=>p.brand==='Whole Food'&&fuelCarbG(p)>0);
+  // narrow each candidate pool to the athlete's preferred brands (prefPool falls back to the full
+  // pool if a preference would empty it, so a starting point can always be built)
+  // Gas Station Finds are excluded from auto-Suggest (they stay available in the manual pickers).
+  const drinks=prefPool(allProducts().filter(p=>p.cat==='drink'&&p.brand!=='Gas Station'&&productCarb(p)>0));
+  const lytes =prefPool(allProducts().filter(p=>p.cat==='lyte'&&(+p.sodium||0)>0));
+  let gels=prefPool(FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&p.brand!=='Gas Station'&&fuelCarbG(p)>0&&/gel/i.test(p.product)));
+  if(!gels.length) gels=prefPool(FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&p.brand!=='Gas Station'&&fuelCarbG(p)>0));
+  const foods =prefPool(FUEL_PRODUCTS.filter(p=>p.brand==='Whole Food'&&fuelCarbG(p)>0));
   const closest=(arr,fn,t)=>arr.slice().sort((a,b)=>Math.abs(fn(a)-t)-Math.abs(fn(b)-t))[0];
   // count (in `step` increments) that covers ≥90% of `need`, preferring slightly UNDER over over
   const fitQty=(need,per,step=1)=>{
