@@ -303,7 +303,7 @@
   <div>© 2026 Robert Pickels. Custom-built Hydration &amp; Osmolality Calculator. All rights reserved.</div>
   <div>Free for personal use. This calculator and its code may not be copied, redistributed, modified for redistribution, or used commercially without the owner's prior written permission.</div>
   <div><strong>Not medical advice.</strong> Provided for informational and educational use only. Hydration, sodium, and fueling needs vary by individual, and several inputs (notably product carbohydrate-source splits) are estimates. Consult a qualified medical or sports-nutrition professional before acting on these numbers. Use at your own risk.</div>
-  <div><strong>Privacy.</strong> This tool uses GoatCounter, a privacy-friendly, cookieless analytics service, to count usage. No cookies are set and no personal information is collected, sold, or shared.</div>
+  <div><strong>Privacy.</strong> This tool uses GoatCounter, a privacy-friendly, cookieless analytics service, to count usage. No cookies are set and no personal information is collected, sold, or shared. Your preferences, saved data, and disclaimer acknowledgment are stored only in your own browser (local storage) and never transmitted.</div>
 </footer>
 
 <!-- First-visit entry gate: disclaimer + work-in-progress notice. Shown until acknowledged (localStorage hydra_welcome_v1). -->
@@ -1090,6 +1090,7 @@ function courseTime(){
       : 546*Math.exp(-0.01*Math.max(0,CP-iv)) + 316;                // cycling: Skiba 2012 (DCP in watts)
   let T=0, D=0, nextBound=SEG; const segDist=[], segGr=[], segIv=[], bounds=[];
   let wbal=Wp, wMin=Wp, anaerWork=0, supraSec=0, capSec=0; // reserve state + anaerobic work done above the boundary
+  const kg=S.bodyLbs/2.2, gly0=glycogenKcal(); let cumCho=0; const series=[]; // depletion series: [distM, sec, W′%, glyc%, CHO%] at the predicted workload
   for(let i=1;i<pr.length;i++){
     const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
     const grade=(pr[i][1]-pr[i-1][1])/dd;
@@ -1104,14 +1105,16 @@ function courseTime(){
     // ---- reserve dynamics: deplete above CP/CS (clamp the effort if it would run the reserve dry),
     //      reconstitute below it. T_lim = W′/(P−CP); depletion is linear in (intensity − boundary). ----
     const unit = isRun()? dt/60 : dt;                     // reserve units consumed per step (m for D′ · W·s=J for W′)
+    let spent=0, supraStep=false;                         // anaerobic units drawn this step + whether it ran above the boundary
     if(iv>CP){
+      supraStep=true;
       const demand=(iv-CP)*unit;
       if(demand>wbal){                                    // not enough reserve → clamp this section to sustainable
         const ivCap=CP + Math.max(0,wbal)/Math.max(unit,1e-9);
         if(isRun()){ const mc=ivCap/(baseIt.speed||1); v=solveSpeedScaled(grade,mc,baseIt); }
         else        { v=cycSpeedMS(ivCap,grade); }
-        anaerWork+=Math.max(0,wbal); wbal=0; iv=ivCap; dt=dd/Math.max(v,1e-6); capSec+=dt;
-      } else { wbal-=demand; anaerWork+=demand; }
+        spent=Math.max(0,wbal); anaerWork+=spent; wbal=0; iv=ivCap; dt=dd/Math.max(v,1e-6); capSec+=dt;
+      } else { wbal-=demand; anaerWork+=demand; spent=demand; }
       supraSec+=dt;
     } else {
       const tau=tauOf(iv); wbal=Wp-(Wp-wbal)*Math.exp(-dt/Math.max(tau,1));
@@ -1122,12 +1125,22 @@ function courseTime(){
     const b=Math.floor((T+dt/2)/SEG);                      // bucket by the pair's midpoint time
     segDist[b]=(segDist[b]||0)+dd; segGr[b]=(segGr[b]||0)+dd*grade; segIv[b]=(segIv[b]||0)+iv*dd;
     T+=dt; D+=dd;
+    { // per-step energy → CHO/fat split + endogenous-glycogen depletion at the predicted workload
+      const hrStep=dt/3600;
+      const em = isRun()? imetrics({speed:v*60}, grade*100) : imetrics({watts:iv}, 0);
+      const anaerK = spent>0 ? (isRun()? spent*(1.04/1000)*kg : spent/0.24/4184) : 0;   // glycolytic work — charged to CHO
+      const slowK  = supraStep ? VO2_SLOW_FRAC*em.kcalHr*hrStep : 0;                     // VO₂ slow-component surcharge
+      const stepKcal=em.kcalHr*hrStep+anaerK+slowK, stepCho=em.choKcalHr*hrStep+anaerK+slowK;
+      cumCho+=stepCho; const glyRem=Math.max(0,gly0-cumCho);
+      series.push([D, T, Wp>0?Math.max(0,wbal)/Wp*100:100, gly0>0?glyRem/gly0*100:0, stepKcal>0?Math.min(100,stepCho/stepKcal*100):0]);
+    }
   }
   const nSeg=Math.max(1, Math.ceil(T/SEG)), grades=[], ivs=[];
   for(let b=0;b<nSeg;b++){ const w=segDist[b]||0; grades.push(+(((w>0?segGr[b]/w:0))*100).toFixed(1)); ivs.push(w>0?segIv[b]/w:0); }
   return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds, distM:D, scale, strat:useStrat?strat:(S.segBreakdown?'manual':'even'),
     cpBound:CP, wpFull:Wp, wbalMin:wMin, wbalMinPct:Wp>0?Math.max(0,wMin)/Wp*100:100,
-    anaerWork, supraSec, capSec, capped:capSec>0.5 };   // reserve diagnostics (W′/D′ units; capSec/supraSec in s)
+    anaerWork, supraSec, capSec, capped:capSec>0.5,       // reserve diagnostics (W′/D′ units; capSec/supraSec in s)
+    series, gly0 };                                       // per-step depletion series for the course chart
 }
 // keep the EFFECTIVE activity duration (S.eventHours, used everywhere downstream) in sync with the
 // source of truth: the Performance-Predictor estimate while a course is loaded, else the user's
@@ -1173,6 +1186,46 @@ function courseSpark(c, t){
     ${lines}
   </svg>`;
 }
+// depletion chart under the course — W′/D′ reserve, endogenous glycogen, and CHO/fat energy share
+// along the course at the predicted per-segment workloads. Shares the elevation profile's x=distance
+// so it lines up beneath it. All four traces are 0–100% (see legend for what each % references).
+function courseEnergyChart(c, t){
+  const ser=t&&t.series; if(!ser||ser.length<2) return '';
+  const run=isRun(), W=600, H=150, dmax=c.profile[c.profile.length-1][0]||1;
+  const MAXP=200, k=Math.max(1,Math.ceil(ser.length/MAXP));      // thin the series so the DOM stays light
+  const pts=[]; for(let i=0;i<ser.length;i+=k) pts.push(ser[i]);
+  const last=ser[ser.length-1]; if(pts[pts.length-1]!==last) pts.push(last);
+  const X=d=>(d/dmax*W).toFixed(1), Y=v=>(5+(100-Math.max(0,Math.min(100,v)))/100*(H-10)).toFixed(1);
+  const poly=(f,color,w)=>`<polyline points="${pts.map(p=>X(p[0])+','+Y(f(p))).join(' ')}" fill="none" stroke="${color}" stroke-width="${w}" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"></polyline>`;
+  const grid=[0,50,100].map(v=>`<line x1="0" y1="${Y(v)}" x2="${W}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke" opacity="${v===50?0.45:0.3}"></line>`).join('');
+  const rp=+S.reservePct||0;
+  const resLine=rp>0?`<line x1="0" y1="${Y(rp)}" x2="${W}" y2="${Y(rp)}" stroke="#e0703a" stroke-width="1" stroke-dasharray="5 3" vector-effect="non-scaling-stroke" opacity="0.75"></line>`:'';
+  const bs=((t&&t.bounds)||[]).filter(d=>d>0&&d<dmax-1e-6);
+  const divs=bs.map(d=>`<line x1="${X(d)}" y1="0" x2="${X(d)}" y2="${H}" stroke="rgba(120,132,156,0.30)" stroke-width="1" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"></line>`).join('');
+  const R=run?'D′':'W′', CW='#6c8cff', CG='var(--accent)', CC='#e0a13a', CF='#3fb2a4';
+  const svg=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:150px;display:block;background:var(--panel2);border-radius:6px">
+    ${grid}${resLine}${divs}
+    ${poly(p=>100-p[4],CF,1.3)}
+    ${poly(p=>p[4],CC,1.3)}
+    ${poly(p=>p[3],CG,2)}
+    ${poly(p=>p[2],CW,2)}
+  </svg>`;
+  const ev=eventTotals(), choShare=ev.kcal>0?ev.choKcal/ev.kcal*100:0, fatShare=Math.max(0,100-choShare);
+  const glyStart=t.gly0||glycogenKcal(), glyEndPct=last[3], glyEnd=Math.max(0,glyStart*glyEndPct/100), bonk=glyEndPct<=0.5;
+  const yLab=[100,50,0].map((v,i)=>`<span style="position:absolute;left:2px;top:${i*50}%;transform:translateY(${i===0?'0':i===2?'-100%':'-50%'});font-size:9px;color:var(--muted);font-family:var(--font-mono);background:var(--panel2);padding:0 1px;border-radius:2px">${v}</span>`).join('');
+  const chip=(color,txt,dash)=>`<span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><span style="width:16px;height:0;border-top:${dash?'2px dashed':'2.5px solid'} ${color};display:inline-block"></span>${txt}</span>`;
+  return `<div class="sub-h" style="margin-top:14px">Predicted depletion over the course <span class="muted" style="text-transform:none;letter-spacing:0">(at the workloads above · no exogenous carbs)</span></div>
+    <div style="position:relative;margin-top:6px">${svg}<div style="position:absolute;left:0;top:0;bottom:0;width:24px;pointer-events:none">${yLab}</div></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:7px;font-size:11px;color:var(--txt)">
+      ${chip(CW,`${R} reserve <span class="muted">→ low ${fmt(wMinPctSafe(t),0)}%</span>`)}
+      ${chip(CG,`Glycogen <span class="muted">${fmt(glyStart/4,0)}→${fmt(glyEnd/4,0)} g${bonk?' · <b style="color:var(--bad)">bonk</b>':''}</span>`)}
+      ${chip(CC,`CHO <span class="muted">${fmt(choShare,0)}% of energy</span>`)}
+      ${chip(CF,`Fat <span class="muted">${fmt(fatShare,0)}%</span>`)}
+      ${rp>0?chip('#e0703a',`<span class="muted">${rp}% reserve floor</span>`,true):''}
+    </div>
+    <div class="note" style="margin-top:4px">All four trace the <b>predicted per-segment workload</b> along the course (x = distance, aligned to the profile above). <b>${R}</b> and <b>glycogen</b> are <b>% remaining</b> — glycogen assumes <b>no fuel</b>, so add carbs on the Fueling Plan to hold it up; <b>CHO/Fat</b> are the instantaneous share of energy expenditure. ${srcLink('depletion &amp; substrate models →')}</div>`;
+}
+function wMinPctSafe(t){ return t&&t.wbalMinPct!=null? t.wbalMinPct : 100; }
 // preset menus for the cycling time model (label → value); manual entry stays available alongside
 const BIKE_PRESETS=[['Aero / race road — 16',16],['Road — 18',18],['Endurance / disc road — 20',20],['TT / tri — 21',21],['Gravel — 22',22],['MTB — 28',28]];
 const CDA_PRESETS =[['Upright / tops — 0.40',0.40],['Road hoods — 0.32',0.32],['Road drops — 0.28',0.28],['Aero / TT bars — 0.24',0.24],['Gravel — 0.38',0.38],['MTB — 0.48',0.48]];
@@ -1297,6 +1350,7 @@ function courseBody(intOpts){
         <span style="display:inline-flex;align-items:center;gap:3px"><span style="width:11px;height:11px;border-radius:2px;background:rgb(200,80,46);display:inline-block"></span>harder</span>
       </span>
     </div>
+    ${courseEnergyChart(c,t)}
     <div style="text-align:center;margin-top:14px;padding:16px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:8px">
       <div style="font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;font-size:12px;color:var(--accent2)">Est. moving time</div>
       <div style="font-family:var(--font-display);font-size:44px;font-weight:700;color:var(--accent);line-height:1.05;font-variant-numeric:tabular-nums;margin:4px 0 3px">${t?hm(t.hours):'—'}</div>
@@ -1904,6 +1958,13 @@ function viewRider(){
           <button class="sm ${S.gutAdapt==='highcarb'?'':'ghost'}" onclick="window._setGutAdapt('highcarb')">High-carb (150)</button>
         </div>
         <div class="note">Your trained carbohydrate-absorption ceiling — caps the fuel targets on the Caloric Needs &amp; Fueling Plan tabs.</div>
+        <div class="sub-h">Muscle glycogen state <span class="muted" style="text-transform:none">(readiness)</span></div>
+        <div class="modeseg">
+          <button class="sm ${S.glyState==='training'?'':'ghost'}" onclick="window._setGlyState('training')">Typical training</button>
+          <button class="sm ${S.glyState==='rested'?'':'ghost'}" onclick="window._setGlyState('rested')">Tapered &amp; rested</button>
+          <button class="sm ${S.glyState==='loaded'?'':'ghost'}" onclick="window._setGlyState('loaded')">Carb-loaded</button>
+        </div>
+        <div class="note">Muscle-glycogen concentration in engaged muscle: <b>Typical training ${GLY_CONC.training}</b> · <b>Tapered &amp; rested ${GLY_CONC.rested}</b> · <b>Carb-loaded ${GLY_CONC.loaded} g/kg</b> — drives predicted glycogen &amp; time-to-bonk on the Caloric Needs tab. ${srcLink('glycogen sizing &amp; sources →')}</div>
         <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>activity duration${run?' / grade':''}</b> in <b>Activity Information</b> below, and your <b>sweat rate</b> on the <b>In the Bottle</b> tab.</div>
         <div class="row-actions" style="margin-top:8px;align-items:center">
           <span class="muted" style="font-size:11px">✓ Inputs are saved in this browser and restored next visit.</span>
@@ -2296,12 +2357,7 @@ function viewCaloric(){
   <div class="panel">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <h2 style="margin:0">Predicted Glycogen & Time to Bonk</h2>
-      <div class="modeseg" style="margin-left:auto">
-        <span class="muted" style="font-size:11px;margin-right:2px">Muscle state</span>
-        <button class="sm ${S.glyState==='training'?'':'ghost'}" onclick="window._setGlyState('training')">Typical training</button>
-        <button class="sm ${S.glyState==='rested'?'':'ghost'}" onclick="window._setGlyState('rested')">Tapered &amp; rested</button>
-        <button class="sm ${S.glyState==='loaded'?'':'ghost'}" onclick="window._setGlyState('loaded')">Carb-loaded</button>
-      </div>
+      <span class="muted" style="margin-left:auto;font-size:12px">Muscle state: <b>${({training:'Typical training',rested:'Tapered & rested',loaded:'Carb-loaded'})[S.glyState]||S.glyState}</b> · <a onclick="active='rider';render()" style="color:var(--accent);cursor:pointer">edit on Athlete &amp; Activity →</a></span>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:24px;margin-top:6px">
       <div class="res" style="border:none"><span>Glycogen stored&nbsp;</span><span class="v">${fmt(glycogenKcal()/4,0)} g</span></div>
