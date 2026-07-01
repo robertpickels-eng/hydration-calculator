@@ -233,6 +233,8 @@
   td.st-y{background:#f1e8d2;color:#6f561f}
   td.st-o{background:#ecdfd2;color:#6a4d39}
   td.st-r{background:#f1ddda;color:#86413b}
+  /* bare (non-td) light-mode variants so carb-source tier chips render inline in legends (dark variants defined below) */
+  .st-g{background:#e4eadd;color:#3e4b32}.st-y{background:#f1e8d2;color:#6f561f}.st-o{background:#ecdfd2;color:#6a4d39}.st-r{background:#f1ddda;color:#86413b}
   button{background:var(--accent);color:var(--paper);border:1px solid var(--accent);border-radius:6px;
     padding:7px 13px;font-weight:600;cursor:pointer;font-size:13px;font-family:var(--font-body);
     transition:background .16s ease,transform .12s ease,box-shadow .16s ease}
@@ -658,6 +660,13 @@ let PRODUCTS = [
   ['Gas Station','Monster Energy (16 oz, 160mg caf)','16 oz can','drink',16,370,210,{glucose:27,sucrose:27,malto:0,fructose:0},100,'lbl'],
   ['Gas Station','Chocolate Milk (8 oz)','8 oz','drink',8,150,130,{glucose:11,sucrose:13,malto:0,fructose:0},100,'lbl'],
   ['Gas Station','Orange Juice (12 oz)','12 oz','drink',12,5,165,{glucose:12,sucrose:15,malto:0,fructose:12},100,'lbl'],
+  // --- Pure Sugars: single carb sources for a DIY bottle. oz=0 → loaded as EXACT grams (no volume scaling). Base split = 60 g; the Library "Pure Sugars" section rescales to the chosen 30/60/90/120 g. 4 kcal/g, 0 sodium. ---
+  ['Pure Sugar','Glucose (Dextrose)','add to bottle','drink',0,0,240,{glucose:60,sucrose:0,malto:0,fructose:0},100,'lbl'],
+  ['Pure Sugar','Fructose','add to bottle','drink',0,0,240,{glucose:0,sucrose:0,malto:0,fructose:60},100,'lbl'],
+  ['Pure Sugar','Sucrose (Table Sugar)','add to bottle','drink',0,0,240,{glucose:0,sucrose:60,malto:0,fructose:0},100,'lbl'],
+  ['Pure Sugar','Maltodextrin (DE 18)','add to bottle','drink',0,0,240,{glucose:0,sucrose:0,malto:60,fructose:0},18,'lbl'],
+  ['Pure Sugar','Honey','add to bottle','drink',0,0,240,{glucose:26.4,sucrose:2.4,malto:0,fructose:31.2},100,'lbl'],
+  ['Pure Sugar','Maple Syrup','add to bottle','drink',0,0,240,{glucose:1.5,sucrose:57,malto:0,fructose:1.5},100,'lbl'],
 ].map(p=>({brand:p[0],product:p[1],unit:p[2],cat:p[3],name:p[0]+' '+p[1],oz:p[4],sodium:p[5],kcal:p[6],split:p[7],de:p[8],conf:p[9],potassium:p[10]||0,magnesium:p[11]||0,calcium:p[12]||0,
   // electrolyte form: 'mix' = powder/tablet/drink mixed into water (has a serving volume) · 'cap' = capsule/chew swallowed dry. Override with p[13].
   form:p[13]||((+p[4]||0)>0?'mix':'cap')}));
@@ -1701,6 +1710,32 @@ function fuelGF(p){ const s=(p&&p.split)||{};
   if(glu+fru<=0) return '—'; if(fru<=0) return 'all glu'; if(glu<=0) return 'all fru';
   return (glu/fru).toFixed(1)+':1';
 }
+// conspicuous, leading G:F tag for product-picker option text (plain <option> can't be styled) — '' when the product carries no carb
+function gfTag(p){ const g=fuelGF(p);
+  if(g==='—') return '';
+  const inner = (g==='all glu') ? 'all glucose' : (g==='all fru') ? 'all fructose' : `G:F ${g}`;
+  return `‹ ${inner} › · `; }
+// Carb-source TIER by G:F ratio — mirrors carbSourceRec() (Caloric tab) so the Library bands and the
+// "Recommended Carb Source" use the SAME thresholds & colors. `max` = highest hourly carb the ratio suits.
+//   st-o (1:1, ~0.7:1–1.5:1)  → up to >90 g/hr — maximal glucose+fructose co-transport
+//   st-y (2:1, ~1.5:1–2.5:1)  → 60–90 g/hr
+//   st-g (glucose-dominant / all-glu, >2.5:1) → ≤60 g/hr — single transporter (SGLT1)
+//   st-r (fructose-dominant, <0.7:1) → a blend COMPONENT, not a standalone high-rate fuel
+function gfTier(p){ const s=(p&&p.split)||{};
+  const glu=(+s.glucose||0)+(+s.malto||0)+(+s.sucrose||0)/2, fru=(+s.fructose||0)+(+s.sucrose||0)/2;
+  if(glu+fru<=0) return null;                                                         // no carb
+  if(fru<=0)  return {cls:'st-g', max:60,   tip:'glucose-dominant → suits ≤60 g/hr'};  // all glucose
+  const r=glu/fru;
+  if(r>2.5)   return {cls:'st-g', max:60,   tip:'glucose-dominant → suits ≤60 g/hr'};
+  if(r>1.5)   return {cls:'st-y', max:90,   tip:'≈2:1 → suits 60–90 g/hr'};
+  if(r>=0.7)  return {cls:'st-o', max:9999, tip:'≈1:1 → suits >90 g/hr'};
+  return {cls:'st-r', max:60, tip:'fructose-dominant → a blend component, not a standalone high-rate fuel'};
+}
+// highest hourly carb a product's ratio is appropriate for — the Suggester never pushes a product ABOVE this
+// (but a higher-tier product may be used for a LOWER need). Non-carb items (electrolytes) are unconstrained.
+function carbSourceMax(p){ const t=gfTier(p); return t ? t.max : 9999; }
+function gfCellStyle(p){ const t=gfTier(p);
+  return t ? `class="${t.cls}" style="font-weight:700;text-align:center" title="${t.tip}"` : 'style="color:var(--muted)"'; }
 
 /* ============================================================
    ROLES & MODERATION  (browser-local; not server-enforced)
@@ -1746,6 +1781,13 @@ function brandPickKeep(p, id, sel){ if(id===sel) return true; if(!brandActive())
 // (e.g. a preferred brand makes gels but no electrolyte) so a starting point can always be built.
 function prefPool(arr){ if(!brandActive()) return arr;
   const f=arr.filter(p=>!p.brand || S.preferredBrands.includes(p.brand)); return f.length?f:arr; }
+// Pure Sugars (brand 'Pure Sugar') — single-carb DIY sources, loaded as exact grams; kept out of the main
+// Drinks table + Suggest, shown in their own Library section. Short "% source" label derived from the split.
+const PURE_SUGAR_BRAND = 'Pure Sugar';
+const SUGAR_AMOUNTS = [30, 60, 90, 120];
+function sugarSourceLabel(p){ const t=productCarb(p)||1;
+  return [['glucose',p.split.glucose],['fructose',p.split.fructose],['sucrose',p.split.sucrose],['maltodextrin',p.split.malto]]
+    .filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]).map(x=>`${Math.round(x[1]/t*100)}% ${x[0]}`).join(' · '); }
 
 /* ------------------------------------------------------------
    ATHLETE PERSISTENCE  — remember the rider's last inputs across
@@ -2072,11 +2114,11 @@ function viewBasic(){
   const perHrFluidOz=(+S.bottleOz||0)*(+S.bottlesPerHour||0);   // fluid comes from the bottle, not the mixed-in products
   const carbNeedEv=ev.targetRateG*hrs, fluidNeedEv=fluidOzHr*hrs, naNeedEv=naMgHr*hrs;
   const fuelOpts=(sel)=>{
-    const opt=(id,label,carb,na,oz)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na${oz?` · ${fmt(oz,0)}oz`:''}</option>`;
-    const drinks=allProducts().filter(p=>p.cat==='drink'&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
+    const opt=(id,label,carb,na,oz,gf='')=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${gf}${fmt(carb,0)}g · ${fmt(na,0)}mg Na${oz?` · ${fmt(oz,0)}oz`:''}</option>`;
+    const drinks=allProducts().filter(p=>p.cat==='drink'&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0,gfTag(p))).join('');
     const lyteMix=allProducts().filter(p=>isElyteMix(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
     const lyteCap=allProducts().filter(p=>isElyteCap(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,+p.oz||0)).join('');
-    const foods =FUEL_PRODUCTS.filter(p=>brandPickKeep(p,p.id,sel)).map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium,0)).join('');
+    const foods =FUEL_PRODUCTS.filter(p=>brandPickKeep(p,p.id,sel)).map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium,0,gfTag(p))).join('');
     return `<optgroup label="Drinks">${drinks}</optgroup><optgroup label="Electrolyte mixes &amp; tablets">${lyteMix}</optgroup><optgroup label="Electrolyte capsules">${lyteCap}</optgroup><optgroup label="Foods &amp; gels">${foods}</optgroup>`;
   };
   const bar=(label,supplied,need,unit,kind)=>{
@@ -2710,16 +2752,16 @@ function planSummaryFor(h,dur){
 function viewEventPlan(){
   const ev=eventTotals(), rows=planHours();
   const fuelOpts=(sel)=>{
-    const opt=(id,label,carb,na)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
-    const foods=FUEL_PRODUCTS.filter(p=>brandPickKeep(p,p.id,sel)).map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium)).join('');
+    const opt=(id,label,carb,na,gf='')=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${gf}${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
+    const foods=FUEL_PRODUCTS.filter(p=>brandPickKeep(p,p.id,sel)).map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium,gfTag(p))).join('');
     const lyteMix=allProducts().filter(p=>isElyteMix(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
     const lyteCap=allProducts().filter(p=>isElyteCap(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
     return `<optgroup label="Foods">${foods}</optgroup><optgroup label="Electrolyte mixes &amp; tablets">${lyteMix}</optgroup><optgroup label="Electrolyte capsules">${lyteCap}</optgroup>`;
   };
   // dropdown for a per-hour drink-mix supplement: every DB drink + electrolyte, per-serving carb & Na
   const mixOpts=(sel)=>{
-    const opt=(id,label,carb,na)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
-    const drinks=allProducts().filter(p=>p.cat==='drink'&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    const opt=(id,label,carb,na,gf='')=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${gf}${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
+    const drinks=allProducts().filter(p=>p.cat==='drink'&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium,gfTag(p))).join('');
     const lyteMix=allProducts().filter(p=>isElyteMix(p)&&brandPickKeep(p,p._id,sel)).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
     return `<option value=""${sel?'':' selected'}>— pick a product —</option><optgroup label="Carb drinks">${drinks}</optgroup><optgroup label="Electrolyte mixes">${lyteMix}</optgroup>`;
   };
@@ -2833,9 +2875,10 @@ function viewLibrary(){
   // preferred-brands filter — unique brands across drinks/electrolytes/foods
   const brands=libBrandList();
   const bf=brandPasses;
-  const isGas=p=>p.brand==='Gas Station';
-  const drinks=all.filter(p=>p.cat!=='lyte' && !isGas(p) && bf(p)), lytes=all.filter(p=>p.cat==='lyte' && bf(p)), foods=FUEL_PRODUCTS.filter(p=>!isGas(p) && bf(p));
+  const isGas=p=>p.brand==='Gas Station', isSugar=p=>p.brand===PURE_SUGAR_BRAND;
+  const drinks=all.filter(p=>p.cat!=='lyte' && !isGas(p) && !isSugar(p) && bf(p)), lytes=all.filter(p=>p.cat==='lyte' && bf(p)), foods=FUEL_PRODUCTS.filter(p=>!isGas(p) && bf(p));
   const gasDrinks=all.filter(p=>p.cat!=='lyte' && isGas(p) && bf(p)), gasFoods=FUEL_PRODUCTS.filter(p=>isGas(p) && bf(p));
+  const pureSugars=all.filter(p=>isSugar(p) && bf(p));
   const esc=s=>(''+(s||'')).replace(/"/g,'&quot;');
   // one editable row for a drink/electrolyte product
   const dbRow=p=>{
@@ -2867,10 +2910,11 @@ function viewLibrary(){
       <td>${num('split',p.split.malto,44,0.5,'malto')}</td>
       <td>${num('de',p.de,40,1)}</td>
       <td style="font-weight:700">${fmt(carb,0)}</td>
+      <td ${gfCellStyle(p)}>${fuelGF(p)}</td>
       <td style="color:var(--${t.cls});font-weight:700">${p.oz>0?fmt(osm,0):'—'}</td>
       <td style="text-align:left">${act}</td></tr>`;
   };
-  const dbHead=`<thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Serving <span class="muted" style="font-weight:400;text-transform:none">(mix / fluid)</span></th><th>Na (mg)</th><th>kcal</th><th>Glu</th><th>Fru</th><th>Suc</th><th>Malto</th><th>DE</th><th>Carb (g)</th><th>mOsm/L</th><th>Status / actions</th></tr></thead>`;
+  const dbHead=`<thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Serving <span class="muted" style="font-weight:400;text-transform:none">(mix / fluid)</span></th><th>Na (mg)</th><th>kcal</th><th>Glu</th><th>Fru</th><th>Suc</th><th>Malto</th><th>DE</th><th>Carb (g)</th><th>G:F</th><th>mOsm/L</th><th>Status / actions</th></tr></thead>`;
   // electrolytes: only Na drives the math; K/Mg/Ca are informative
   const lyteHead=`<thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Unit</th><th>Na (mg)</th><th>K (mg)</th><th>Mg (mg)</th><th>Ca (mg)</th><th>kcal</th><th>Status / actions</th></tr></thead>`;
   const lyteRow=p=>{
@@ -2905,7 +2949,7 @@ function viewLibrary(){
       <td><input type="number" step="0.5" value="${s.malto||0}" style="width:48px" onchange="window._setFuel('${p.id}','malto',this.value)"></td>
       <td><input type="number" step="1" value="${p.de}" style="width:44px" onchange="window._setFuel('${p.id}','de',this.value)"></td>
       <td style="font-weight:700">${fmt(fuelCarbG(p),0)}</td>
-      <td style="color:var(--accent2)">${fuelGF(p)}</td>
+      <td ${gfCellStyle(p)}>${fuelGF(p)}</td>
       <td><input type="number" step="5" value="${p.kcal}" style="width:58px" onchange="window._setFuel('${p.id}','kcal',this.value)"></td>
       <td><input type="number" step="5" value="${p.sodium}" style="width:58px" onchange="window._setFuel('${p.id}','sodium',this.value)"></td>
       <td><button class="sm ghost" onclick="window._rmFuel('${p.id}')" title="remove">×</button></td></tr>`;};
@@ -2918,6 +2962,7 @@ function viewLibrary(){
     ${pend?`<span class="pill" style="background:var(--warn);color:var(--paper)">${pend} pending review</span>`:''}
   </div>
   <div class="note">Per-serving values are <span class="est">editable estimates</span> from public labels — verify against your products. Sodium feeds the Activity Plan and the Hydration Net Na⁺ balance. Canonical rows are editable in <b>Admin</b>; anyone can add a row (flagged <b>Pending</b> until approved). <b>Load</b> sends a drink/electrolyte into the bottle.</div>
+  <div class="note" style="margin-top:6px"><b>G:F</b> = glucose : fructose ratio (maltodextrin counts as glucose; sucrose splits 50/50). Bands mirror the <b>Recommended Carb Source</b> on the Caloric tab — the hourly carb rate each ratio suits: <b class="st-o" style="padding:1px 6px;border-radius:4px">≈1:1 → &gt;90 g/hr</b> <b class="st-y" style="padding:1px 6px;border-radius:4px">≈2:1 → 60–90 g/hr</b> <b class="st-g" style="padding:1px 6px;border-radius:4px">glucose-dominant → ≤60 g/hr</b> <b class="st-r" style="padding:1px 6px;border-radius:4px">fructose-dominant → blend component</b>. A higher-tier product covers lower needs too (a 1:1 works at 50 g/hr); the Basic <b>Suggester</b> won't push a lower-tier product above its ceiling.</div>
 
   ${(()=>{ const pb=S.preferredBrands;
     const label = pb==null ? 'All brands' : (pb.length===0 ? 'None selected' : `${pb.filter(b=>brands.includes(b)).length} of ${brands.length}`);
@@ -2941,6 +2986,18 @@ function viewLibrary(){
   <div class="sub-h" style="margin-top:14px">Drinks <span class="muted" style="text-transform:none">— carbohydrate mixes</span></div>
   <div class="scroll" style="margin-top:6px"><table class="tc">${dbHead}<tbody>${drinks.map(dbRow).join('')}</tbody></table></div>
   <div class="row-actions"><button class="sm" onclick="window._addDrink('drink')">＋ Add drink</button></div>
+${pureSugars.length?`
+  <div class="sub-h" style="margin-top:18px">🧪 Pure Sugars <span class="muted" style="text-transform:none">— single carb sources; pick grams and load straight into your bottle</span></div>
+  <div class="note" style="margin-top:4px">Loads the <b>exact</b> carbohydrate into your <b>current bottle</b> (not scaled to volume) — set your bottle size on <b>In the Bottle</b> first; osmolality shows there once loaded. 4 kcal/g, no sodium. Excluded from <b>Suggest</b>; toggle the <b>Pure Sugar</b> brand off in Preferred brands to hide.</div>
+  <div class="scroll" style="margin-top:6px"><table class="tc">
+    <thead><tr><th style="text-align:left">Sugar</th><th style="text-align:left">Carb source</th><th>Load amount → bottle</th></tr></thead>
+    <tbody>${pureSugars.map(p=>`<tr>
+      <td style="text-align:left;font-weight:600">${esc(p.product)}</td>
+      <td style="text-align:left" class="muted">${sugarSourceLabel(p)}${p.split.malto>0?` · DE ${p.de}`:''}</td>
+      <td style="text-align:left"><select style="width:auto">${SUGAR_AMOUNTS.map(g=>`<option value="${g}"${g===60?' selected':''}>${g} g · ${g*4} kcal</option>`).join('')}</select>
+        <button class="sm" data-sid="${esc(p._id)}" onclick="window._loadSugarBtn(this)" style="margin-left:6px">Load ↦ bottle</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>`:''}
 
   <div class="sub-h" style="margin-top:18px">Electrolyte drinks, powders &amp; tablets <span class="muted" style="text-transform:none">— mixed into water; K / Mg / Ca for reference, only Na is used</span></div>
   <div class="scroll" style="margin-top:6px"><table class="tc">${lyteHead}<tbody>${lytes.filter(isElyteMix).map(lyteRow).join('')}</tbody></table></div>
@@ -3255,10 +3312,10 @@ function viewDebrief(){
 
   // ---- 30-min actual-fuel grid, diffed against the plan ----
   const fuelOpts=(sel)=>{
-    const opt=(id,label,carb,na)=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
-    const foods=FUEL_PRODUCTS.map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium)).join('');
+    const opt=(id,label,carb,na,gf='')=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${gf}${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
+    const foods=FUEL_PRODUCTS.map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium,gfTag(p))).join('');
     const lyteMix=allProducts().filter(isElyteMix).map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
-    const drinks=allProducts().filter(p=>p.cat==='drink').map(p=>opt(p._id,p.name,productCarb(p),p.sodium)).join('');
+    const drinks=allProducts().filter(p=>p.cat==='drink').map(p=>opt(p._id,p.name,productCarb(p),p.sodium,gfTag(p))).join('');
     return `<optgroup label="Foods">${foods}</optgroup><optgroup label="Carb drinks">${drinks}</optgroup><optgroup label="Electrolyte mixes &amp; tablets">${lyteMix}</optgroup>`;
   };
   const nBlk=segCount();
@@ -3513,7 +3570,8 @@ window._loadProd=(id)=>{
   if(!p) return;
   // Keep the user's bottle size; scale the product (a per-serving recipe) to fill it,
   // preserving the product's concentration -> same osmolality at any bottle size.
-  const f = (+S.bottleOz || p.oz) / p.oz;
+  // Products with no serving volume (oz=0, e.g. Pure Sugars) load their EXACT grams — no scaling (and no ÷0).
+  const f = p.oz>0 ? ((+S.bottleOz || p.oz) / p.oz) : 1;
   S.comp.glucose  = +(p.split.glucose  * f).toFixed(2);
   S.comp.sucrose  = +(p.split.sucrose  * f).toFixed(2);
   S.comp.malto    = +(p.split.malto    * f).toFixed(2);
@@ -3523,6 +3581,20 @@ window._loadProd=(id)=>{
   S.comp.nacl = +((p.sodium/1000/0.3934) * f).toFixed(2);
   S.loadedProduct = p.name;
   active='hydr'; render();   // S.bottleOz deliberately unchanged
+};
+// Pure Sugar → bottle: load an EXACT gram amount (the base split is per 60 g; scale to the chosen grams).
+// Button carries the product id in data-sid and reads its sibling <select> — avoids unsafe ids/quoting.
+window._loadSugarBtn=(btn)=>{ const sel=btn.parentNode.querySelector('select'); window._loadSugar(btn.dataset.sid, sel?+sel.value:60); };
+window._loadSugar=(id, g)=>{
+  const p=allProducts().find(x=>x._id===id); if(!p) return;
+  const f=(+g||0)/(productCarb(p)||1);   // base split sums to 60 g → f scales to the requested grams
+  S.comp.glucose  = +(p.split.glucose  * f).toFixed(2);
+  S.comp.sucrose  = +(p.split.sucrose  * f).toFixed(2);
+  S.comp.malto    = +(p.split.malto    * f).toFixed(2);
+  S.comp.fructose = +(p.split.fructose * f).toFixed(2);
+  S.maltoDE = p.de; S.comp.citrate = 0; S.comp.nacl = 0;   // pure sugar: no sodium
+  S.loadedProduct = `${p.name} · ${+g||0} g`;
+  active='hydr'; render();
 };
 window._basicPage=(p)=>{ basicPage=(p==='library'?'library':'main'); render(); };
 // preferred-brands filter: null = all (incl. future) · [] = none · [..] = explicit
@@ -3580,12 +3652,17 @@ function buildFuelOption(opt){
   const T=basicTargets(), carbT=T.carb, naT=T.naMg;
   // narrow each candidate pool to the athlete's preferred brands (prefPool falls back to the full
   // pool if a preference would empty it, so a starting point can always be built)
-  // Gas Station Finds are excluded from auto-Suggest (they stay available in the manual pickers).
-  const drinks=prefPool(allProducts().filter(p=>p.cat==='drink'&&p.brand!=='Gas Station'&&productCarb(p)>0));
+  // Gas Station Finds and Pure Sugars are excluded from auto-Suggest (they stay available in the manual pickers).
+  // capOK = never push a product ABOVE its carb-source tier ceiling (glucose ≤60, 2:1 ≤90, 1:1 >90) — but a
+  // higher-tier product MAY be used for a lower need. STRICT (no fallback): if nothing qualifies, that style
+  // simply can't supply carb via this vehicle and its coverage chip flags the shortfall — rather than
+  // recommend an under-ratio product for a high target.
+  const capOK = arr => arr.filter(p=>carbSourceMax(p) >= carbT-0.5);
+  const drinks=capOK(prefPool(allProducts().filter(p=>p.cat==='drink'&&p.brand!=='Gas Station'&&p.brand!==PURE_SUGAR_BRAND&&productCarb(p)>0)));
   const lytes =prefPool(allProducts().filter(p=>p.cat==='lyte'&&(+p.sodium||0)>0));
-  let gels=prefPool(FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&p.brand!=='Gas Station'&&fuelCarbG(p)>0&&/gel/i.test(p.product)));
-  if(!gels.length) gels=prefPool(FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&p.brand!=='Gas Station'&&fuelCarbG(p)>0));
-  const foods =prefPool(FUEL_PRODUCTS.filter(p=>p.brand==='Whole Food'&&fuelCarbG(p)>0));
+  let gels=capOK(prefPool(FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&p.brand!=='Gas Station'&&fuelCarbG(p)>0&&/gel/i.test(p.product))));
+  if(!gels.length) gels=capOK(prefPool(FUEL_PRODUCTS.filter(p=>p.brand!=='Whole Food'&&p.brand!=='Gas Station'&&fuelCarbG(p)>0)));
+  const foods =capOK(prefPool(FUEL_PRODUCTS.filter(p=>p.brand==='Whole Food'&&fuelCarbG(p)>0)));
   const closest=(arr,fn,t)=>arr.slice().sort((a,b)=>Math.abs(fn(a)-t)-Math.abs(fn(b)-t))[0];
   // count (in `step` increments) that covers ≥90% of `need`, preferring slightly UNDER over over
   const fitQty=(need,per,step=1)=>{
