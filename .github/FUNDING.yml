@@ -1,0 +1,8 @@
+# GitHub-native funding config — adds a "Sponsor" button to the repository.
+# Dual-homed donation funnels:
+#   github → developer / technical sponsorship
+#            (the Sponsor button appears once GitHub approves the pending
+#             Sponsors enrollment for this account)
+#   ko_fi  → casual athlete tipping (live now)
+github: [robertpickels-eng]
+ko_fi: extrapickels
