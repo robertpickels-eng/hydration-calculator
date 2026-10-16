@@ -397,11 +397,15 @@ function extrasOsmoles(){
   let m=0;
   (S.extraCarbs||[]).forEach(x=>{ const it=CARB_LIB.find(c=>c.key===x.key); if(it) m += (+x.grams||0)/carbLibMW(it)*it.p; });
   (S.extraLytes||[]).forEach(x=>{ const pr=extraLyteProd(x);
-    if(pr){ m += osmolFromSodium((+pr.sodium||0)*(+x.grams||0)); return; }
+    if(pr){ const q=+x.grams||0, sp=pr.split||{};
+      m += osmolFromSodium((+pr.sodium||0)*q)
+         + osmolesOf({glucose:(sp.glucose||0)*q, fructose:(sp.fructose||0)*q, sucrose:(sp.sucrose||0)*q, malto:(sp.malto||0)*q}, pr.de||18);
+      return; }
     const it=ELYTE_LIB.find(c=>c.key===x.key); if(it) m += (+x.grams||0)/it.mw*it.p; });
   return m;
 }
-function extrasCarbG(){ return (S.extraCarbs||[]).reduce((s,x)=>s+(+x.grams||0),0); }
+function extrasCarbG(){ return (S.extraCarbs||[]).reduce((s,x)=>s+(+x.grams||0),0)
+  + (S.extraLytes||[]).reduce((s,x)=>{ const pr=extraLyteProd(x); return s+(pr?productCarb(pr)*(+x.grams||0):0); },0); }
 function extrasNaMg(){ return (S.extraLytes||[]).reduce((s,x)=>{ const pr=extraLyteProd(x);
   if(pr) return s+(+pr.sodium||0)*(+x.grams||0);
   const it=ELYTE_LIB.find(c=>c.key===x.key); return s+(it?(+x.grams||0)*it.naFrac*1000:0); },0); }
@@ -426,7 +430,7 @@ const CF = {
 const cfColors = c => document.documentElement.classList.contains('dark') ? {bg:c.dbg,fg:c.dfg} : {bg:c.bg,fg:c.fg};
 const cfStyle = c => { if(!c) return ''; const k=cfColors(c); return `style="background:${k.bg};color:${k.fg};font-weight:700;border-radius:4px"`; };
 // Body Na+ (mM): green 135–146, amber <135, red >146   (sheet column P)
-function naCF(mM){ return cfStyle(mM<135?CF.amber : mM>146?CF.red : CF.green); }
+function naCF(mM){ if(!isFinite(mM)) return ''; return cfStyle(mM<135?CF.amber : mM>146?CF.red : CF.green); }
 // Body weight: green within [start*(1-loss%), start], red below floor   (sheet column K)
 function wtCF(wt){
   const top=S.bodyLbs, floor=S.bodyLbs*(1-S.acceptLoss/100);
@@ -547,7 +551,7 @@ const WEEKLY_HOURS = [
 ];
 function sweatRateLhr(){
   if((S.sweatMethod||'prepost')==='prepost')
-    return ((S.pre - S.post)/S.time)/2.2*0.95;  // (lbs->kg, *0.95 CHO-burn correction) L/hr
+    return (+S.time>0) ? Math.max(0, ((S.pre - S.post)/S.time)/2.2*0.95) : 0;  // (lbs->kg, *0.95 CHO-burn correction) L/hr
   return (S.manualSweat!=null && S.manualSweat!=='') ? +S.manualSweat : 0; // estimate / manual
 }
 function bodyKg(){ return S.bodyLbs/2.2; }
@@ -562,15 +566,17 @@ function bodyNaContentMmol(){ return S.bodyNaConc*totalECF(); }
 function hourMix(h){ return (h!=null && S.planDrink && S.planDrink[h]!==undefined) ? S.planDrink[h] : null; }
 function mixCompList(list){
   const c={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};
-  let naMg=0;
+  let naMg=0, deW=0;
   (list||[]).forEach(e=>{
     const p=allProducts().find(x=>x._id===e.prodId), q=+e.qty||0;
     if(!p||q<=0) return;
     c.glucose+=(p.split.glucose||0)*q; c.sucrose+=(p.split.sucrose||0)*q;
     c.malto  +=(p.split.malto  ||0)*q; c.fructose+=(p.split.fructose||0)*q;
+    deW += (p.split.malto||0)*q*(p.de||18);
     naMg += (p.sodium||0)*q;
   });
   c.nacl = (naMg/1000)/(NA_MW/MW.nacl);   // mg Na → g NaCl-equivalent
+  c.de = c.malto>0 ? deW/c.malto : 18;    // malto-weighted DE → exact malto moles for this mix
   return c;
 }
 // effective per-bottle composition for hour h (null/undefined h → the global bottle)
@@ -706,6 +712,15 @@ function productOsm(p){
    ============================================================ */
 const GUT_LEVELS = { unadapted:90, adapted:120, highcarb:150 };   // g/hr carb-absorption ceiling by gut-training level
 function carbCap(){ return GUT_LEVELS[S.gutAdapt] || 120; }        // gut-absorption ceiling for the selected level
+// guideline minimum carb intake (g/hr) by event duration — low end of Jeukendrup 2014 / ACSM-AND-DC 2016:
+// <1 h none needed · 1–2.5 h 30 g/hr (range 30–60) · >2.5 h 60 g/hr (range 60–90+). Always ≤ every gut ceiling.
+function carbFloorG(hrs){ return hrs<1 ? 0 : hrs<=2.5 ? 30 : 60; }
+// short explanation of what set the carb target (shown next to it)
+function targetBasisNote(ev){
+  return ev.targetBasis==='guideline'
+    ? `guideline minimum for ${fmt(+S.eventHours||0,1)} hr — your ${S.reservePct}% reserve alone needs ~${fmt(ev.reserveRateG,0)} g/hr`
+    : `keep ${S.reservePct}% reserve`;
+}
 function gutAdaptLabel(){ return {unadapted:'unadapted',adapted:'adapted',highcarb:'high-carb-adapted'}[S.gutAdapt] || ''; }
 // Specific carb-source recommendation for a given hourly carb target. One transporter (SGLT1) clears
 // ~60 g/hr of glucose; above that you add fructose (GLUT5) so a glucose:fructose blend keeps absorbing.
@@ -830,10 +845,11 @@ function fitFrac(){
 // intensity where oxidation goes all-CHO. Untrained burn little fat across all zones & saturate early.
 function rqFromFrac(frac){
   const f=fitFrac();
-  const rq0=0.78-0.18*f;       // resting RQ: rec 0.78 (little fat) → elite 0.60 (lots of fat)
-  const fracMax=0.85+0.20*f;   // all-CHO point: rec 85% → elite 105% of threshold
+  const rq0=0.80-0.08*f;       // resting RQ: rec 0.80 → elite 0.72 (stays above the 0.70 all-fat floor)
+  const fracMax=1.00+0.10*f;   // all-CHO point: rec 100% → elite 110% of threshold
   if(frac>=fracMax) return 1.0;
-  return rq0+(1-rq0)*(frac/fracMax);
+  // quadratic: RER stays low through Zone 2 (~0.88–0.90 at 60–70% threshold) and bends up toward threshold
+  return rq0+(1-rq0)*Math.pow(Math.max(0,frac)/fracMax,2);
 }
 // metrics for an intensity item: {watts} (cycling) or {speed m/min} (running), at % grade (running only)
 function imetrics(item, grade=0){
@@ -920,12 +936,17 @@ function eventTotals(){
   const gly=glycogenKcal(), usableGly=gly*(1-S.reservePct/100);
   // carbohydrate that must be eaten so endogenous glycogen stays above the reserve to the finish
   const reqSuppKcal=Math.max(0, choKcal-usableGly);
-  const targetRateGRaw=(reqSuppKcal/4)/hrs;             // steady g/hr to FULLY hold the reserve (uncapped)
+  const reserveRateG=(reqSuppKcal/4)/hrs;               // steady g/hr to FULLY hold the reserve (uncapped)
+  // performance floor: intake guidelines apply even when glycogen alone wouldn't run short (blood glucose,
+  // liver glycogen, central effects) — low end of Jeukendrup 2014 / ACSM 2016: 30 g/hr for 1–2.5 h, 60 beyond
+  const floorRateG=carbFloorG(hrs);
+  const targetRateGRaw=Math.max(reserveRateG, floorRateG);
+  const targetBasis=floorRateG>reserveRateG ? 'guideline' : 'reserve';
   const cap=carbCap();                                  // gut-absorption ceiling for the selected level
   const targetRateG=Math.min(targetRateGRaw, cap);      // plan target — capped at what the gut can absorb
   return { segs, kcal, choKcal, fatKcal, choG:choKcal/4,
     gly, usableGly, reqSuppKcal, reqSuppG:reqSuppKcal/4,
-    targetRateGRaw, targetRateGCap:cap,
+    targetRateGRaw, targetRateGCap:cap, reserveRateG, floorRateG, targetBasis,
     targetRateG, targetRateKcal:targetRateG*4,
     overGut: targetRateGRaw>cap,                         // true requirement exceeds the gut ceiling
     anaerKcal, slowKcal, supraKcal:anaerKcal+slowKcal,   // physiological supra-threshold surcharge (kcal)
@@ -1087,7 +1108,7 @@ function buildProfile(pts){
   for(let i=1;i<pts.length;i++){ cum+=haversine(pts[i-1].lat,pts[i-1].lon,pts[i].lat,pts[i].lon); raw.push({d:cum,ele:pts[i].ele}); }
   if(!(cum>0)) throw new Error('track has no distance');
   // carry-forward any missing elevations
-  let last=0; raw.forEach(r=>{ if(r.ele==null) r.ele=last; else last=r.ele; });
+  let last=(raw.find(r=>r.ele!=null)||{ele:0}).ele; raw.forEach(r=>{ if(r.ele==null) r.ele=last; else last=r.ele; });
   // resample to even spacing → compact storage + clean grade math (cap ~1500 samples)
   const spacing=Math.max(20, cum/1500), prof=[];
   let j=0;
@@ -1097,6 +1118,7 @@ function buildProfile(pts){
     const t=(b.d>a.d)?(di-a.d)/(b.d-a.d):0;
     prof.push([+di.toFixed(1), +(a.ele+(b.ele-a.ele)*t).toFixed(1)]);
   }
+  if(cum-prof[prof.length-1][0] > 0.5) prof.push([+cum.toFixed(1), +raw[raw.length-1].ele.toFixed(1)]);  // close out the final partial step
   // smooth elevation (±2-sample moving average) to kill GPS noise before computing grade
   const sm=prof.map((p,i)=>{ let s=0,n=0; for(let k=-2;k<=2;k++){ const q=prof[i+k]; if(q){ s+=q[1]; n++; } } return [p[0], +(s/n).toFixed(1)]; });
   let gain=0,loss=0,maxG=0;
@@ -1139,7 +1161,7 @@ function buildPerf(pts){
   const d0=raw[0].d; raw.forEach(r=>r.d-=d0);
   const distM=raw[raw.length-1].d; if(!(distM>0)) throw new Error('track has no distance');
   // carry-forward missing elevation (as buildProfile does) so grade math stays clean
-  let le=0; raw.forEach(r=>{ if(r.ele==null) r.ele=le; else le=r.ele; });
+  let le=(raw.find(r=>r.ele!=null)||{ele:0}).ele; raw.forEach(r=>{ if(r.ele==null) r.ele=le; else le=r.ele; });
   // resample onto an even-distance grid (≤300 nodes → light DOM + small localStorage footprint)
   const spacing=Math.max(20, distM/300), grid=[]; let j=0;
   for(let di=0; di<=distM+1e-6; di+=spacing){
@@ -1157,19 +1179,28 @@ function buildPerf(pts){
   for(let i=1;i<grid.length;i++){ if(grid[i].spd==null && grid[i].t!=null && grid[i-1].t!=null){
     const dt=grid[i].t-grid[i-1].t; if(dt>0) grid[i].spd=(grid[i].d-grid[i-1].d)/dt; } }
   const hasTime=grid.some(g=>g.t!=null), hasPower=grid.some(g=>g.pw>0), hasHr=grid.some(g=>g.hr>0);
-  // rollups: time-weighted power/hr, normalized power (4th-power mean), moving vs elapsed, elevation gain
-  let elapsed=hasTime? grid[grid.length-1].t : null, moving=0, pwDt=0, hrDt=0, pw4=0, sumDt=0;
-  for(let i=1;i<grid.length;i++){ const dt=(grid[i].t!=null&&grid[i-1].t!=null)? grid[i].t-grid[i-1].t : 0;
-    if(dt<=0) continue; sumDt+=dt;
-    const dd=grid[i].d-grid[i-1].d, spd=grid[i].spd!=null?grid[i].spd:(dt>0?dd/dt:0);
-    if(spd>0.5 || (grid[i].pw>0)) moving+=dt;                               // "moving" = rolling or producing power
-    const pw=grid[i].pw||0; pwDt+=pw*dt; pw4+=Math.pow(pw,4)*dt;
-    if(grid[i].hr>0) hrDt+=grid[i].hr*dt; }
+  // rollups on the RAW time series (the distance grid folds stops into one step): time-weighted power/hr over
+  // elapsed time (zeros count), Coggan NP = 4th-power mean of the 30-s rolling average of 1-s power, moving time.
+  // A record gap > 10 s with little distance covered = paused/stopped: 0 W, not moving.
+  const tr=raw.filter(r=>r.t!=null);
+  let elapsed=tr.length>1? tr[tr.length-1].t-tr[0].t : (hasTime?grid[grid.length-1].t:null);
+  let moving=0, pwDt=0, hrDt=0, hrT=0, sumDt=0; const sec=[];
+  for(let i=1;i<tr.length;i++){ const dt=tr[i].t-tr[i-1].t; if(!(dt>0)) continue;
+    const dd=tr[i].d-tr[i-1].d, spd=tr[i].spd!=null?tr[i].spd:dd/dt, stopped=dt>10 && dd/dt<0.5;
+    const pw=stopped?0:(tr[i].pw||0); sumDt+=dt; pwDt+=pw*dt;
+    if(!stopped && (spd>0.5 || pw>0)) moving+=dt;                             // "moving" = rolling or producing power
+    if(!stopped && tr[i].hr>0){ hrDt+=tr[i].hr*dt; hrT+=dt; }
+    if(sec.length<345600){ const n=Math.max(1,Math.round(dt)); for(let k=0;k<n;k++) sec.push(pw); } }   // 1-s power (cap 4 days)
+  let np=null;
+  if(sumDt>0 && sec.length){ const W=30; let run=0, s4=0, n=0;
+    for(let i=0;i<sec.length;i++){ run+=sec[i]; if(i>=W) run-=sec[i-W];
+      if(i>=W-1){ s4+=Math.pow(run/W,4); n++; } }
+    np = n? Math.pow(s4/n,0.25) : sec.reduce((a,b)=>a+b,0)/sec.length; }
   let gain=0; for(let i=1;i<grid.length;i++){ const de=grid[i].ele-grid[i-1].ele; if(de>0) gain+=de; }
   return { distM, samples:grid, hasTime, hasPower, hasHr,
     elapsedSec:elapsed, movingSec:moving||elapsed,
-    avgPw: sumDt>0?pwDt/sumDt:null, np: sumDt>0?Math.pow(pw4/sumDt,0.25):null,
-    avgHr: hrDt>0&&sumDt>0?hrDt/sumDt:null, gainM:gain };
+    avgPw: sumDt>0?pwDt/sumDt:null, np,
+    avgHr: hrT>0?hrDt/hrT:null, gainM:gain };
 }
 // cycling: solve road speed (m/s) at a given grade for a target power, against
 // gravity + rolling + aero drag (simplified Martin et al. 1998). Cubic → bisection.
@@ -1195,7 +1226,9 @@ function solveSpeedScaled(grade, m, it){
     let den=0.2 + 0.9*Math.max(-0.30,Math.min(0.30,grade)); // ACSM VO₂, iso-effort solve for speed
     if(den<0.05) den=0.05;                                 // guard steep descents (model breaks down)
     const v=(0.2*v0)/den;                                  // m/min
-    return Math.max(0.4*base, Math.min(2.0*base, v))/60;   // clamp vs base flat speed → m/s
+    // clamp vs flat-equivalent speed → m/s. ACSM has no real downhill term; runners gain ≲25% on descents
+    // (braking/eccentric cost on steep grades), so cap there instead of 2× (which gave ~4:00/mi on −15%)
+    return Math.max(0.4*base, Math.min((grade<0?1.25:2.0)*v0, v))/60;
   }
   return cycSpeedMS((it.watts||0)*m, grade);
 }
@@ -1225,7 +1258,7 @@ function paceMult(strat, grade, frac){                      // climb/flat SURGE 
 // (just maxed a climb) → coast to recover fast; full reserve (fresh) → pedal the shallow descent toward your
 // average; steep descents coast regardless. Strategy-independent — descent effort tracks the climb you did.
 function descentMult(grade, wFrac){
-  if((grade||0)>=0) return 1;
+  if((grade||0)>=0 || isRun()) return 1;               // runners don't coast — the ACSM iso-effort solve handles descents
   const gradeCoast=Math.max(0,1-Math.min(1,(-(grade||0))/DESCENT_COAST));   // 1 at flat → 0 at the coast grade
   return gradeCoast * Math.max(0,Math.min(1,wFrac||0));
 }
@@ -1289,9 +1322,14 @@ function courseTime(opts){
       s4+=Math.pow(iv,4)*dt; T2+=dt; }
     return T2>0? Math.pow(s4/T2,0.25) : 0;
   };
-  let scale=1;                                             // NP ∝ scale, so this converges in ~2 passes
-  for(let it=0; it<5; it++){ const np=npAt(scale); if(np<=1) break; const f=baseIv/np;
-    scale=Math.max(0.2,Math.min(3,scale*f)); if(Math.abs(f-1)<0.004) break; }
+  // NP ∝ scale, so this converges in ~2 passes — unless W′/CP clamps eat the extra effort (target unreachable):
+  // then stop when a pass gains <0.5% NP, keep the last useful scale, and cap the scale so surges stay realistic.
+  const NP_SCALE_MAX=1.3;
+  let scale=1, prevNp=0, prevScale=1;
+  for(let it=0; it<6; it++){ const np=npAt(scale); if(np<=1) break;
+    if(it>0 && np<baseIv && np<prevNp*1.005){ scale=prevScale; break; }
+    prevNp=np; prevScale=scale; const f=baseIv/np;
+    scale=Math.max(0.2,Math.min(NP_SCALE_MAX,scale*f)); if(Math.abs(f-1)<0.004 || scale===prevScale) break; }
   let T=0, D=0, nextBound=SEG; const segDist=[], segGr=[], segIv=[], bounds=[];
   let wbal=Wp, wMin=Wp, anaerWork=0, supraSec=0, capSec=0, blown=false; // reserve state + recovery-mode flag
   const kg=S.bodyLbs/2.2, gly0=glycogenKcal(); let cumCho=0, cumOx=0, glyBlown=false, glyCapSec=0, glyCapEffSec=0; const series=[]; // [distM, sec, W′%, glyc%, CHO%] · cumOx/glyBlown drive the optional supplemented Z2 cap
@@ -1364,7 +1402,7 @@ function courseTime(opts){
     cpBound:CP, wpFull:Wp, wbalMin:wMin, wbalMinPct:Wp>0?Math.max(0,wMin)/Wp*100:100,
     anaerWork, supraSec, capSec, capped:capSec>0.5,       // reserve diagnostics (W′/D′ units; capSec/supraSec in s)
     glyCapSec, glyCapEffSec, glyCapped:glyCapSec>0.5,      // time (s) below the glycogen floor / where Z2 cap cut effort (Summary predictor)
-    avgIv, np:NP, targetNP:baseIv, vi: avgIv>0?NP/avgIv:1, intFactor: CP>0?NP/CP:0, npScale:scale,
+    avgIv, np:NP, targetNP:baseIv, npShort: baseIv>0 && NP<baseIv*0.98, vi: avgIv>0?NP/avgIv:1, intFactor: CP>0?NP/CP:0, npScale:scale,
     series, gly0, blocks, kcal:totKcal, choKcal:totCho, fatKcal:totFat, anaerKcal:totAnaer, slowKcal:totSlow };
 }
 // keep the EFFECTIVE activity duration (S.eventHours, used everywhere downstream) in sync with the
@@ -1374,7 +1412,7 @@ function syncDuration(){
   const onCourse = S.activityMode==='course' && S.course;
   const t = onCourse ? courseTime() : null;               // single terrain-fine pass drives everything
   S._ct = t; S._ctFine = t;                               // _ctFine kept as an alias for the chart/sustainability call sites
-  S.eventHours = t ? +t.hours.toFixed(2) : (+S.manualHours||0);
+  S.eventHours = t ? +t.hours.toFixed(2) : Math.min(48, Math.max(0, +S.manualHours||0));   // clamp: a huge saved value would hang every reload
 }
 // diverging colour from a signed, normalized effort t ∈ [−1,1] (0 = average, cool = easier, warm = harder).
 // a mild gamma pulls mid-range values away from neutral so nearby workloads read as distinct shades.
@@ -1546,7 +1584,7 @@ function courseBody(intOpts, totalsBlock){
           <label style="flex:0 0 auto;margin-right:6px" title="Critical ${run?'speed = your threshold pace':'power = your FTP'} — the sustainable boundary (~30-min limit)">${run?'Critical speed':'Critical power'}</label>
           <span class="v" style="margin-right:14px">${cpLbl}</span>
           <label style="flex:0 0 auto;margin-right:6px" title="${run?'D′ — finite distance reserve above critical speed':'W′ — finite work capacity above critical power'}">${R}</label>
-          <input type="number" step="${run?1:0.5}" value="${fmt(reserveEff, run?0:1)}" data-k="${reserveKey}" data-obj="S" style="width:64px" title="Override the auto value">
+          <input type="number" step="${run?1:0.5}" value="${numVal(reserveEff,run?0:1)}" data-k="${reserveKey}" data-obj="S" style="width:64px" title="Override the auto value">
           <span class="u" style="width:auto">${run?'m':'kJ'}</span>
           ${overridden?`<a onclick="window._resetReserve()" style="color:var(--accent2);cursor:pointer;font-size:11px;margin-left:4px">auto</a>`:`<span class="muted" style="font-size:11px;margin-left:4px">auto · ${S.athleteType} · ${run?fmt(dPrimeCoef(),1)+' m/kg':fmt(wPrimeCoef(),2)+' kJ/kg'}</span>`}
         </div>
@@ -1589,6 +1627,7 @@ function courseBody(intOpts, totalsBlock){
       <div style="font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;font-size:12px;color:var(--accent2)">Est. moving time</div>
       <div style="font-family:var(--font-display);font-size:44px;font-weight:700;color:var(--accent);line-height:1.05;font-variant-numeric:tabular-nums;margin:4px 0 3px">${t?hm(t.hours):'—'}</div>
       <div class="muted" style="font-size:11.5px">@ <b>${run?paceFmt(speedToPace(t.np))+'/mi':Math.round(t.np)+' W'} ${run?'NGP':'NP'}</b> · IF ${fmt(t.intFactor,2)} · ${PACE_LABELS[strat]}</div>
+      ${t.npShort?`<div class="note" style="color:var(--warn);margin-top:4px">Target ${run?'NGP '+paceFmt(speedToPace(t.targetNP))+'/mi':'NP '+Math.round(t.targetNP)+' W'} isn't sustainable on this course — your W′/CP limits cap it at ${run?paceFmt(speedToPace(t.np))+'/mi':Math.round(t.np)+' W'}. Pick a lower intensity for a realistic plan.</div>`:''}
     </div>
     <div class="grid cols3" style="margin-top:10px">
       <div class="res"><span>Normalized ${run?'pace (NGP)':'power (NP)'}</span><span class="v">${run?paceFmt(speedToPace(t.np))+'/mi':Math.round(t.np)+' W'} · IF ${fmt(t.intFactor,2)}</span></div>
@@ -1617,10 +1656,10 @@ function cyclingModelBody(){
       <div>${courseParamRow('Crr','crr','',0.0001,CRR_PRESETS)}${courseParamRow('Air density','airRho','kg/m³',0.01,RHO_PRESETS)}</div>
     </div>
     <div class="field" style="gap:6px;margin-top:6px"><label style="flex:0 0 auto;margin-right:8px">Gear / clothing</label>
-      <input type="number" step="0.5" value="${fmt(S.gearLbs,1)}" data-k="gearLbs" data-obj="S" style="width:74px" title="Fixed allowance added to every bike: worn kit/shoes/helmet + repair kit + computer + cages/empty bottles (fluid excluded)"><span class="u" style="width:auto">lbs</span>
+      <input type="number" step="0.5" value="${+(+S.gearLbs||0).toFixed(1)}" data-k="gearLbs" data-obj="S"${limAttrs('gearLbs')} style="width:74px" title="Fixed allowance added to every bike: worn kit/shoes/helmet + repair kit + computer + cages/empty bottles (fluid excluded)"><span class="u" style="width:auto">lbs</span>
       <span class="muted" style="font-size:11px;margin-left:6px">added to total mass · clothing + repair kit + computer + cages</span></div>
     <div class="field" style="gap:6px;margin-top:6px"><label style="flex:0 0 auto;margin-right:8px">Max descent speed</label>
-      <input type="number" step="1" value="${fmt(S.maxDescentKmh,0)}" data-k="maxDescentKmh" data-obj="S" style="width:74px" title="Your braking/cornering ceiling on descents"><span class="u" style="width:auto">km/h</span>
+      <input type="number" step="1" value="${Math.round(+S.maxDescentKmh||0)}" data-k="maxDescentKmh" data-obj="S"${limAttrs('maxDescentKmh')} style="width:74px" title="Your braking/cornering ceiling on descents"><span class="u" style="width:auto">km/h</span>
       <span class="muted" style="font-size:11px;margin-left:6px">${fmt((+S.maxDescentKmh||0)/1.609,0)} mph · raise for open descents, lower for technical</span></div>
     <div class="note" style="margin-top:8px">Pick a preset or type your own. Below <b>−5% grade the rider coasts</b> (0 W) and speed is set by gravity vs. drag &amp; rolling, then held to your <b>max descent speed</b>. <b>Air density was set from this course's mean altitude</b> (${fmt(c.elevMeanM||0,0)} m → ${fmt(isaDensity(c.elevMeanM||0),3)} kg/m³, ISA). ${srcLink('cycling power & air-density model →')}</div>`;
 }
@@ -1703,7 +1742,9 @@ let FUEL_PRODUCTS = [
   ['Gas Station','Potato Chips','1 oz',                     160,170, {glucose:1,  fructose:0,    sucrose:0,  malto:14  }, 20 ],
   ['Gas Station','PayDay Bar','Each',                       240,120, {glucose:5,  fructose:0,    sucrose:18, malto:4   }, 20 ],
   ['Gas Station','Beef Jerky','1 oz',                        80,500, {glucose:1,  fructose:0,    sucrose:4,  malto:0   }, 100],
-].map((p,i)=>({id:'f'+i, brand:p[0], product:p[1], unit:p[2], kcal:p[3], sodium:p[4], split:{...p[5]}, de:p[6]}));
+].map(p=>({id:fuelSlug(p[0],p[1]), brand:p[0], product:p[1], unit:p[2], kcal:p[3], sodium:p[4], split:{...p[5]}, de:p[6]}));
+// stable factory-food id from brand+product (NOT array position — inserting a food must not shift saved references)
+function fuelSlug(brand,product){ return 'f:'+(`${brand||''}|${product||''}`).trim().toLowerCase().replace(/[^a-z0-9|]+/g,'-'); }
 // keep the food library alphabetical by manufacturer (ids are stored on each object, so reordering is lookup-safe)
 function sortFuel(){ FUEL_PRODUCTS.sort(byBrand); }
 sortFuel();
@@ -1775,8 +1816,13 @@ function gfCellStyle(p){ const t=gfTier(p);
    ============================================================ */
 const ADMIN_PASS = 'boulder-admin';            // CHANGE ME — client-side guardrail only
 const DB_KEY = 'hydra_db_v1';
+// user-entered product text is shown in dozens of templates/<option>s → strip markup characters at the source
+const cleanText = v => (''+(v==null?'':v)).replace(/[<>"`]/g,'');
+function cleanNames(o){ if(o) ['brand','product','unit','name'].forEach(k=>{ if(typeof o[k]==='string') o[k]=cleanText(o[k]); }); return o; }
 function loadDB(){
-  try{ const d=JSON.parse(localStorage.getItem(DB_KEY)); if(d) return {userItems:d.userItems||[], overrides:d.overrides||{}}; }catch(e){}
+  try{ const d=JSON.parse(localStorage.getItem(DB_KEY));
+    if(d){ (d.userItems||[]).forEach(cleanNames); Object.values(d.overrides||{}).forEach(cleanNames);
+      return {userItems:d.userItems||[], overrides:d.overrides||{}}; } }catch(e){}
   return {userItems:[], overrides:{}};
 }
 let DB = loadDB();
@@ -1817,7 +1863,8 @@ const ATH_KEY = 'hydra_athlete_v1';
 let _suppressSave = false;                        // set during reset so the unload save can't re-create the key
 function saveAthlete(){
   if(_suppressSave) return;
-  try{ localStorage.setItem(ATH_KEY, JSON.stringify({ v:1, fuelV:FUEL_LIB_VERSION, S, fuel:FUEL_PRODUCTS, sweat:SWEATLOG })); }catch(e){}
+  try{ localStorage.setItem(ATH_KEY, JSON.stringify({ v:1, fuelV:FUEL_LIB_VERSION, S, fuel:FUEL_PRODUCTS, sweat:SWEATLOG },
+    (k,v)=> (k[0]==='_' && k!=='_id') ? undefined : v)); }catch(e){}   // skip derived/cached _keys (S._ct ≈ 175 KB on a big course)
 }
 function loadAthlete(){
   try{
@@ -1837,8 +1884,12 @@ function loadAthlete(){
     // keep a saved fuel list only if it's the new brand/split schema; legacy generic lists
     // are dropped so the curated defaults (with sodium + sugar splits) take over
     if(Array.isArray(raw.fuel) && raw.fuel.length && raw.fuel.every(p=>p && p.split!==undefined && p.product!==undefined)){
+      raw.fuel.forEach(cleanNames);                       // strip markup from saved custom food names
       const _norm=s=>(''+(s||'')).trim().toLowerCase();   // case/space-insensitive so a corrected brand spelling matches (no dup)
-      const isFactory = p => FUEL_DEFAULTS.some(d=>_norm(d.brand)===_norm(p.brand) && _norm(d.product)===_norm(p.product));
+      const factoryOf = p => FUEL_DEFAULTS.find(d=>_norm(d.brand)===_norm(p.brand) && _norm(d.product)===_norm(p.product));
+      const isFactory = p => !!factoryOf(p);
+      // old saves used positional factory ids ('f0','f1',…) → map them to the stable brand+product ids
+      const idMap={}; raw.fuel.forEach(p=>{ const d=factoryOf(p); if(d && p.id!==d.id) idMap[p.id]=d.id; });
       if((+raw.fuelV||1) < FUEL_LIB_VERSION){
         // migration: refresh every factory food to the current library (picks up new items AND corrections),
         // while preserving any custom foods the user added themselves
@@ -1846,9 +1897,12 @@ function loadAthlete(){
         FUEL_PRODUCTS = FUEL_DEFAULTS.map(d=>({...d, split:{...d.split}})).concat(customs);
       } else {
         FUEL_PRODUCTS=raw.fuel;
+        FUEL_PRODUCTS.forEach(p=>{ if(idMap[p.id]) p.id=idMap[p.id]; });
         // bring in any factory foods added since this profile was saved (matched by brand+product)
-        FUEL_DEFAULTS.forEach(d=>{ if(!FUEL_PRODUCTS.some(p=>p.brand===d.brand && p.product===d.product)) FUEL_PRODUCTS.push({...d, split:{...d.split}}); });
+        FUEL_DEFAULTS.forEach(d=>{ if(!FUEL_PRODUCTS.some(p=>p.id===d.id || isFactory(p)&&factoryOf(p)===d)) FUEL_PRODUCTS.push({...d, split:{...d.split}}); });
       }
+      if(Object.keys(idMap).length){ const fix=arr=>(arr||[]).forEach(it=>{ if(idMap[it.prodId]) it.prodId=idMap[it.prodId]; });
+        fix(S.planItems); fix(S.basicFuel); fix(S.debrief&&S.debrief.actualItems); }
       sortFuel();
     }
     if(Array.isArray(raw.sweat) && raw.sweat.length) SWEATLOG=raw.sweat;
@@ -1863,12 +1917,12 @@ function allProducts(){
     const merged = ov ? {...p, ...ov, split:{...p.split, ...(ov.split||{})}} : p;
     return {...merged, _id:'c:'+p.name, _kind:'canonical', _status:'approved', _edited:!!ov};
   });
-  const user = DB.userItems.map(u=>({...u, _id:u.id, _kind:'user', _status:u.status||'pending', form:u.form||((+u.oz||0)>0?'mix':'cap')}));
+  const user = DB.userItems.map(u=>({...u, name:(`${u.brand||''} ${u.product||''}`.trim() || u.name), _id:u.id, _kind:'user', _status:u.status||'pending', form:u.form||((+u.oz||0)>0?'mix':'cap')}));
   return canon.concat(user).sort(byBrand);
 }
 // sort products/foods alphabetically by manufacturer (brand), then product name — case-insensitive
 function byBrand(a,b){ return (a.brand||'').localeCompare(b.brand||'',undefined,{sensitivity:'base'}) || (a.product||'').localeCompare(b.product||'',undefined,{sensitivity:'base'}); }
-function loadableProducts(){ return allProducts().filter(p=>p._status==='approved'); }
+function loadableProducts(){ return allProducts().filter(p=>p._status==='approved' || p._kind==='user'); }   // your own rows load in your browser
 function pendingCount(){ return DB.userItems.filter(u=>(u.status||'pending')==='pending').length; }
 function canEditRow(p){ return p._kind==='canonical' ? ADMIN : (p._status==='pending' || ADMIN); }
 
@@ -1878,11 +1932,11 @@ function dbEdit(id, field, sub, val){
     if(!ADMIN) return;
     const name=id.slice(2);
     const ov=DB.overrides[name]||(DB.overrides[name]={});
-    if(sub){ ov.split=ov.split||{}; ov.split[sub]=val; } else ov[field]=val;
+    if(sub){ ov.split=ov.split||{}; ov.split[sub]=val; } else ov[field]=typeof val==='string'?cleanText(val):val;
   } else {
     const it=DB.userItems.find(u=>u.id===id);
     if(!it || !(((it.status||'pending')==='pending') || ADMIN)) return;
-    if(sub){ it.split[sub]=val; } else it[field]=val;
+    if(sub){ it.split[sub]=val; } else it[field]=typeof val==='string'?cleanText(val):val;
   }
   saveDB(); render();
 }
@@ -1893,9 +1947,17 @@ function dbEdit(id, field, sub, val){
 const $ = (s,el=document)=>el.querySelector(s);
 const fmt=(n,d=1)=>Number.isFinite(n)?(+n).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
 const escHtml=s=>(''+(s==null?'':s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// sane bounds for numeric inputs [min, max]; REQUIRED_POS keys must stay > 0 (blank/0 → keep the previous value)
+const NUM_LIMITS={ bodyLbs:[50,500], ftp:[30,800], manualHours:[0,48], bottlesPerHour:[0,10], bottleOz:[1,128],
+  maltoDE:[1,100], pre:[50,500], post:[50,500], manualSweat:[0,5], time:[0.05,24], acceptLoss:[0,10],
+  gearLbs:[0,50], maxDescentKmh:[5,150], sweatNa:[0,4000] };
+const REQUIRED_POS=new Set(['bodyLbs','ftp','bottleOz','time']);
+// plain number for <input type=number> value= (fmt() is locale-formatted: "1,5"/"1,234" are invalid there)
+function numVal(x,d){ return +(+x||0).toFixed(d); }
+function limAttrs(key){ const l=NUM_LIMITS[key]; return l?` min="${l[0]}" max="${l[1]}"`:''; }
 function numField(label,key,unit,step=1,obj=S){
   return `<div class="field"><label>${label}</label>
-    <input type="number" step="${step}" value="${obj[key]??''}" data-k="${key}" data-obj="${obj===S?'S':'comp'}">
+    <input type="number" step="${step}"${limAttrs(key)} value="${obj[key]??''}" data-k="${key}" data-obj="${obj===S?'S':'comp'}">
     <span class="u">${unit||''}</span></div>`;
 }
 function compField(label,key,unit){
@@ -1983,7 +2045,7 @@ function sweatSodiumPanel(){
           </select></div>`:''}
         ${S.sweatMethod==='manual'?numField('Sweat rate','manualSweat','L/hr',0.01):''}
         <div class="res"><span class="muted">Sweat rate used</span><span class="v">${fmt(sr,2)} L/hr</span></div>
-        <div class="note">Want a precise number? Use the detailed <a href="https://www.sweatratecalculator.com" target="_blank" rel="noopener" style="color:var(--accent)">sweatratecalculator.com</a>, then enter the result above.</div>
+        <div class="note">Want a precise number? Use the detailed <a href="https://sweatratecalculator.com" target="_blank" rel="noopener" style="color:var(--accent)">sweatratecalculator.com</a>, then enter the result above.</div>
         <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg <span class="muted">@ ${fmt(S.sweatNa,0)} mg/L</span></span></div>
         <div class="note">Set <b>sweat sodium concentration</b> on the <b>Athlete</b> tab. With heat acclimatization sweat [Na⁺] <b>drops</b> — you lose less sodium per liter.</div>
         <div class="sub-h">Targets</div>
@@ -1993,7 +2055,7 @@ function sweatSodiumPanel(){
             <option value="manual"${S.acceptLossMode==='manual'?' selected':''}>Manual entry…</option>
           </select></div>
         ${S.acceptLossMode==='manual'?`<div class="field"><label class="muted">↳ manual</label>
-          <input type="number" step="0.5" value="${S.acceptLoss}" data-k="acceptLoss" data-obj="S"><span class="u">%</span></div>`:''}
+          <input type="number" step="0.5" value="${S.acceptLoss}" data-k="acceptLoss" data-obj="S"${limAttrs('acceptLoss')}><span class="u">%</span></div>`:''}
       </div>`;
 }
 
@@ -2242,7 +2304,7 @@ function viewRider(){
         <div class="fgrid" style="margin-top:10px">
           ${numField('Body weight','bodyLbs','lbs')}
           <div class="field"><label>Body Mass</label>
-            <input type="number" step="0.1" value="${fmt(bodyKg(),1)}" data-kgmass title="Linked to body weight (kg = lbs ÷ 2.2)">
+            <input type="number" step="0.1" value="${numVal(bodyKg(),1)}" data-kgmass title="Linked to body weight (kg = lbs ÷ 2.2)">
             <span class="u">kg</span></div>
         </div>
         <div class="field"><label>Gender</label>
@@ -2266,7 +2328,7 @@ function viewRider(){
             <option value="manual"${S.sweatNaMode==='manual'?' selected':''}>Manual entry…</option>
           </select></div>
         ${S.sweatNaMode==='manual'?`<div class="field"><label class="muted">↳ manual value</label>
-          <input type="number" step="10" value="${S.sweatNa}" data-k="sweatNa" data-obj="S"><span class="u">mg/L</span></div>`:''}
+          <input type="number" step="10" value="${S.sweatNa}" data-k="sweatNa" data-obj="S"${limAttrs('sweatNa')}><span class="u">mg/L</span></div>`:''}
         <div class="sub-h">Gut adaptation <span class="muted" style="text-transform:none">(carb ceiling)</span></div>
         <div class="modeseg">
           <button class="sm ${S.gutAdapt==='unadapted'?'':'ghost'}" onclick="window._setGutAdapt('unadapted')">Unadapted (90)</button>
@@ -2314,7 +2376,7 @@ function viewRider(){
       <div class="res"><span>Total energy</span><span class="v">${fmt(ev.kcal,0)} kcal · ${fmt(ev.kcalHr,0)}/hr</span></div>
       <div class="res"><span>Carbohydrate burned</span><span class="v">${fmt(ev.choG,0)} g · ${fmt(ev.choKcal,0)} kcal</span></div>
       <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
-      <div class="res" style="display:block;line-height:1.5">Carb fuel target <span class="muted">(keep ${S.reservePct}% reserve)</span>: <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
+      <div class="res" style="display:block;line-height:1.5">Carb fuel target <span class="muted">(${targetBasisNote(ev)})</span>: <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
       ${ev.overGut?`<div class="note" style="color:var(--warn)">Capped at the ${carbCap()} g/hr gut-absorption limit (${gutAdaptLabel()}) — fully holding your reserve would take ~${fmt(ev.targetRateGRaw,0)} g/hr, so you'll dip into reserves. Spread carbs across drink + food and train your gut.</div>`:''}`;
     const manualInputs = `
         ${numField('Activity duration','manualHours','hr',0.5)}
@@ -2428,7 +2490,7 @@ function viewHydration(){
         <div class="fgrid">
           ${numField('Bottle size','bottleOz','oz',0.1)}
           <div class="field"><label>Bottle size</label>
-            <input type="number" step="0.05" value="${fmt(S.bottleOz/OZ_PER_L,2)}" data-lvol title="Linked to oz (1 L = 33.814 oz)">
+            <input type="number" step="0.05" value="${numVal(S.bottleOz/OZ_PER_L,2)}" data-lvol title="Linked to oz (1 L = 33.814 oz)">
             <span class="u">L</span></div>
         </div>
         ${numField('Bottles / hr','bottlesPerHour','',0.25)}
@@ -2456,7 +2518,7 @@ function viewHydration(){
           ${compField('NaCl','nacl','g')}
           ${compField('Na citrate','citrate','g')}
           <div class="field"><label>Drink Na <span class="muted">(calc)</span></label>
-            <input type="number" value="${fmt(calcDrinkNaPerOz(),1)}" disabled title="Calculated from NaCl + sodium citrate (+ any added electrolytes) ÷ bottle size">
+            <input type="number" value="${numVal(calcDrinkNaPerOz(),1)}" disabled title="Calculated from NaCl + sodium citrate (+ any added electrolytes) ÷ bottle size">
             <span class="u">mg/oz</span></div>
         </div>
         ${S.extraLytes.map(x=>extraRow(x,'l')).join('')}
@@ -2515,21 +2577,24 @@ function osmolalityPanel(){
 
 /* ---------- TAB: PROJECTION (port of Bare-Minimum hours table) ---------- */
 // Plan-based projection (mirrors the "Solve drink contents" tab): everything is driven by
-// the user's inputs — Bottles = hours × Bottles/hr — and acceptable loss / Na just flag limits.
+// the user's inputs — each hour's planned bottles (override, else Bottles/hr), mix and food/capsule Na — and acceptable loss / Na just flag limits.
 function projectionRows(hours=8){
-  const C6=sweatRateLhr(), C5=S.bottleOz, H2=S.bottlesPerHour, C3=S.bodyLbs,
-        H8=totalECF(), H5=calcDrinkNaPerOz(), H6=S.sweatNa, H11=bodyNaContentG();
+  const C6=sweatRateLhr(), C5=S.bottleOz, C3=S.bodyLbs,
+        H8=totalECF(), H6=S.sweatNa, H11=bodyNaContentG();
   const rows=[];
+  let bottles=0, drinkNaMg=0;
   for(let h=1;h<=hours;h++){
     const lostL    = h*C6;                       // sweat lost (L)
-    const bottles  = h*H2;                        // bottles consumed = hours × bottles/hr
+    const bH       = planBottlesFor(h,1);         // this hour's bottles: plan override, else Bottles/hr
+    bottles       += bH;                          // cumulative bottles consumed
+    drinkNaMg     += naFromSaltsMg(h)*bH + foodNaFor(h);  // that hour's mix + planned food/capsule Na
     const replOz   = bottles*C5;                  // fluid consumed (oz)
     const replL    = replOz/OZ_PER_L;             // fluid consumed (L)
     const lossLbs  = (lostL-replL)*2.2;           // net body-mass change (lbs; + = lost)
     const lossPct  = C3 ? lossLbs/C3*100 : 0;     // % of body weight
     const wt       = C3-lossLbs;                  // current body weight (lbs)
     const ecf      = H8-lostL+replL;              // new ECF (L)
-    const lostNaG  = ((H6*lostL)-(replOz*H5))/1000; // net sodium lost (g) = sweat Na − drink Na
+    const lostNaG  = ((H6*lostL)-drinkNaMg)/1000;   // net sodium lost (g) = sweat Na − drink/food Na
     const Ng       = H11-lostNaG;                 // body Na (g)
     const Ommol    = Ng/23*1000;                  // body Na (mmol)
     const mM       = ecf ? Ommol/ecf : 0;         // body Na (mM)
@@ -2582,7 +2647,7 @@ function viewProjection(){
   const hrs=Math.min(36,Math.max(S.projHours||8, evHour+2)); // always show ≥2 hours past the event
   const r=projectionRows(hrs);
   return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
-  <div class="note">Projects <b>your plan</b>: Bottles = hours × your Bottles/hr, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146. <b>Note:</b> <b>Body Na⁺ (g)</b> is total sodium <i>mass</i> while <b>Na⁺ (mM)</b> is <i>concentration</i> (mass ÷ fluid). They can move opposite ways: if you under-drink, mM can <i>climb</i> (dehydration concentrates sodium) even while total Na⁺ falls and the bottle tab shows a <i>negative</i> hourly Na⁺ balance — that balance is a mass deficit, not a concentration. The <b>Recommendation</b> column reads those flags for each hour: green = good to go, otherwise it estimates how much fluid and sodium to add (or cut) per hour to get back in band — solved together, so the sodium amount accounts for how the corrected fluid volume dilutes or concentrates your Na⁺. The <b style="color:var(--accent2)">boxed</b> row marks the hour your ${fmt(S.eventHours,1)}-hr activity ends (set on Athlete &amp; Activity); the table runs a couple hours past it.</div>
+  <div class="note">Projects <b>your plan</b>: each hour's planned bottles (Event Plan overrides, else your Bottles/hr), that hour's drink mix plus planned food/capsule sodium, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146. <b>Note:</b> <b>Body Na⁺ (g)</b> is total sodium <i>mass</i> while <b>Na⁺ (mM)</b> is <i>concentration</i> (mass ÷ fluid). They can move opposite ways: if you under-drink, mM can <i>climb</i> (dehydration concentrates sodium) even while total Na⁺ falls and the bottle tab shows a <i>negative</i> hourly Na⁺ balance — that balance is a mass deficit, not a concentration. The <b>Recommendation</b> column reads those flags for each hour: green = good to go, otherwise it estimates how much fluid and sodium to add (or cut) per hour to get back in band — solved together, so the sodium amount accounts for how the corrected fluid volume dilutes or concentrates your Na⁺. The <b style="color:var(--accent2)">boxed</b> row marks the hour your ${fmt(S.eventHours,1)}-hr activity ends (set on Athlete &amp; Activity); the table runs a couple hours past it.</div>
   <div class="scroll" style="margin-top:10px"><table class="tc proj">
     <thead><tr><th>Hr</th><th>Water lost (L)</th><th>Replaced (oz)</th>
       <th>Wt loss (lbs)</th><th>Wt loss (%)</th><th>Body wt (lbs)</th>
@@ -2661,7 +2726,7 @@ function viewCaloric(){
       <div class="res"><span>Total energy</span><span class="v">${fmt(ev.kcal,0)} kcal · ${fmt(ev.kcalHr,0)}/hr</span></div>
       <div class="res"><span>Carbohydrate burned</span><span class="v">${fmt(ev.choG,0)} g · ${fmt(ev.choKcal,0)} kcal</span></div>
       <div class="res"><span>Fat burned</span><span class="v">${fmt(ev.fatKcal/9,0)} g · ${fmt(ev.fatKcal,0)} kcal</span></div>
-      <div class="res"><span>Carb fuel target <span class="muted">(${S.reservePct}% reserve${ev.overGut?` · capped at ${ev.targetRateGCap} g/hr`:''})</span></span>
+      <div class="res"><span>Carb fuel target <span class="muted">(${targetBasisNote(ev)}${ev.overGut?` · capped at ${ev.targetRateGCap} g/hr`:''})</span></span>
         <span class="v" style="color:${ev.overGut?'var(--warn)':'var(--good)'}">${fmt(ev.targetRateG,0)} g/hr · ${fmt(ev.targetRateKcal,0)} kcal/hr</span></div>
     </div>
     ${ev.overGut?`<div class="note" style="color:var(--warn)">Fully holding your ${S.reservePct}% reserve would take <b>~${fmt(ev.targetRateGRaw,0)} g/hr</b> — above the ${ev.targetRateGCap} g/hr gut-absorption ceiling (${gutAdaptLabel()}), so the plan is capped at <b>${ev.targetRateGCap} g/hr</b>. Expect a glycogen deficit: pace conservatively, spread carbs across drink + food, and train your gut to raise the ceiling (Athlete &amp; Activity tab).</div>`:''}
@@ -2709,15 +2774,15 @@ function viewCaloric(){
     const usableGly=glycogenKcal()*(1-S.reservePct/100);
     const cap=carbCap();
     // supplemental CHO (g/hr) so glycogen never drops below the reserve over a T-hour effort
-    const suppG=(choKcalHr,T)=>Math.max(0,(choKcalHr - usableGly/T)/4);
+    const suppG=(choKcalHr,T)=>Math.max(carbFloorG(T), (choKcalHr - usableGly/T)/4);   // reserve need, floored at the guideline minimum
     const cls=g=> g<=0?'st-w' : g<=60?'st-g' : g<=90?'st-y' : g<=cap?'st-o' : 'st-r';
     const cell=g=> g<=0?'—' : (g>cap ? '✕' : fmt(g,0));
     return `<div class="panel" style="margin-top:16px">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <h2 style="margin:0">Zone × Time — carbs to hold a ${S.reservePct}% reserve</h2>
+        <h2 style="margin:0">Zone × Time — recommended carbs (g/hr)</h2>
         <span class="muted" style="font-size:11px;margin-left:auto">Gut ceiling <b style="color:var(--accent)">${cap} g/hr</b> (${gutAdaptLabel()}) — set on Athlete tab</span>
       </div>
-      <div class="note" style="margin-top:4px">Recommended carbohydrate intake (<b>g/hr</b>) by ${wl?(run?'pace':'workload'):'zone'} and total ${run?'run':'ride'} duration, so predicted glycogen never falls below your ${S.reservePct}% reserve. Capped at your gut ceiling of <b>${cap} g/hr</b> (${gutAdaptLabel()}); an <span style="color:var(--bad);font-weight:700">✕</span> means the requirement exceeds it. Glycogen store ${fmt(glycogenKcal()/4,0)} g · usable ${fmt(usableGly/4,0)} g.</div>
+      <div class="note" style="margin-top:4px">Recommended carbohydrate intake (<b>g/hr</b>) by ${wl?(run?'pace':'workload'):'zone'} and total ${run?'run':'ride'} duration: enough that predicted glycogen never falls below your ${S.reservePct}% reserve, and never less than the guideline minimum (30 g/hr for 1–2.5 hr, 60 g/hr beyond). Capped at your gut ceiling of <b>${cap} g/hr</b> (${gutAdaptLabel()}); an <span style="color:var(--bad);font-weight:700">✕</span> means the requirement exceeds it. Glycogen store ${fmt(glycogenKcal()/4,0)} g · usable ${fmt(usableGly/4,0)} g.</div>
       <div class="scroll" style="margin-top:8px"><table class="tc zxt">
         <thead><tr><th style="text-align:left">${wl?(run?'Pace':'Workload'):'Zone'}</th><th>CHO burn (g/hr)</th>
           ${DURS.map(d=>`<th>${d} hr</th>`).join('')}</tr></thead>
@@ -2741,8 +2806,8 @@ function drinkCarbGperHr(){ return carbPerBottle()*S.bottlesPerHour; }
 // bottles planned for an hour: explicit override, else the global rate × that hour's duration
 function planBottlesFor(h,dur){ const v=(S.planBottles||{})[h]; return (v==null||v==='')? +(((+S.bottlesPerHour||0)*dur).toFixed(2)) : (+v||0); }
 function drinkCarbFor(h,dur){ return carbPerBottle(h)*planBottlesFor(h,dur); }
-// per-bottle osmolality for an hour's mix (mOsm/L) — uses the global malto DE, like the rest of the app
-function mixOsm(h){ const c=effComp(h), oz=S.bottleOz; return oz ? osmolesOf(c,S.maltoDE)*OZ_PER_L*1000/oz : 0; }
+// per-bottle osmolality for an hour's mix (mOsm/L) — custom mixes use their products' own malto DE
+function mixOsm(h){ const c=effComp(h), oz=S.bottleOz; return oz ? osmolesOf(c, c.de!=null?c.de:S.maltoDE)*OZ_PER_L*1000/oz : 0; }
 // short human label for an hour's custom mix
 function mixSummary(h){
   const parts=((S.planDrink||{})[h]||[]).map(e=>{ const p=allProducts().find(x=>x._id===e.prodId); return p?`${qtyStr(e.qty)}× ${p.name}`:null; }).filter(Boolean);
@@ -2903,7 +2968,7 @@ function viewLibrary(){
   const drinks=all.filter(p=>p.cat!=='lyte' && !isGas(p) && !isSugar(p) && bf(p)), lytes=all.filter(p=>p.cat==='lyte' && bf(p)), foods=FUEL_PRODUCTS.filter(p=>!isGas(p) && bf(p));
   const gasDrinks=all.filter(p=>p.cat!=='lyte' && isGas(p) && bf(p)), gasFoods=FUEL_PRODUCTS.filter(p=>isGas(p) && bf(p));
   const pureSugars=all.filter(p=>isSugar(p) && bf(p));
-  const esc=s=>(''+(s||'')).replace(/"/g,'&quot;');
+  const esc=escHtml;
   // one editable row for a drink/electrolyte product
   const dbRow=p=>{
     const carb=productCarb(p), osm=p.oz>0?productOsm(p):0, t=tonicity(osm);
@@ -2917,7 +2982,7 @@ function viewLibrary(){
     let act;
     if(pending) act = ADMIN
         ? `<button class="sm" onclick="window._approve('${p._id}')">✓</button> <button class="sm ghost" onclick="window._reject('${p._id}')">✗</button>`
-        : `<span class="pill" style="background:var(--warn);color:var(--paper)">Pending</span>`;
+        : `<button class="sm" onclick="window._loadProd('${p._id}')">Load</button> <button class="sm ghost" onclick="window._reject('${p._id}')" title="delete your entry">Del</button> <span class="pill" style="background:var(--warn);color:var(--paper)" title="Your own entry — usable here; not yet reviewed for the shared library">Yours</span>`;
     else act = `<button class="sm" onclick="window._loadProd('${p._id}')">Load</button>`
         + (ADMIN && p._kind==='user' ? ` <button class="sm ghost" onclick="window._reject('${p._id}')">Del</button>` : '')
         + (ADMIN && p._edited ? ` <button class="sm ghost" onclick="window._resetRow('${p._id}')" title="revert admin edits">Reset</button>` : '');
@@ -2948,7 +3013,7 @@ function viewLibrary(){
     const num=(f,v,w=54)=> ed ? `<input type="number" step="1" value="${v||0}" data-id="${p._id}" data-f="${f}" style="width:${w}px">`
                               : `<span style="font-variant-numeric:tabular-nums">${v||0}</span>`;
     let act;
-    if(pending) act = ADMIN ? `<button class="sm" onclick="window._approve('${p._id}')">✓</button> <button class="sm ghost" onclick="window._reject('${p._id}')">✗</button>` : `<span class="pill" style="background:var(--warn);color:var(--paper)">Pending</span>`;
+    if(pending) act = ADMIN ? `<button class="sm" onclick="window._approve('${p._id}')">✓</button> <button class="sm ghost" onclick="window._reject('${p._id}')">✗</button>` : (p.oz>0?`<button class="sm" onclick="window._loadProd('${p._id}')">Load</button> `:'')+`<button class="sm ghost" onclick="window._reject('${p._id}')" title="delete your entry">Del</button> <span class="pill" style="background:var(--warn);color:var(--paper)" title="Your own entry — usable here; not yet reviewed for the shared library">Yours</span>`;
     else act = (p.oz>0?`<button class="sm" onclick="window._loadProd('${p._id}')">Load</button>`:'')
         + (ADMIN && p._kind==='user' ? ` <button class="sm ghost" onclick="window._reject('${p._id}')">Del</button>` : '')
         + (ADMIN && p._edited ? ` <button class="sm ghost" onclick="window._resetRow('${p._id}')" title="revert admin edits">Reset</button>` : '');
@@ -3098,8 +3163,7 @@ function viewSources(){
     + '<div style="margin-top:10px"><b>5 · Your average is emergent.</b> Because descents give time and watts back, your overall average settles <i>below</i> your NP — exactly as it does in real rides. How the reserve is spent and rebuilt through all of this is the next section.</div>',
     ref('Martin JC, Milliken DL, Cobb JE, McFadden KL, Coggan AR','1998','Validation of a mathematical model for road cycling power.','Journal of Applied Biomechanics, 14(3), 276–291.')
     + ref('di Prampero PE, Cortili G, Mognoni P, Saibene F','1979','Equation of motion of a cyclist.','Journal of Applied Physiology, 47(1), 201–206. — gravity, rolling and air-resistance components of cycling power.')
-    + ref('Coggan AR (Allen H &amp; Coggan A)','2010','Training and Racing with a Power Meter (2nd ed.).','VeloPress. — Normalized Power, Intensity Factor and the Variability Index used as the intensity target here.')
-    + ref('Skiba PF','2006','Analysis of power output and training stress in cyclists: the development of the xPower and Normalized Power algorithms.','— the 30-s-rolling, fourth-power Normalized Power algorithm.')
+    + ref('Allen H, Coggan AR','2010','Training and Racing with a Power Meter (2nd ed.).','VeloPress. — Coggan’s Normalized Power (fourth-power mean of 30-s rolling power), Intensity Factor and the Variability Index used as the intensity target here.')
     + ref('Swain DP','1997','A model for optimizing cycling performance by varying power on hills and in wind.','Medicine &amp; Science in Sports &amp; Exercise, 29(8), 1104–1108. — riding harder uphill / easier downhill (the climb-surge strategies).')
     + ref('Wilson DG, Schmidt T','2020','Bicycling Science (4th ed.).','MIT Press. — drag-area (CdA) reference values by riding position.')
     + ref('BicycleRollingResistance.com','lab data','Rolling-resistance test database.','— Crr presets are lab-measured values for specific named tires; real-world Crr varies with pressure, surface and load.')
@@ -3134,9 +3198,10 @@ function viewSources(){
 
   ${sec('Carbohydrate intake &amp; gut absorption',
     'Hourly carbohydrate targets and the gut-absorption ceiling: ≈ 60 g/hr from single-transportable (glucose-only) vs ≈ 90 g/hr from multiple-transportable (glucose + fructose) carbohydrate. The higher trained ceilings (adapted 120, high-carb 150 g/hr) reflect deliberate gut training, which up-regulates intestinal transporters and raises tolerable intake.',
-    ref('Jeukendrup AE','2014','A step towards personalized sports nutrition: carbohydrate intake during exercise.','Sports Medicine, 44(Suppl 1), S25–S33.')
+    ref('Jeukendrup AE','2014','A step towards personalized sports nutrition: carbohydrate intake during exercise.','Sports Medicine, 44(Suppl 1), S25–S33. — duration-based intake guidance; its low end sets the minimum carb target (30 g/hr for 1–2.5 h, 60 g/hr beyond).')
+    + ref('Thomas DT, Erdman KA, Burke LM','2016','American College of Sports Medicine joint position statement: Nutrition and athletic performance.','Medicine &amp; Science in Sports &amp; Exercise, 48(3), 543–568. — 30–60 g/hr for 1–2.5 h; up to 90 g/hr for longer events.')
     + ref('Jentjens RLPG, Moseley L, Waring RH, Harding LK, Jeukendrup AE','2004','Oxidation of combined ingestion of glucose and fructose during exercise.','Journal of Applied Physiology, 96(4), 1277–1284.')
-    + ref('Jeukendrup AE','2017','Training the gut for athletes.','Sports Medicine, 47(Suppl 1), 101–110. — adaptation of carbohydrate absorption with training (the elevated 120/150 g/hr ceilings).'))}
+    + ref('Jeukendrup AE','2017','Training the gut for athletes.','Sports Medicine, 47(Suppl 1), 101–110. — adaptation of carbohydrate absorption with training (supports the trained-gut ~90–120 g/hr range; the 150 g/hr tier is beyond what this review tested).'))}
 
   ${sec('Hydration, sweat &amp; sodium',
     'Sweat-rate fluid replacement, sodium-balance targets, and extracellular-fluid sizing (ECF ≈ 25% of body mass; plasma [Na⁺] ≈ 140 mmol/L).',
@@ -3449,7 +3514,7 @@ let basicPage='main';       // Basic-mode sub-page: 'main' (planner) | 'library'
 function trackCalcUse(){
   if(_calcCounted || !_booted) return;
   if(window.goatcounter && typeof goatcounter.count==='function'){
-    goatcounter.count({path:'calc-run', title:'Calculation run', event:true});
+    goatcounter.count({path:'calc-run', title:'Calculation run', event:true, allow_frame:true});   // count.js skips iframes unless allow_frame
     _calcCounted=true;
   }
 }
@@ -3520,7 +3585,9 @@ function bind(){
     const obj = el.dataset.obj==='comp'?S.comp:S;
     const isBottle = el.dataset.k==='bottleOz';
     const commit=()=>{
-      let v=el.value;
+      let v=el.value; const k=el.dataset.k, lim=NUM_LIMITS[k];
+      if(REQUIRED_POS.has(k) && !(+v>0)) return;    // required: ignore blank / 0 / negative (re-render restores the old value)
+      if(lim && v!=='' && isFinite(+v)) v=String(Math.min(lim[1],Math.max(lim[0],+v)));
       if(isBottle){ applyBottleVolume(v); return; } // scales comp to hold concentration; keeps loadedProduct
       obj[el.dataset.k] = (v===''?(el.dataset.k==='manualSweat'?null:''):+v);
       if(el.dataset.k==='maltoDE') S.loadedProduct=null; // manual change → no longer stock mix
@@ -3532,10 +3599,12 @@ function bind(){
   // Gender select (rider profile) → drives glycogen estimate
   const gs=$('#genderSel'); if(gs) gs.onchange=()=>{ S.gender=gs.value; render(); };
   // running threshold-pace twin inputs (mm:ss per mile ↔ per km)
-  const tMi=$('#thrMi'); if(tMi) tMi.onchange=()=>{ S.runThreshold=parsePace(tMi.value); render(); };
-  const tKm=$('#thrKm'); if(tKm) tKm.onchange=()=>{ S.runThreshold=Math.round(kmToMiPace(parsePace(tKm.value))); render(); };
+  const tMi=$('#thrMi'); if(tMi) tMi.onchange=()=>{ const v=parsePace(tMi.value); if(v>=150&&v<=1800) S.runThreshold=v; render(); };   // 2:30–30:00 /mi
+  const tKm=$('#thrKm'); if(tKm) tKm.onchange=()=>{ const v=Math.round(kmToMiPace(parsePace(tKm.value))); if(v>=150&&v<=1800) S.runThreshold=v; render(); };
   document.querySelectorAll('input[data-comp]').forEach(el=>{
-    const commit=()=>{ S.comp[el.dataset.comp]=+el.value||0; S.loadedProduct=null; };
+    const commit=()=>{ const k=el.dataset.comp, v=+el.value||0;
+      if(k==='malto' && v>0 && !(+S.comp.malto>0)) S.maltoDE=18;   // stale DE from a malto-free product
+      S.comp[k]=v; S.loadedProduct=null; };
     el.onchange=()=>{ commit(); render(); };
     el.oninput=()=>{ commit(); refreshOutputs(); };
   });
@@ -3600,7 +3669,8 @@ window._loadProd=(id)=>{
   S.comp.sucrose  = +(p.split.sucrose  * f).toFixed(2);
   S.comp.malto    = +(p.split.malto    * f).toFixed(2);
   S.comp.fructose = +(p.split.fructose * f).toFixed(2);
-  S.maltoDE = p.de; S.comp.citrate = 0;
+  S.maltoDE = (p.split.malto>0 && p.de) ? p.de : 18; S.comp.citrate = 0;
+  S.extraCarbs=[]; S.extraLytes=[];   // a stock mix replaces the whole bottle, add-ons included
   // product sodium as NaCl-equivalent (Na fraction of NaCl = 0.3934), scaled to the bottle
   S.comp.nacl = +((p.sodium/1000/0.3934) * f).toFixed(2);
   S.loadedProduct = p.name;
@@ -3616,7 +3686,8 @@ window._loadSugar=(id, g)=>{
   S.comp.sucrose  = +(p.split.sucrose  * f).toFixed(2);
   S.comp.malto    = +(p.split.malto    * f).toFixed(2);
   S.comp.fructose = +(p.split.fructose * f).toFixed(2);
-  S.maltoDE = p.de; S.comp.citrate = 0; S.comp.nacl = 0;   // pure sugar: no sodium
+  S.maltoDE = (p.split.malto>0 && p.de) ? p.de : 18; S.comp.citrate = 0; S.comp.nacl = 0;   // pure sugar: no sodium
+  S.extraCarbs=[]; S.extraLytes=[];
   S.loadedProduct = `${p.name} · ${+g||0} g`;
   active='hydr'; render();
 };
@@ -3738,6 +3809,7 @@ function buildFuelOption(opt){
     if(f) items.push({prodId:f.id, qty:fitQty(carbT,fuelCarbG(f),1)});
     fillSodium();
   }
+  for(let i=items.length-1;i>=0;i--) if(!(items[i].qty>0)) items.splice(i,1);   // never suggest "0× …"
   const bottlesPerHour=(S.bottleOz>0 && T.fluidOz>0) ? Math.max(0.25, fitQty(T.fluidOz, S.bottleOz, 0.25)) : S.bottlesPerHour;
   let carbHr=0, naHr=0; items.forEach(it=>{ const p=basicFuelProd(it.prodId); if(p){ carbHr+=p.carbG*it.qty; naHr+=p.sodium*it.qty; } });
   const gelCount=items.reduce((s,it)=>s+(FUEL_PRODUCTS.some(p=>p.id===it.prodId)&&/gel/i.test((FUEL_PRODUCTS.find(p=>p.id===it.prodId)||{}).product||'')?it.qty:0),0);
@@ -3752,7 +3824,8 @@ function fuelCoverScore(opt){
   const T=basicTargets(), b=buildFuelOption(opt);
   const parts=[[b.carbHr,T.carb],[b.fluidHr,T.fluidOz],[b.naHr,T.naMg]];
   let s=0, over=0;
-  parts.forEach(([sup,need])=>{ const c=need>0?sup/need:1; const m=covMark(c); s+=(m==='good'?1:m==='close'?0.6:0); over+=Math.max(0,c-1); });
+  parts.forEach(([sup,need])=>{ const c=need>0?sup/need:(sup>0?1.2:1); const m=covMark(c);   // need 0: none supplied = on target, some = "close"
+    s+=(m==='good'?1:m==='close'?0.6:0); over+=Math.max(0,c-1); });
   return s - 0.15*over;
 }
 function recFuelOption(){ return FUEL_OPTIONS.map(o=>({k:o.key,s:fuelCoverScore(o.key)})).sort((a,b)=>b.s-a.s)[0].k; }
@@ -3873,6 +3946,7 @@ window._loadPerf=(e)=>{
 };
 window._clearPerf=()=>{ if(S.debrief) S.debrief.track=null; render(); };
 window._addActualItem=(block)=>{ if(!S.debrief) S.debrief={actualItems:[],actualFluid:{},notes:''};
+  if(!FUEL_PRODUCTS.length) return;
   (S.debrief.actualItems=S.debrief.actualItems||[]).push({id:_xid('ai'),block,prodId:FUEL_PRODUCTS[0].id,qty:1}); render(); };
 window._setActualItem=(id,field,val)=>{ const it=(S.debrief.actualItems||[]).find(x=>x.id===id); if(!it) return;
   it[field]= field==='qty' ? (val===''?0:+val) : val; render(); };
@@ -3984,7 +4058,7 @@ window._printFuelCard=()=>{
   w.document.open(); w.document.write(doc); w.document.close();
 };
 window._setFuel=(id,field,val)=>{ const p=fuelById(id); if(!p) return;
-  if(['brand','product','unit'].includes(field)) p[field]=val;
+  if(['brand','product','unit'].includes(field)) p[field]=cleanText(val);
   else if(['glucose','fructose','sucrose','malto'].includes(field)){ p.split=p.split||{}; p.split[field]=+val||0; }
   else p[field]=+val||0;
   render(); };
@@ -4016,7 +4090,7 @@ catch(e){
     if(app) app.innerHTML='<div class="panel" style="margin-top:16px"><h2>Couldn’t load your saved data</h2>'
       +'<div class="note">Something in this browser’s saved profile is preventing the calculator from loading. '
       +'Resetting clears only your saved inputs in this browser.</div>'
-      +'<button class="sm" style="margin-top:10px" onclick="try{localStorage.removeItem(ATH_KEY);}catch(e){};location.reload();">Reset saved data &amp; reload</button></div>';
+      +'<button class="sm" style="margin-top:10px" onclick="resetAthlete()">Reset saved data &amp; reload</button></div>';
   }
 }
 _booted=true;                                    // initial render done — count real usage from here on
