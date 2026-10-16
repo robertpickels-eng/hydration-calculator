@@ -14,7 +14,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>Hydration & Osmolality Calculator</title>
-<script>try{if(localStorage.getItem('hydra_theme')!=='light')document.documentElement.classList.add('dark');}catch(e){}</script><!-- dark by default; honors an explicit light choice, no flash -->
+<script>try{var _t=new URLSearchParams(location.search).get('theme');if(_t==='dark'||(_t!=='light'&&localStorage.getItem('hydra_theme')!=='light'))document.documentElement.classList.add('dark');}catch(e){}</script><!-- ?theme= from an embedding page wins; else dark by default, honoring an explicit light choice; no flash -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -429,8 +429,9 @@ const CF = {
 };
 const cfColors = c => document.documentElement.classList.contains('dark') ? {bg:c.dbg,fg:c.dfg} : {bg:c.bg,fg:c.fg};
 const cfStyle = c => { if(!c) return ''; const k=cfColors(c); return `style="background:${k.bg};color:${k.fg};font-weight:700;border-radius:4px"`; };
-// Body Na+ (mM): green 135–146, amber <135, red >146   (sheet column P)
-function naCF(mM){ if(!isFinite(mM)) return ''; return cfStyle(mM<135?CF.amber : mM>146?CF.red : CF.green); }
+// Body Na+ (mM): green 135–145, amber <135 (hyponatremia), red >145 (hypernatremia)
+const NA_LO=135, NA_HI=145;
+function naCF(mM){ if(!isFinite(mM)) return ''; return cfStyle(mM<NA_LO?CF.amber : mM>NA_HI?CF.red : CF.green); }
 // Body weight: green within [start*(1-loss%), start], red below floor   (sheet column K)
 function wtCF(wt){
   const top=S.bodyLbs, floor=S.bodyLbs*(1-S.acceptLoss/100);
@@ -452,6 +453,7 @@ const S = {
   acceptLossMode:'preset',                     // 'preset' | 'manual'
   sweatNa:1380,                                // mg/L
   sweatNaMode:'preset',                        // 'preset' (acclimatization dropdown) | 'manual'
+  testDrankOz:0,                               // fluid drunk during the pre/post sweat test (oz)
   bodyNaConc:140,                              // mmol/L (locked physiological constant)
   maltoDE:18,
   preferredBrands:null,                        // Fuel Library "preferred brands" filter — null = all (incl. future), [] = none, [..] = explicit
@@ -549,13 +551,18 @@ const WEEKLY_HOURS = [
   [2,'Under 3 hrs / week'], [4.5,'3–6 hrs / week'], [8,'6–10 hrs / week'],
   [12,'10–15 hrs / week'], [17,'15+ hrs / week'],
 ];
+// body-mass loss (lb) + fluid drunk (oz) over a test → sweat loss (L). ×0.95 removes the non-sweat mass loss
+// (substrate burned + respiratory water); 1 L sweat ≈ 1 kg. Shared by the calculator and the Sweat Log.
+function sweatLossL(pre, post, drankOz){ return Math.max(0, ((+pre||0)-(+post||0))/LB_PER_KG*0.95 + (+drankOz||0)/OZ_PER_L); }
 function sweatRateLhr(){
   if((S.sweatMethod||'prepost')==='prepost')
-    return (+S.time>0) ? Math.max(0, ((S.pre - S.post)/S.time)/2.2*0.95) : 0;  // (lbs->kg, *0.95 CHO-burn correction) L/hr
+    return (+S.time>0) ? sweatLossL(S.pre, S.post, S.testDrankOz)/S.time : 0;  // (lbs->kg, *0.95 CHO-burn correction) L/hr
   return (S.manualSweat!=null && S.manualSweat!=='') ? +S.manualSweat : 0; // estimate / manual
 }
 function bodyKg(){ return S.bodyLbs/2.2; }
-function totalECF(){ return bodyKg()*0.25; }            // L
+const LB_PER_KG=2.2046;
+function totalECF(){ return bodyKg()*0.20; }            // L — extracellular fluid ≈ 20% of body mass
+function totalTBW(){ return bodyKg()*(S.gender==='female'?0.50:0.60); }   // L — total body water (Watson-style rule of thumb)
 function bodyNaContentG(){ return (bodyNaContentMmol()*23)/1000; }
 function bodyNaContentMmol(){ return S.bodyNaConc*totalECF(); }
 // ---- per-hour drink mix --------------------------------------------------
@@ -615,18 +622,18 @@ let PRODUCTS = [
   ['Skratch Labs','Sport Hydration Mix','1 scoop','drink',16,380,80,{glucose:7,sucrose:14,malto:0,fructose:0},100,'est'],
   ['Skratch Labs','Super High-Carb','2 scoops','drink',10,200,400,{glucose:0,sucrose:0,malto:67,fructose:33},15,'est'],
   ['Gatorade','Thirst Quencher','1 scoop','drink',12,160,80,{glucose:11,sucrose:9,malto:0,fructose:0},100,'est'],
-  ['Gatorade','Endurance Formula','2 scoops','drink',16,310,90,{glucose:0,sucrose:9,malto:9,fructose:4},15,'est'],
+  ['Gatorade','Endurance Formula','per 12 oz','drink',12,310,90,{glucose:0,sucrose:9,malto:9,fructose:4},15,'est'],
   ['First Endurance','EFS Drink Mix','1 scoop','drink',16,300,96,{glucose:8,sucrose:4,malto:12,fructose:0},15,'est'],
   ['First Endurance','EFS-PRO','1 scoop','drink',16,380,120,{glucose:5,sucrose:0,malto:20,fructose:5},12,'est'],
-  ['Tailwind Nutrition','Endurance Fuel','1 scoop','drink',24,160,100,{glucose:17,sucrose:8,malto:0,fructose:0},100,'est'],
-  ['Tailwind Nutrition','High-Carb','2 scoops','drink',16,300,200,{glucose:34,sucrose:16,malto:0,fructose:0},100,'est'],
+  ['Tailwind Nutrition','Endurance Fuel','1 scoop','drink',24,303,100,{glucose:17,sucrose:8,malto:0,fructose:0},100,'est'],
+  ['Tailwind Nutrition','High-Carb','3 scoops (1 pouch)','drink',24,680,360,{glucose:30,sucrose:0,malto:30,fructose:30},18,'est'],   // label: 90 g carb, 2:1 dextrose+malto : fructose
   ['Infinit Nutrition','Go Far','2 scoops','drink',20,379,280,{glucose:10,sucrose:0,malto:55,fructose:5},15,'est'],
   ['Maurten','Drink Mix 320','1 sachet','drink',17,245,320,{glucose:14,sucrose:0,malto:30,fructose:36},15,'est'],
   ['Maurten','Drink Mix 160','1 sachet','drink',17,123,160,{glucose:7,sucrose:0,malto:15,fructose:18},15,'est'],
   ['Styrkr','MIX90','1 sachet','drink',16.9,200,372,{glucose:0,sucrose:0,malto:50,fructose:40},15,'lbl'],
   ['Styrkr','MIX90 Caffeine','1 sachet','drink',16.9,200,372,{glucose:0,sucrose:0,malto:50,fructose:40},15,'lbl'],
   ['Styrkr','MIX60','1 sachet','drink',16.9,140,256,{glucose:0,sucrose:0,malto:33,fructose:27},15,'lbl'],
-  ['Styrkr','MIX+ Carb & Electrolyte','1 scoop','drink',16.9,900,160,{glucose:0,sucrose:0,malto:17,fructose:13},15,'lbl'],
+  ['Styrkr','MIX+ Carb & Electrolyte','1 scoop','drink',16.9,360,160,{glucose:0,sucrose:0,malto:17,fructose:13},15,'lbl'],
   ['Flow Formulas','Endurance','1 scoop','drink',16,390,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
   ['Flow Formulas','Endurance (High Sodium)','1 scoop','drink',16,780,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
   ['NeverSecond','C30 Drink Mix','1 sachet','drink',17,20,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
@@ -642,7 +649,7 @@ let PRODUCTS = [
   ['SiS','GO Electrolyte','2 scoops','drink',17,475,144,{glucose:0,sucrose:0,malto:36,fructose:0},15,'lbl'],
   ['UnTapped','Mapleaid','1 packet','drink',12,250,80,{glucose:1,sucrose:18,malto:0,fructose:1},100,'lbl'],
   ['Infinit Nutrition','Speed','2 scoops','drink',20,379,230,{glucose:15,sucrose:21,malto:21,fructose:0},15,'lbl'],
-  ['Infinit Nutrition','Jet Fuel','1 serving','drink',24,379,230,{glucose:15,sucrose:21,malto:21,fructose:0},15,'lbl'],
+  ['Infinit Nutrition','Jet Fuel','2 scoops (+125 mg caffeine)','drink',24,379,230,{glucose:15,sucrose:21,malto:21,fructose:0},15,'lbl'],
   ['Infinit Nutrition','Premium Fructose Fuel (90)','1 packet','drink',25,500,360,{glucose:10,sucrose:0,malto:50,fructose:30},15,'lbl'],
   ['Amacx','Energy Drink','2 scoops','drink',17,372,119,{glucose:0,sucrose:0,malto:20,fructose:10},15,'lbl'],
   ['Amacx','Turbo Drink (80g)','2 scoops','drink',20,311,319,{glucose:0,sucrose:0,malto:44,fructose:36},15,'lbl'],
@@ -710,6 +717,7 @@ function productOsm(p){
    Calculator — ACSM ergometry VO₂, Weir caloric equivalent,
    substrate-oxidation RQ model). Reads the shared rider profile in S.
    ============================================================ */
+const EXO_OX_MAX = 105;   // g/hr peak exogenous CHO oxidation (~1.75 g/min, glucose+fructose; Jentjens 2004, Jeukendrup 2014)
 const GUT_LEVELS = { unadapted:90, adapted:120, highcarb:150 };   // g/hr carb-absorption ceiling by gut-training level
 function carbCap(){ return GUT_LEVELS[S.gutAdapt] || 120; }        // gut-absorption ceiling for the selected level
 // guideline minimum carb intake (g/hr) by event duration — low end of Jeukendrup 2014 / ACSM-AND-DC 2016:
@@ -783,9 +791,10 @@ function estWkg(hours){ return _clampNum(2.3+(hours-2)*(4.3-2.3)/(17-2), 2.0, 4.
 function estRunPaceSec(hours){ return _clampNum(540-(hours-2)*(540-360)/(17-2), 345, 555); } // run threshold sec/mi, 9:00 @2h → 6:00 @17h
 function applyFitnessEstimate(){
   if(S.fitnessMode!=='estimate') return;            // user typed their own FTP/pace — leave it alone
-  const h=+S.weeklyHours||6;
-  S.ftp = Math.round(estWkg(h)*(S.bodyLbs/2.2)/5)*5;  // nearest 5 W
-  S.runThreshold = Math.round(estRunPaceSec(h));
+  const h=+S.weeklyHours||6, fem=S.gender==='female';
+  // women reach ~88% of men's W/kg and run threshold ~10% slower at similar training (power-profile norms)
+  S.ftp = Math.round(estWkg(h)*(fem?0.88:1)*(S.bodyLbs/2.2)/5)*5;  // nearest 5 W
+  S.runThreshold = Math.round(estRunPaceSec(h)*(fem?1.10:1));
 }
 
 /* ---- critical power / critical speed + anaerobic reserve (W′ cyc · D′ run) ----
@@ -827,9 +836,10 @@ const ACTIVE = {
   running:{ male:0.40, female:0.43 },
 };
 function activeFrac(){ return (ACTIVE[S.activity]||ACTIVE.cycling)[S.gender] ?? 0.27; }
+const GLY_KCAL_G=4.18;   // kcal per g of stored glycogen (glucose units) — same factor the store is built with
 function glycogenKcal(){
   const kg=S.bodyLbs/2.2, g=GLY[S.gender]||GLY.male, conc=glyConc();
-  return liverKcal() + (kg*g.lean*g.musc*activeFrac())*conc*4.18;
+  return liverKcal() + (kg*g.lean*g.musc*activeFrac())*conc*GLY_KCAL_G;
 }
 // active (engaged) muscle mass in kg — exposed for display
 function activeMuscleKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*g.musc*activeFrac(); }
@@ -1019,7 +1029,7 @@ function trackPointsRegex(text){
   const t=s=>{ if(!s) return null; const ms=Date.parse(s[1]); return isFinite(ms)?ms/1000:null; };
   const n=s=>{ if(!s) return null; const v=parseFloat(s[1]); return isFinite(v)?v:null; };
   if(text.indexOf('<Trackpoint')>=0 && text.indexOf('<trkpt')<0){          // TCX
-    const blocks=text.split('<Trackpoint>');
+    const blocks=text.split(/<Trackpoint\b[^>]*>/);
     for(let i=1;i<blocks.length;i++){ const b=blocks[i];
       const la=b.match(/<LatitudeDegrees>([^<]+)</), lo=b.match(/<LongitudeDegrees>([^<]+)</), al=b.match(/<AltitudeMeters>([^<]+)</);
       const ele=al?parseFloat(al[1]):NaN;
@@ -1030,7 +1040,7 @@ function trackPointsRegex(text){
   } else {                                                                 // GPX (paired or self-closing, in order)
     const re=/<(?:trkpt|rtept)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:trkpt|rtept)>)/g; let m;
     while((m=re.exec(text))){ const a=m[1]||'', inner=m[2]||'';
-      const la=a.match(/lat="([^"]+)"/), lo=a.match(/lon="([^"]+)"/), el=inner.match(/<ele>([^<]+)</);
+      const la=a.match(/lat=["']([^"']+)["']/), lo=a.match(/lon=["']([^"']+)["']/), el=inner.match(/<ele>([^<]+)</);
       if(la&&lo){ const lat=+la[1], lon=+lo[1], ele=el?parseFloat(el[1]):NaN;
         if(isFinite(lat)&&isFinite(lon)) pts.push({lat,lon,ele:isFinite(ele)?ele:null,
           t:t(inner.match(/<time>([^<]+)</)), pw:n(inner.match(/<[\w:]*power(?:inwatts)?>([\d.]+)</i)),
@@ -1204,6 +1214,7 @@ function buildPerf(pts){
 }
 // cycling: solve road speed (m/s) at a given grade for a target power, against
 // gravity + rolling + aero drag (simplified Martin et al. 1998). Cubic → bisection.
+const WALK_MS=0.85;   // ≈3 km/h: below this a rider walks/pushes the bike rather than riding slower
 function cycSpeedMS(P, grade){
   const m=(S.bodyLbs + (+S.bikeLbs||0) + (+S.gearLbs||0))/2.2;   // total system mass (kg): rider + bike + gear/clothing allowance
   const g=9.8067, th=Math.atan(grade||0);
@@ -1215,7 +1226,7 @@ function cycSpeedMS(P, grade){
   let lo=0.01, hi=40;
   if(f(hi)<0) return Math.min(35, capMs);                // steep descent → terminal-ish; hold to the descent cap
   for(let k=0;k<60;k++){ const mid=(lo+hi)/2; if(f(mid)>0) hi=mid; else lo=mid; }
-  return Math.max(1.0, Math.min(35, capMs, (lo+hi)/2));  // floor ~3.6 km/h; ceiling = descent cap (or 35 m/s)
+  return Math.max(WALK_MS, Math.min(35, capMs, (lo+hi)/2));  // floor = hike-a-bike pace; ceiling = descent cap (or 35 m/s)
 }
 // speed (m/s) at a grade for a base intensity item, scaled by a pacing multiplier m (m=1 → hold).
 // cycling scales watts; running scales the flat-equivalent speed then solves iso-effort at grade.
@@ -1284,7 +1295,7 @@ function courseTime(opts){
   // oxidised per hour (gut-capped, kcal), which spares endogenous glycogen 1:1 up to what's being burned. glyFloor =
   // glycogen fraction below which effort is held at top-of-Z2 until it rebuilds back above the floor (hysteresis,
   // mirroring the W′ recovery cap) — a real athlete who runs the tank low must soft-pedal to recover.
-  const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap())*4;
+  const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap(), EXO_OX_MAX)*4;   // ingested ≠ oxidised above ~105 g/hr
   const glyFloor = +opts.glyCapFrac||0;
   // anaerobic-reserve boundary + capacity (W′ cyc in J vs CP=W · D′ run in m vs CS=m/min flat-equiv)
   const CP = isRun()? csSpeed() : cpWatts();
@@ -1309,7 +1320,7 @@ function courseTime(opts){
     for(let i=1;i<pr.length;i++){ const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
       const grade=(pr[i][1]-pr[i-1][1])/dd, wF = Wp>0 ? Math.max(0,Math.min(1,wb/Wp)) : 1;
       if(bl){ if(wF>=RC_HIGH) bl=false; } else if(wF<=0.01){ bl=true; }
-      const m=paceMult(strat,grade,pr[i-1][0]/totalD)*descentMult(grade,wF)*scale;
+      const m=paceMult(strat,grade,pr[i-1][0]/totalD)*descentMult(grade,wF)*scale*sc(Math.floor(T2/SEG));   // same per-block effort as the main pass
       let iv=baseIv*m; { const ceil=recoveryCeil(bl,wF); if(iv>ceil) iv=ceil; } iv=supraTaper(iv,wF);
       let v=isRun()?solveSpeedScaled(grade,baseIv>0?iv/baseIv:0,baseIt):cycSpeedMS(iv,grade); if(v<=0) continue;
       let dt=dd/v; const unit=isRun()?dt/60:dt;
@@ -1409,10 +1420,11 @@ function courseTime(opts){
 // source of truth: the Performance-Predictor estimate while a course is loaded, else the user's
 // manual entry (S.manualHours). Called at the top of render() so every tab reflects it.
 function syncDuration(){
+  applyFitnessEstimate();                                 // estimate mode: keep FTP/pace current with weight & sex (no-op in manual)
   const onCourse = S.activityMode==='course' && S.course;
   const t = onCourse ? courseTime() : null;               // single terrain-fine pass drives everything
   S._ct = t; S._ctFine = t;                               // _ctFine kept as an alias for the chart/sustainability call sites
-  S.eventHours = t ? +t.hours.toFixed(2) : Math.min(48, Math.max(0, +S.manualHours||0));   // clamp: a huge saved value would hang every reload
+  S.eventHours = t ? t.hours : Math.min(48, Math.max(0, +S.manualHours||0));   // clamp: a huge saved value would hang every reload
 }
 // diverging colour from a signed, normalized effort t ∈ [−1,1] (0 = average, cool = easier, warm = harder).
 // a mild gamma pulls mid-range values away from neutral so nearby workloads read as distinct shades.
@@ -1684,11 +1696,11 @@ let FUEL_PRODUCTS = [
   ['NeverSecond','C30 Gel','Each',                          120,200, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
   ['Styrkr','GEL30 Dual-Carb Gel','Each',                   128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
   ['Styrkr','GEL30 Caffeine Gel','Each',                    128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
-  ['Styrkr','BAR50 Rice Energy Bar','Each',                 260,603, {glucose:0,  fructose:0,    sucrose:10, malto:40  }, 20],
+  ['Styrkr','BAR50 Rice Energy Bar','Each',                 260,250, {glucose:0,  fructose:0,    sucrose:10, malto:40  }, 20],
   ['Styrkr','BAR30 Rice Energy Bar','Each',                 170,190, {glucose:0,  fructose:0,    sucrose:7,  malto:23  }, 20],
   ['Honey Stinger','Energy Gel','Each',                     100, 50, {glucose:12, fructose:12,   sucrose:0,  malto:0   }, 15],
   ['Honey Stinger','Waffle','Each',                         150, 50, {glucose:7,  fructose:0,    sucrose:14, malto:0   }, 15],
-  ['Skratch','Energy Chews','Pack',                          80, 80, {glucose:7,  fructose:0,    sucrose:12, malto:0   }, 15],
+  ['Skratch','Energy Chews','Pack (2 servings)',            160,160, {glucose:14, fructose:0,    sucrose:24, malto:0   }, 15],
   ['Clif','Shot Bloks','3 chews',                           100, 50, {glucose:10, fructose:0,    sucrose:14, malto:0   }, 15],
   ['Clif','Bar','Each',                                     250,150, {glucose:20, fructose:10,   sucrose:14, malto:0   }, 15],
   ['Gatorade','Endurance Carb Gel','Each',                   80, 90, {glucose:0,  fructose:6,    sucrose:0,  malto:14  }, 15],
@@ -1752,7 +1764,7 @@ sortFuel();
 const FUEL_DEFAULTS = FUEL_PRODUCTS.map(p=>({...p, split:{...p.split}}));
 // Bump this when the factory food list changes (new items OR corrections to existing ones) so saved
 // profiles refresh their factory foods on next load while keeping any custom foods the user added.
-const FUEL_LIB_VERSION = 4;
+const FUEL_LIB_VERSION = 5;   // v5: Skratch chews per full pack, Styrkr BAR50 sodium (label-verified 2026-10-16)
 function fuelById(id){ return FUEL_PRODUCTS.find(p=>p.id===id); }
 function fuelCarbG(p){ const s=(p&&p.split)||{}; return (+s.glucose||0)+(+s.fructose||0)+(+s.sucrose||0)+(+s.malto||0); }
 function fuelLabel(p){ return p ? `${p.brand?p.brand+' ':''}${p.product||''}${p.unit?' ('+p.unit+')':''}`.trim() : ''; }
@@ -1880,6 +1892,11 @@ function loadAthlete(){
       if(s.manualHours===undefined) s.manualHours = (s.eventHours!==undefined ? +s.eventHours : S.manualHours); // seed manual entry from old saves
       if(s.activityMode===undefined) s.activityMode = s.course ? 'course' : 'manual'; // seed the source toggle from old saves
       Object.assign(S, s);
+      // estimate mode now re-runs every render: protect FTP/pace typed under older versions (no mode saved, or a
+      // value that doesn't match the weekly-hours estimate) by treating them as hand-entered
+      if(s.fitnessMode===undefined) S.fitnessMode='manual';
+      else if(S.fitnessMode==='estimate'){ const f0=S.ftp, r0=S.runThreshold; applyFitnessEstimate();
+        if(Math.abs(S.ftp-f0)>5 || Math.abs(S.runThreshold-r0)>5){ S.ftp=f0; S.runThreshold=r0; S.fitnessMode='manual'; } }
     }
     // keep a saved fuel list only if it's the new brand/split schema; legacy generic lists
     // are dropped so the curated defaults (with sodium + sugar splits) take over
@@ -1949,7 +1966,7 @@ const fmt=(n,d=1)=>Number.isFinite(n)?(+n).toLocaleString(undefined,{minimumFrac
 const escHtml=s=>(''+(s==null?'':s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // sane bounds for numeric inputs [min, max]; REQUIRED_POS keys must stay > 0 (blank/0 → keep the previous value)
 const NUM_LIMITS={ bodyLbs:[50,500], ftp:[30,800], manualHours:[0,48], bottlesPerHour:[0,10], bottleOz:[1,128],
-  maltoDE:[1,100], pre:[50,500], post:[50,500], manualSweat:[0,5], time:[0.05,24], acceptLoss:[0,10],
+  maltoDE:[1,100], testDrankOz:[0,400], pre:[50,500], post:[50,500], manualSweat:[0,5], time:[0.05,24], acceptLoss:[0,10],
   gearLbs:[0,50], maxDescentKmh:[5,150], sweatNa:[0,4000] };
 const REQUIRED_POS=new Set(['bodyLbs','ftp','bottleOz','time']);
 // plain number for <input type=number> value= (fmt() is locale-formatted: "1,5"/"1,234" are invalid there)
@@ -1969,7 +1986,7 @@ function compField(label,key,unit){
 /* Typical sweat [Na+] by acclimatization — reference table from the workbook (mmol/L, mg/L, level) */
 const SWEAT_NA_REF = [
   [20, 460, 'Low'], [40, 920, 'L Norm'], [60, 1380, 'H Norm'],
-  [80, 1840, 'Salty'], [100, 2300, 'Highest'], [140, 3220, 'Body'],
+  [80, 1840, 'Salty'], [100, 2300, 'Highest'],
 ];
 // add-on ingredient row: a dropdown limited to the known library + grams
 function extraRow(x, kind){
@@ -2025,7 +2042,8 @@ function sweatSodiumPanel(){
   const sr = sweatRateLhr();
   return `<div class="panel" style="margin-top:16px">
         <h2>Sweat & Sodium</h2>
-        <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
+        <div class="res"><span>Total body water (≈${S.gender==='female'?50:60}% mass)</span><span class="v">${fmt(totalTBW(),1)} L</span></div>
+        <div class="res"><span>Total ECF (≈20% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
         <div class="sub-h">Sweat rate</div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Method</label>
@@ -2038,6 +2056,7 @@ function sweatSodiumPanel(){
           ${numField('Pre weight','pre','lbs')}
           ${numField('Post weight','post','lbs')}
           ${numField('Test duration','time','hr',0.1)}
+          ${numField('Drank during test','testDrankOz','oz',1)}
         </div>`:''}
         ${S.sweatMethod==='estimate'?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">How sweaty?</label>
           <select id="sweatGuess" style="flex:1;min-width:0">
@@ -2360,8 +2379,9 @@ function viewRider(){
         ${(()=>{const f=fitFrac();const lbl=f<0.2?'Recreational':f<0.45?'Developing':f<0.7?'Trained':f<0.9?'Well-trained':'Elite';
           return `<div class="res"><span>Training status <span class="muted">(fat-ox)</span></span><span class="v">${lbl} · ${fmt(f*100,0)}%</span></div>`;})()}
         <div class="res"><span>Active muscle <span class="muted">(${run?'running':'cycling'})</span></span><span class="v">${fmt(activeMuscleKg(),1)} kg · ${fmt(activeFrac()*100,0)}% of SMM</span></div>
-        <div class="res"><span>Predicted glycogen</span><span class="v">${fmt(glycogenKcal()/4,0)} g · ${fmt(glycogenKcal(),0)} kcal</span></div>
-        <div class="res"><span>Total ECF (≈25% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
+        <div class="res"><span>Predicted glycogen</span><span class="v">${fmt(glycogenKcal()/GLY_KCAL_G,0)} g · ${fmt(glycogenKcal(),0)} kcal</span></div>
+        <div class="res"><span>Total body water (≈${S.gender==='female'?50:60}% mass)</span><span class="v">${fmt(totalTBW(),1)} L</span></div>
+        <div class="res"><span>Total ECF (≈20% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
         <div class="note">Derived from weight, gender, sport &amp; ${run?'pace':'FTP'} — these feed the Caloric (glycogen, time-to-bonk) and Hydration (ECF, sodium balance) models. ${srcLink('model details →')}</div>
       </div>
@@ -2499,7 +2519,7 @@ function viewHydration(){
         <h2>Product</h2>
         <div class="row-actions">
           <select id="loadProd" style="flex:1;min-width:0"><option value=""${S.loadedProduct?'':' selected'}>— load a product —</option>
-            ${loadableProducts().map(p=>`<option value="${p._id}"${p.name===S.loadedProduct?' selected':''}>${p.name}</option>`).join('')}</select>
+            ${loadableProducts().filter(p=>!isElyteCap(p)).map(p=>`<option value="${p._id}"${p.name===S.loadedProduct?' selected':''}>${p.name}</option>`).join('')}</select>
           <button class="sm" onclick="window._createCustom()" title="Clear everything to a blank custom formula">Create Custom</button>
         </div>
         ${S.loadedProduct?`<div class="note" style="color:var(--accent2)">Loaded <b>${S.loadedProduct}</b> — values reflect the manufacturer's standard mix ratio, scaled to your bottle volume (${fmt(S.bottleOz,1)} oz / ${fmt(S.bottleOz/OZ_PER_L,2)} L). Edit any field to customize.</div>`:''}
@@ -2579,8 +2599,11 @@ function osmolalityPanel(){
 // Plan-based projection (mirrors the "Solve drink contents" tab): everything is driven by
 // the user's inputs — each hour's planned bottles (override, else Bottles/hr), mix and food/capsule Na — and acceptable loss / Na just flag limits.
 function projectionRows(hours=8){
-  const C6=sweatRateLhr(), C5=S.bottleOz, C3=S.bodyLbs,
-        H8=totalECF(), H6=S.sweatNa, H11=bodyNaContentG();
+  // Edelman: plasma [Na⁺] ≈ exchangeable (Na⁺+K⁺) ÷ total body water. Water gained/lost spreads over ALL body
+  // water; sodium lost/gained stays extracellular. So [Na⁺]t = (C0·TBW0 − net Na lost) ÷ TBWt, and ECF follows
+  // osmotically: ECFt = ECF Na content ÷ [Na⁺]t. (An ECF-only water model overstates the swing ~2.5×.)
+  const C6=sweatRateLhr(), C5=S.bottleOz, C3=S.bodyLbs, C0=S.bodyNaConc,
+        TBW0=totalTBW(), ECF0=totalECF(), H6=S.sweatNa, pool0=C0*TBW0, ecfNa0=C0*ECF0;
   const rows=[];
   let bottles=0, drinkNaMg=0;
   for(let h=1;h<=hours;h++){
@@ -2593,46 +2616,50 @@ function projectionRows(hours=8){
     const lossLbs  = (lostL-replL)*2.2;           // net body-mass change (lbs; + = lost)
     const lossPct  = C3 ? lossLbs/C3*100 : 0;     // % of body weight
     const wt       = C3-lossLbs;                  // current body weight (lbs)
-    const ecf      = H8-lostL+replL;              // new ECF (L)
-    const lostNaG  = ((H6*lostL)-drinkNaMg)/1000;   // net sodium lost (g) = sweat Na − drink/food Na
-    const Ng       = H11-lostNaG;                 // body Na (g)
-    const Ommol    = Ng/23*1000;                  // body Na (mmol)
-    const mM       = ecf ? Ommol/ecf : 0;         // body Na (mM)
-    rows.push({h, lostL, bottles, replOz, lossLbs, lossPct, wt, ecf, Ng, Ommol, mM});
+    const tbw      = TBW0-lostL+replL;            // total body water now (L)
+    const lostNaMmol=((H6*lostL)-drinkNaMg)/23;   // net sodium lost (mmol) = sweat Na − drink/food Na
+    const pool     = pool0-lostNaMmol;            // osmotically effective cation pool (mmol)
+    const mM       = tbw>0 ? pool/tbw : 0;        // plasma Na⁺ (mM)
+    const Ommol    = ecfNa0-lostNaMmol;           // extracellular Na content (mmol)
+    const Ng       = Ommol*23/1000;               // extracellular Na (g)
+    const ecf      = mM>0 ? Ommol/mM : 0;         // ECF volume at osmotic equilibrium (L)
+    rows.push({h, lostL, bottles, replOz, lossLbs, lossPct, wt, ecf, tbw, pool, Ng, Ommol, mM});
   }
   return rows;
 }
 /* Per-hour coaching for a projection row: flags fluid + sodium and, where out of band,
    computes how much to add/cut PER HOUR to bring that metric back into the green.
-   Fluid: 1 lb water ≈ 15.4 oz (lbs ÷ 2.2 → L × 33.814).  Na: ΔmM × ECF(L) × 23 = mg Na. */
+   Fluid: 1 lb water ≈ 15.4 oz (lbs ÷ 2.2 → L × 33.814).  Na: Δ[Na⁺] × total body water × 23 = mg Na
+   (sodium you add is diluted across all body water at equilibrium — same Edelman model as the projection). */
 function recoFor(x){
   const acceptableLbs = S.bodyLbs * S.acceptLoss/100;       // allowed net loss (lbs)
   const lbsToOz = lbs => lbs/2.2*OZ_PER_L;                  // lbs of water → fluid oz
   const naToSaltG = mg => mg/1000/0.3934;                   // mg Na⁺ → g of NaCl (table salt)
+  const naPerOz = calcDrinkNaPerOz();                       // the bottle's sodium rides along with any fluid change
   const parts=[]; let cls='good';
-  // --- 1) Fluid: how much to add/cut, AND the ECF that results once it's corrected ---
-  // The two are coupled: adding water raises ECF (dilutes Na⁺), cutting it lowers ECF
-  // (concentrates Na⁺). We fix fluid first, then judge sodium at that corrected ECF.
-  let ecfAdj = x.ecf;                                        // ECF after the fluid fix (L)
+  // --- 1) Fluid: how much to add/cut, AND the body water + Na pool that result once it's corrected ---
+  // Adding bottles adds water (dilutes) AND the bottle's sodium; cutting removes both. Fix fluid first,
+  // then judge sodium at the corrected state.
+  let tbwAdj = x.tbw, poolAdj = x.pool;
   if(x.lossPct > S.acceptLoss){                              // drying out → drink more, up to the floor
-    ecfAdj = totalECF() - acceptableLbs/2.2;                 // ECF held at the acceptable-loss floor
-    const oz = lbsToOz(x.lossLbs - acceptableLbs)/x.h;       // extra oz PER HOUR
-    parts.push(`Add ≈ <b>${fmt(oz,0)} oz/hr</b> fluid`);
+    const addOz = lbsToOz(x.lossLbs - acceptableLbs);        // cumulative extra fluid
+    tbwAdj = x.tbw + addOz/OZ_PER_L; poolAdj = x.pool + addOz*naPerOz/23;
+    parts.push(`Add ≈ <b>${fmt(addOz/x.h,0)} oz/hr</b> fluid`);
     cls='bad';
   } else if(x.wt > S.bodyLbs){                               // gaining weight → ease back to start weight
-    ecfAdj = totalECF();
-    const oz = lbsToOz(x.wt - S.bodyLbs)/x.h;
-    parts.push(`Cut ≈ <b>${fmt(oz,0)} oz/hr</b> fluid`);
+    const cutOz = lbsToOz(x.wt - S.bodyLbs);
+    tbwAdj = x.tbw - cutOz/OZ_PER_L; poolAdj = x.pool - cutOz*naPerOz/23;
+    parts.push(`Cut ≈ <b>${fmt(cutOz/x.h,0)} oz/hr</b> fluid`);
     if(cls==='good') cls='warn';
   }
-  // --- 2) Sodium: judged at the CORRECTED ECF so the volume + Na⁺ move together (mM green 135–146) ---
-  const mMadj = ecfAdj ? x.Ommol/ecfAdj : x.mM;             // body Na⁺ concentration once the fluid fix lands
-  if(mMadj < 135){                                           // too dilute → add sodium
-    const mg = (135 - mMadj)*ecfAdj*23/x.h;                  // extra mg Na⁺ PER HOUR
+  // --- 2) Sodium: judged at the CORRECTED state so volume + Na⁺ move together (mM green 135–145) ---
+  const mMadj = tbwAdj>0 ? poolAdj/tbwAdj : x.mM;           // plasma Na⁺ once the fluid fix lands
+  if(mMadj < NA_LO){                                         // too dilute → add sodium
+    const mg = (NA_LO - mMadj)*tbwAdj*23/x.h;                // extra mg Na⁺ PER HOUR
     parts.push(`Add ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺ (~${fmt(naToSaltG(mg),1)} g salt)`);
     if(cls!=='bad') cls='warn';
-  } else if(mMadj > 146){                                    // too concentrated → ease off salt
-    const mg = (mMadj - 146)*ecfAdj*23/x.h;
+  } else if(mMadj > NA_HI){                                  // too concentrated → ease off salt
+    const mg = (mMadj - NA_HI)*tbwAdj*23/x.h;
     parts.push(`Cut ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺`);
     cls='bad';
   }
@@ -2647,15 +2674,15 @@ function viewProjection(){
   const hrs=Math.min(36,Math.max(S.projHours||8, evHour+2)); // always show ≥2 hours past the event
   const r=projectionRows(hrs);
   return `<div class="panel"><h2>Hour-by-Hour Projection</h2>
-  <div class="note">Projects <b>your plan</b>: each hour's planned bottles (Event Plan overrides, else your Bottles/hr), that hour's drink mix plus planned food/capsule sodium, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Body Na⁺ (mM)</b> is green 135–146, amber &lt;135, red &gt;146. <b>Note:</b> <b>Body Na⁺ (g)</b> is total sodium <i>mass</i> while <b>Na⁺ (mM)</b> is <i>concentration</i> (mass ÷ fluid). They can move opposite ways: if you under-drink, mM can <i>climb</i> (dehydration concentrates sodium) even while total Na⁺ falls and the bottle tab shows a <i>negative</i> hourly Na⁺ balance — that balance is a mass deficit, not a concentration. The <b>Recommendation</b> column reads those flags for each hour: green = good to go, otherwise it estimates how much fluid and sodium to add (or cut) per hour to get back in band — solved together, so the sodium amount accounts for how the corrected fluid volume dilutes or concentrates your Na⁺. The <b style="color:var(--accent2)">boxed</b> row marks the hour your ${fmt(S.eventHours,1)}-hr activity ends (set on Athlete &amp; Activity); the table runs a couple hours past it.</div>
+  <div class="note">Projects <b>your plan</b>: each hour's planned bottles (Event Plan overrides, else your Bottles/hr), that hour's drink mix plus planned food/capsule sodium, replaced volume vs sweat loss. <b>Weight loss %</b> turns red once it exceeds your acceptable loss; <b>Body weight</b> is green within the band, red below it; <b>Na⁺ (mM)</b> is green 135–145, amber &lt;135, red &gt;145. Water you gain or lose spreads across <b>all body water</b>, while sodium stays in the extracellular fluid (Edelman), so concentration moves less than an ECF-only estimate would suggest. <b>Note:</b> <b>Body Na⁺ (g)</b> is extracellular sodium <i>mass</i> while <b>Na⁺ (mM)</b> is <i>concentration</i> (mass ÷ fluid). They can move opposite ways: if you under-drink, mM can <i>climb</i> (dehydration concentrates sodium) even while total Na⁺ falls and the bottle tab shows a <i>negative</i> hourly Na⁺ balance — that balance is a mass deficit, not a concentration. The <b>Recommendation</b> column reads those flags for each hour: green = good to go, otherwise it estimates how much fluid and sodium to add (or cut) per hour to get back in band — solved together, so the sodium amount accounts for how the corrected fluid volume dilutes or concentrates your Na⁺. The <b style="color:var(--accent2)">boxed</b> row marks the hour your ${fmt(S.eventHours,1)}-hr activity ends (set on Athlete &amp; Activity); the table runs a couple hours past it.</div>
   <div class="scroll" style="margin-top:10px"><table class="tc proj">
     <thead><tr><th>Hr</th><th>Water lost (L)</th><th>Replaced (oz)</th>
       <th>Wt loss (lbs)</th><th>Wt loss (%)</th><th>Body wt (lbs)</th>
-      <th>New ECF (L)</th><th>Body Na⁺ (g)</th><th>Na⁺ (mM)</th><th>Recommendation</th></tr></thead>
+      <th>Body water (L)</th><th>ECF (L)</th><th>Body Na⁺ (g)</th><th>Na⁺ (mM)</th><th>Recommendation</th></tr></thead>
     <tbody>${r.map(x=>{const rc=recoFor(x);return `<tr${x.h===evHour?' class="proj-evrow"':''}>
       <td>${x.h}${x.h===evHour?`<div class="muted" style="font-size:9px;color:var(--accent2)">event end</div>`:''}</td><td>${fmt(x.lostL,1)}</td><td>${fmt(x.replOz,0)}</td>
       <td>${fmt(x.lossLbs,1)}</td><td ${lossCF(x.lossPct)}>${fmt(x.lossPct,1)}%</td>
-      <td ${wtCF(x.wt)}>${fmt(x.wt,1)}</td><td>${fmt(x.ecf,1)}</td>
+      <td ${wtCF(x.wt)}>${fmt(x.wt,1)}</td><td>${fmt(x.tbw,1)}</td><td>${fmt(x.ecf,1)}</td>
       <td>${fmt(x.Ng,1)}</td><td ${naCF(x.mM)}>${fmt(x.mM,1)}</td>
       <td class="reco"><span class="reco-box" ${recoBoxStyle(rc.cls)}>${rc.html}</span></td></tr>`;}).join('')}
     </tbody></table></div>
@@ -2740,7 +2767,7 @@ function viewCaloric(){
       <span class="muted" style="margin-left:auto;font-size:12px">Muscle state: <b>${({training:'Typical training',rested:'Tapered & rested',loaded:'Carb-loaded'})[S.glyState]||S.glyState}</b> · <a onclick="active='rider';render()" style="color:var(--accent);cursor:pointer">edit on Athlete &amp; Activity →</a></span>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:24px;margin-top:6px">
-      <div class="res" style="border:none"><span>Glycogen stored&nbsp;</span><span class="v">${fmt(glycogenKcal()/4,0)} g</span></div>
+      <div class="res" style="border:none"><span>Glycogen stored&nbsp;</span><span class="v">${fmt(glycogenKcal()/GLY_KCAL_G,0)} g</span></div>
       <div class="res" style="border:none"><span>Energy stored&nbsp;</span><span class="v">${fmt(glycogenKcal(),0)} kcal</span></div>
       <div class="res" style="border:none"><span>Active muscle&nbsp;</span><span class="v">${fmt(activeMuscleKg(),1)} kg @ ${glyConc()} g/kg</span></div>
     </div>
@@ -2782,7 +2809,7 @@ function viewCaloric(){
         <h2 style="margin:0">Zone × Time — recommended carbs (g/hr)</h2>
         <span class="muted" style="font-size:11px;margin-left:auto">Gut ceiling <b style="color:var(--accent)">${cap} g/hr</b> (${gutAdaptLabel()}) — set on Athlete tab</span>
       </div>
-      <div class="note" style="margin-top:4px">Recommended carbohydrate intake (<b>g/hr</b>) by ${wl?(run?'pace':'workload'):'zone'} and total ${run?'run':'ride'} duration: enough that predicted glycogen never falls below your ${S.reservePct}% reserve, and never less than the guideline minimum (30 g/hr for 1–2.5 hr, 60 g/hr beyond). Capped at your gut ceiling of <b>${cap} g/hr</b> (${gutAdaptLabel()}); an <span style="color:var(--bad);font-weight:700">✕</span> means the requirement exceeds it. Glycogen store ${fmt(glycogenKcal()/4,0)} g · usable ${fmt(usableGly/4,0)} g.</div>
+      <div class="note" style="margin-top:4px">Recommended carbohydrate intake (<b>g/hr</b>) by ${wl?(run?'pace':'workload'):'zone'} and total ${run?'run':'ride'} duration: enough that predicted glycogen never falls below your ${S.reservePct}% reserve, and never less than the guideline minimum (30 g/hr for 1–2.5 hr, 60 g/hr beyond). Capped at your gut ceiling of <b>${cap} g/hr</b> (${gutAdaptLabel()}); an <span style="color:var(--bad);font-weight:700">✕</span> means the requirement exceeds it. Glycogen store ${fmt(glycogenKcal()/GLY_KCAL_G,0)} g · usable ${fmt(usableGly/4,0)} g.</div>
       <div class="scroll" style="margin-top:8px"><table class="tc zxt">
         <thead><tr><th style="text-align:left">${wl?(run?'Pace':'Workload'):'Zone'}</th><th>CHO burn (g/hr)</th>
           ${DURS.map(d=>`<th>${d} hr</th>`).join('')}</tr></thead>
@@ -3029,18 +3056,18 @@ function viewLibrary(){
       <td style="text-align:left">${act}</td></tr>`;
   };
   const foodRow=p=>{const s=p.split||{};return `<tr>
-      <td style="text-align:left"><input type="text" value="${esc(p.brand)}" style="width:140px" onchange="window._setFuel('${p.id}','brand',this.value)"></td>
-      <td style="text-align:left"><input type="text" value="${esc(p.product)}" style="width:130px" onchange="window._setFuel('${p.id}','product',this.value)"></td>
-      <td><input type="text" value="${esc(p.unit)}" style="width:64px" onchange="window._setFuel('${p.id}','unit',this.value)"></td>
-      <td><input type="number" step="0.5" value="${s.glucose||0}" style="width:48px" onchange="window._setFuel('${p.id}','glucose',this.value)"></td>
-      <td><input type="number" step="0.5" value="${s.fructose||0}" style="width:48px" onchange="window._setFuel('${p.id}','fructose',this.value)"></td>
-      <td><input type="number" step="0.5" value="${s.sucrose||0}" style="width:48px" onchange="window._setFuel('${p.id}','sucrose',this.value)"></td>
-      <td><input type="number" step="0.5" value="${s.malto||0}" style="width:48px" onchange="window._setFuel('${p.id}','malto',this.value)"></td>
-      <td><input type="number" step="1" value="${p.de}" style="width:44px" onchange="window._setFuel('${p.id}','de',this.value)"></td>
+      <td style="text-align:left"><input type="text" value="${esc(p.brand)}" style="width:140px" data-fid="${p.id}" data-ff="brand" onchange="window._setFuel('${p.id}','brand',this.value)\"></td>
+      <td style="text-align:left"><input type="text" value="${esc(p.product)}" style="width:130px" data-fid="${p.id}" data-ff="product" onchange="window._setFuel('${p.id}','product',this.value)\"></td>
+      <td><input type="text" value="${esc(p.unit)}" style="width:64px" data-fid="${p.id}" data-ff="unit" onchange="window._setFuel('${p.id}','unit',this.value)\"></td>
+      <td><input type="number" step="0.5" value="${s.glucose||0}" style="width:48px" data-fid="${p.id}" data-ff="glucose" onchange="window._setFuel('${p.id}','glucose',this.value)\"></td>
+      <td><input type="number" step="0.5" value="${s.fructose||0}" style="width:48px" data-fid="${p.id}" data-ff="fructose" onchange="window._setFuel('${p.id}','fructose',this.value)\"></td>
+      <td><input type="number" step="0.5" value="${s.sucrose||0}" style="width:48px" data-fid="${p.id}" data-ff="sucrose" onchange="window._setFuel('${p.id}','sucrose',this.value)\"></td>
+      <td><input type="number" step="0.5" value="${s.malto||0}" style="width:48px" data-fid="${p.id}" data-ff="malto" onchange="window._setFuel('${p.id}','malto',this.value)\"></td>
+      <td><input type="number" step="1" value="${p.de}" style="width:44px" data-fid="${p.id}" data-ff="de" onchange="window._setFuel('${p.id}','de',this.value)\"></td>
       <td style="font-weight:700">${fmt(fuelCarbG(p),0)}</td>
       <td ${gfCellStyle(p)}>${fuelGF(p)}</td>
-      <td><input type="number" step="5" value="${p.kcal}" style="width:58px" onchange="window._setFuel('${p.id}','kcal',this.value)"></td>
-      <td><input type="number" step="5" value="${p.sodium}" style="width:58px" onchange="window._setFuel('${p.id}','sodium',this.value)"></td>
+      <td><input type="number" step="5" value="${p.kcal}" style="width:58px" data-fid="${p.id}" data-ff="kcal" onchange="window._setFuel('${p.id}','kcal',this.value)\"></td>
+      <td><input type="number" step="5" value="${p.sodium}" style="width:58px" data-fid="${p.id}" data-ff="sodium" onchange="window._setFuel('${p.id}','sodium',this.value)\"></td>
       <td><button class="sm ghost" onclick="window._rmFuel('${p.id}')" title="remove">×</button></td></tr>`;};
   const foodHead=`<thead><tr><th style="text-align:left">Brand</th><th style="text-align:left">Product</th><th>Unit</th><th>Glu</th><th>Fru</th><th>Suc</th><th>Malto</th><th>DE</th><th>Carb (g)</th><th>G:F</th><th>kcal</th><th>Na (mg)</th><th></th></tr></thead>`;
   return `<div class="panel">
@@ -3064,6 +3091,7 @@ function viewLibrary(){
           <button class="sm ghost" onclick="window._prefBrandsAll()">Select all</button>
           <button class="sm ghost" onclick="window._prefBrandsNone()">Select none</button>
         </div>
+        <div class="muted" style="font-size:11px;margin:4px 2px">${pb==null?'All brands — including any added later.':'Only the ticked brands — brands added later stay off until you tick them (or Select all).'}</div>
         <div class="brandms-list">
           ${brands.map(b=>`<label class="brandms-item"><input type="checkbox" value="${esc(b)}"${isBrandPreferred(b)?' checked':''} onchange="window._toggleBrand(this.value,this.checked)"> ${esc(b)}</label>`).join('')}
         </div>
@@ -3112,14 +3140,14 @@ let SWEATLOG = [
   {date:'',hrs:1,cond:'',temp:'',pre:'',post:'',oz:0,na:''},
 ];
 function swCalc(r){
-  const lossOz=(r.pre-r.post)*16 + (+r.oz||0);
-  const ozHr=lossOz/r.hrs, lHr=ozHr/33.8, pctLost=(1-r.post/r.pre)*100;
-  const naL=r.na? r.na*33.8 : '';
+  const lossOz=sweatLossL(r.pre, r.post, r.oz)*OZ_PER_L;
+  const ozHr=lossOz/r.hrs, lHr=ozHr/OZ_PER_L, pctLost=(1-r.post/r.pre)*100;
+  const naL=r.na? r.na*OZ_PER_L : '';
   return {lossOz,ozHr,lHr,pctLost,naL};
 }
 function viewSweatLog(){
   return `<div class="panel"><h2>Sweat-Rate Log</h2>
-  <div class="note">Each row computes oz/hr, L/hr and % body-mass lost from pre/post weight + fluid consumed. <b>Use</b> pushes that sweat rate into the Calculator. <span class="muted">Loss(oz) = (pre−post)×16 + consumed.</span></div>
+  <div class="note">Each row computes oz/hr, L/hr and % body-mass lost from pre/post weight + fluid consumed. <b>Use</b> pushes that sweat rate into the Calculator. <span class="muted">Loss = (pre−post) lb ÷ 2.2046 × 0.95 (non-sweat mass loss removed) + fluid drunk — same formula as the Calculator.</span></div>
   <div class="scroll" style="margin-top:10px"><table>
     <thead><tr><th>Date</th><th>Hrs</th><th>Avg °F</th><th>Pre</th><th>Post</th><th>Drank oz</th>
       <th>Loss oz</th><th>oz/hr</th><th>L/hr</th><th>% lost</th><th>Na mg/oz</th><th></th></tr></thead>
@@ -3182,7 +3210,7 @@ function viewSources(){
     + ref('Jones AM, Vanhatalo A, Burnley M, Morton RH, Poole DC','2010','Critical power: implications for determination of V̇O₂max and exercise tolerance.','Medicine &amp; Science in Sports &amp; Exercise, 42(10), 1876–1890. — CP as the heavy/severe-domain boundary and W′ above it.')
     + ref('Skiba PF, Chidnok W, Vanhatalo A, Jones AM','2012','Modeling the expenditure and reconstitution of work capacity above critical power.','Medicine &amp; Science in Sports &amp; Exercise, 44(8), 1526–1532. — the W′-balance depletion/reconstitution model; the cycling τ used here.')
     + ref('Skiba PF, Clarke D, Vanhatalo A, Jones AM','2014','Effect of work and recovery durations on W′ reconstitution during intermittent exercise.','Medicine &amp; Science in Sports &amp; Exercise, 46(7), 1433–1440. — recovery-intensity dependence of τ.')
-    + ref('Vassallo C, Gray A, Cummins C, Murphy A, Waldron M','2020','Exercise tolerance during flat over-ground intermittent running: modelling the expenditure and reconstitution kinetics of work done above critical power.','European Journal of Applied Physiology, 120, 219–232. — running-specific W′ reconstitution (τ ≈ 120–470 s), ~2× faster than cycling; the running τ used here.')
+    + ref('Vassallo C, Gray A, Cummins C, Murphy A, Waldron M','2020','Exercise tolerance during flat over-ground intermittent running: modelling the expenditure and reconstitution kinetics of work done above critical power.','European Journal of Applied Physiology, 120(1), 219–230. — running-specific W′ reconstitution (τ ≈ 120–470 s), ~2× faster than cycling; the running τ used here.')
     + ref('Kirby BS, Winn BJ, Wilkins BW, Jones AM','2021','Interaction of exercise bioenergetics with pacing behavior predicts track distance running performance.','Journal of Applied Physiology, 131(5), 1532–1542. — D′ balance predicts finishing position; strong runners hold reserve until the final lap (basis for the taper &amp; “hold for the finish” behavior).')
     + ref('Jones AM, Vanhatalo A','2017','The ‘critical power’ concept: applications to sports performance with a focus on intermittent high-intensity exercise.','Sports Medicine, 47(Suppl 1), 65–78. — critical speed / D′ in running.')
     + ref('Abbiss CR, Laursen PB','2008','Describing and understanding pacing strategies during athletic competition.','Sports Medicine, 38(3), 239–252. — pacing taxonomy and the teleoanticipation framework behind the self-preservation taper.')
@@ -3204,10 +3232,11 @@ function viewSources(){
     + ref('Jeukendrup AE','2017','Training the gut for athletes.','Sports Medicine, 47(Suppl 1), 101–110. — adaptation of carbohydrate absorption with training (supports the trained-gut ~90–120 g/hr range; the 150 g/hr tier is beyond what this review tested).'))}
 
   ${sec('Hydration, sweat &amp; sodium',
-    'Sweat-rate fluid replacement, sodium-balance targets, and extracellular-fluid sizing (ECF ≈ 25% of body mass; plasma [Na⁺] ≈ 140 mmol/L).',
+    'Sweat-rate fluid replacement, sodium-balance targets, and body-fluid sizing (total body water ≈ 60% of body mass in men, 50% in women; ECF ≈ 20%; plasma [Na⁺] ≈ 140 mmol/L). The hour-by-hour projection uses Edelman’s relation — plasma [Na⁺] ≈ exchangeable (Na⁺+K⁺) ÷ total body water — so water gained or lost spreads across all body water while sodium stays extracellular. Green band 135–145 mmol/L.',
     ref('Sawka MN, Burke LM, Eichner ER, Maughan RJ, Montain SJ, Stachenfeld NS','2007','American College of Sports Medicine position stand: Exercise and fluid replacement.','Medicine &amp; Science in Sports &amp; Exercise, 39(2), 377–390. — the ≤2% body-mass acceptable-loss threshold.')
     + ref('Baker LB','2017','Sweating rate and sweat sodium concentration in athletes: a review of methodology and intra/interindividual variability.','Sports Medicine, 47(Suppl 1), 111–128.')
-    + ref('Edelman IS, Leibman J','1959','Anatomy of body water and electrolytes.','The American Journal of Medicine, 27(2), 256–277. — body-fluid compartment sizing behind the ECF and sodium-content estimates.'))}
+    + ref('Edelman IS, Leibman J','1959','Anatomy of body water and electrolytes.','The American Journal of Medicine, 27(2), 256–277. — body-fluid compartment sizing behind the ECF and sodium-content estimates.')
+    + ref('Edelman IS, Leibman J, O’Meara MP, Birkenfeld LW','1958','Interrelations between serum sodium concentration, serum osmolarity and total exchangeable sodium, total exchangeable potassium and total body water.','Journal of Clinical Investigation, 37(9), 1236–1256. — plasma [Na⁺] ∝ (Na⁺ₑ + K⁺ₑ) ÷ TBW, the basis of the projection.'))}
 
   ${sec('Drink osmolality &amp; gastric emptying',
     'Bottle osmolality = Σ(grams ÷ molar mass × particles) ÷ volume, and its effect on gastric emptying. Particle (dissociation) factors used: sugars = 1, NaCl = 2, sodium citrate = 4, maltodextrin ≈ 1 per (18016/DE) g — so a higher DE means more, smaller particles and higher osmolality; maltodextrin osmolality is estimated from its dextrose equivalent (number-average MW ≈ 18016 ÷ DE).',
@@ -3260,7 +3289,7 @@ function viewSummary(){
   let glyNoFuelPct=100, glyPlanPct=100;
   if(t&&t.series&&t.series.length) glyNoFuelPct=t.series[t.series.length-1][3];
   if(tS&&tS.series&&tS.series.length) glyPlanPct=tS.series[tS.series.length-1][3];
-  const glyNoFuelG=gly0/4*glyNoFuelPct/100, glyPlanG=gly0/4*glyPlanPct/100, bonk=glyPlanPct<=0.5;
+  const glyNoFuelG=gly0/GLY_KCAL_G*glyNoFuelPct/100, glyPlanG=gly0/GLY_KCAL_G*glyPlanPct/100, bonk=glyPlanPct<=0.5;
 
   const header=`<div class="panel"><h2 style="margin:0 0 4px">Summary</h2>
     <div class="note" style="margin-top:0">The actionable takeaways from your plan${c?` for <b>${escHtml(c.name||'your course')}</b>`:''}. ${t?'Everything below reflects the effort and fuel you’ve set on the other tabs.':'Load a course on <b>Athlete &amp; Activity</b> for the full course-by-course picture — the fuel &amp; hydration targets below already reflect your entries.'}</div></div>`;
@@ -3469,7 +3498,7 @@ function viewDebrief(){
         ${chart}
         <div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:7px;font-size:11px">
           ${legendChip('var(--muted)','Predicted (with plan)',true)}
-          ${legendChip('var(--accent2)',`Actual <span class="muted">≈${fmt(gly0/4*de.endPct/100,0)} g left${de.endPct<=0.5?' · <b style="color:var(--bad)">bonk</b>':''}</span>`)}
+          ${legendChip('var(--accent2)',`Actual <span class="muted">≈${fmt(gly0/GLY_KCAL_G*de.endPct/100,0)} g left${de.endPct<=0.5?' · <b style="color:var(--bad)">bonk</b>':''}</span>`)}
         </div>
         <div class="note" style="margin-top:4px">Actual is rebuilt from your recorded ${run?'pace':'power'} and the fuel you logged above (gut-capped). If it dips below the plan, you either rode harder than modelled or under-fueled. ${srcLink('depletion &amp; substrate models →')}</div>
       </div>`;
@@ -3501,7 +3530,7 @@ let active='rider';
 function elSig(el){
   if(!el || el.tagName!=='INPUT' && el.tagName!=='SELECT') return null;
   if(el.id) return '#'+el.id;
-  const attrs=['data-k','data-obj','data-comp','data-lvol','data-kgmass','data-id','data-f','data-sub','data-xc','data-xl','data-xf','data-sw','data-swk','data-pl','data-plk','data-seg'];
+  const attrs=['data-k','data-obj','data-comp','data-lvol','data-kgmass','data-id','data-f','data-sub','data-xc','data-xl','data-xf','data-sw','data-swk','data-pl','data-plk','data-seg','data-fid','data-ff'];
   let sel=el.tagName.toLowerCase(), has=false;
   attrs.forEach(a=>{ if(el.hasAttribute(a)){ sel+=`[${a}="${el.getAttribute(a)}"]`; has=true; } });
   return has?sel:null;
@@ -3586,7 +3615,8 @@ function bind(){
     const isBottle = el.dataset.k==='bottleOz';
     const commit=()=>{
       let v=el.value; const k=el.dataset.k, lim=NUM_LIMITS[k];
-      if(REQUIRED_POS.has(k) && !(+v>0)) return;    // required: ignore blank / 0 / negative (re-render restores the old value)
+      if(REQUIRED_POS.has(k) && !(+v>0)) return;
+      if(k==='ftp') S.fitnessMode='manual';          // typing your own FTP overrides the weekly-hours estimate    // required: ignore blank / 0 / negative (re-render restores the old value)
       if(lim && v!=='' && isFinite(+v)) v=String(Math.min(lim[1],Math.max(lim[0],+v)));
       if(isBottle){ applyBottleVolume(v); return; } // scales comp to hold concentration; keeps loadedProduct
       obj[el.dataset.k] = (v===''?(el.dataset.k==='manualSweat'?null:''):+v);
@@ -3599,8 +3629,8 @@ function bind(){
   // Gender select (rider profile) → drives glycogen estimate
   const gs=$('#genderSel'); if(gs) gs.onchange=()=>{ S.gender=gs.value; render(); };
   // running threshold-pace twin inputs (mm:ss per mile ↔ per km)
-  const tMi=$('#thrMi'); if(tMi) tMi.onchange=()=>{ const v=parsePace(tMi.value); if(v>=150&&v<=1800) S.runThreshold=v; render(); };   // 2:30–30:00 /mi
-  const tKm=$('#thrKm'); if(tKm) tKm.onchange=()=>{ const v=Math.round(kmToMiPace(parsePace(tKm.value))); if(v>=150&&v<=1800) S.runThreshold=v; render(); };
+  const tMi=$('#thrMi'); if(tMi) tMi.onchange=()=>{ const v=parsePace(tMi.value); if(v>=150&&v<=1800){ S.runThreshold=v; S.fitnessMode='manual'; } render(); };   // 2:30–30:00 /mi
+  const tKm=$('#thrKm'); if(tKm) tKm.onchange=()=>{ const v=Math.round(kmToMiPace(parsePace(tKm.value))); if(v>=150&&v<=1800){ S.runThreshold=v; S.fitnessMode='manual'; } render(); };
   document.querySelectorAll('input[data-comp]').forEach(el=>{
     const commit=()=>{ const k=el.dataset.comp, v=+el.value||0;
       if(k==='malto' && v>0 && !(+S.comp.malto>0)) S.maltoDE=18;   // stale DE from a malto-free product
@@ -3715,7 +3745,6 @@ window._addDrink=(cat='drink',form)=>{
 window._approve=(id)=>{ const it=DB.userItems.find(u=>u.id===id); if(it){ it.status='approved'; saveDB(); render(); } };
 window._reject =(id)=>{ DB.userItems=DB.userItems.filter(u=>u.id!==id); saveDB(); render(); };
 window._resetRow=(id)=>{ if(id.startsWith('c:')){ delete DB.overrides[id.slice(2)]; saveDB(); render(); } };
-window._clearComp=()=>{S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0};S.loadedProduct=null;render();};
 const _xid=(p)=>p+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
 window._addExtraCarb=()=>{ S.extraCarbs.push({id:_xid('xc'),key:CARB_LIB[0].key,grams:0}); render(); };
 window._addExtraLyte=()=>{ S.extraLytes.push({id:_xid('xl'),key:ELYTE_LIB[0].key,grams:0}); render(); };
@@ -3723,7 +3752,6 @@ window._rmExtra=(kind,id)=>{ if(kind==='c') S.extraCarbs=S.extraCarbs.filter(x=>
 window._createCustom=()=>{ S.comp={glucose:0,sucrose:0,malto:0,fructose:0,nacl:0,citrate:0}; S.extraCarbs=[]; S.extraLytes=[]; S.loadedProduct=null; render(); };
 window._addHours=(n)=>{ S.projHours=Math.min(36,(S.projHours||8)+n); render(); };
 window._setHours=(n)=>{ S.projHours=n; render(); };
-window._setSweatNa=(mg)=>{S.sweatNa=mg;render();};
 window._useSweat=(i)=>{const c=swCalc(SWEATLOG[i]);S.manualSweat=+c.lHr.toFixed(3);S.sweatMethod='manual';active='rider';render();};
 window._addSweat=()=>{SWEATLOG.push({date:'',hrs:1,cond:'',temp:'',pre:'',post:'',oz:0,na:''});render();};
 
@@ -3788,9 +3816,14 @@ function buildFuelOption(opt){
   // prefer the drink carrying the most sodium that's still ≤ target (electrolyte only tops up, never over-salts),
   // else the one with the least overshoot. Returns {id, q}.
   const bestCarbDrink=(pool)=>{
-    const cands=(pool.length?pool:drinks).map(d=>{ const q=fitQty(carbT,productCarb(d),0.5); return {id:d._id, q, na:q*(+d.sodium||0)}; });
-    const under=cands.filter(c=>c.na<=naT).sort((a,b)=>b.na-a.na);
-    return under[0] || cands.slice().sort((a,b)=>a.na-b.na)[0];
+    const cands=(pool.length?pool:drinks).map(d=>{ let q=fitQty(carbT,productCarb(d),0.5);
+      const maxQ=(T.fluidOz>0 && +d.oz>0) ? Math.max(0.5, Math.floor(T.fluidOz/d.oz*1.5*2)/2) : Infinity;   // ≤1.5× label strength
+      q=Math.min(q,maxQ); return {id:d._id, q, na:q*(+d.sodium||0), carb:q*productCarb(d)}; });
+    // drinks that still cover ≥90% of the carb target at a sane strength come first; then the sodium rule
+    const covering=cands.filter(c=>c.carb>=0.9*carbT), onTarget=covering.filter(c=>c.carb<=1.3*carbT);   // ≥90%, ideally ≤130%
+    const pool2=onTarget.length?onTarget : covering.length?covering : cands.slice().sort((a,b)=>b.carb-a.carb).slice(0,3);
+    const under=pool2.filter(c=>c.na<=naT).sort((a,b)=>b.na-a.na);
+    return under[0] || pool2.slice().sort((a,b)=>a.na-b.na)[0];
   };
   // each style = ONE carb vehicle (scaled to the carb target) + an electrolyte to finish sodium → ≤2 products, all three hit
   if(opt==='aio'){                                                         // one high-carb electrolyte drink (+ a salt top-up only if very salty)
@@ -3806,7 +3839,7 @@ function buildFuelOption(opt){
     fillSodium();
   } else if(opt==='whole'){                                                // real food for carbs + an electrolyte for sodium (e.g. bananas + Precision PH)
     const mild=foods.filter(f=>(+f.sodium||0)<100); const f=closest(mild.length?mild:foods, fuelCarbG, 25);
-    if(f) items.push({prodId:f.id, qty:fitQty(carbT,fuelCarbG(f),1)});
+    if(f) items.push({prodId:f.id, qty:Math.min(4, fitQty(carbT,fuelCarbG(f),1))});   // ≤4 pieces/hr — beyond that, real food isn't practical
     fillSodium();
   }
   for(let i=items.length-1;i>=0;i--) if(!(items[i].qty>0)) items.splice(i,1);   // never suggest "0× …"
@@ -3981,7 +4014,7 @@ window._setCourseParam=(key,val)=>{ if(val==='') return; S[key]=+val; render(); 
 // Basic bike style → sets position (CdA) + tires (Crr) + weight (lbs) presets in one pick
 const BIKE_TYPES=[
   ['road','Road','Hoods position · Rec road tires · 18 lb',           0.32, 0.0045, 18],
-  ['gravel','Gravel','Hoods position · grippy gravel tires · 20 lb',  0.32, 0.0074, 20],
+  ['gravel','Gravel','Gravel position (hoods, wide tires) · grippy gravel tires · 20 lb',  0.38, 0.0074, 20],
   ['mtb','Mountain','MTB position · grippy XC tires · 26 lb',         0.48, 0.0079, 26],
   ['tt','Time Trial','TT position · Rec road tires · 21 lb',          0.24, 0.0045, 21]];
 window._setBikeType=(t)=>{ const b=BIKE_TYPES.find(x=>x[0]===t); if(!b) return; S.bikeType=t; S.cda=b[3]; S.crr=b[4]; S.bikeLbs=b[5]; render(); };
@@ -4066,7 +4099,8 @@ window._addFuel=()=>{ FUEL_PRODUCTS.push({id:_xid('f'),brand:'',product:'New pro
 window._rmFuel=(id)=>{ FUEL_PRODUCTS=FUEL_PRODUCTS.filter(p=>p.id!==id);
   S.planItems=S.planItems.filter(it=>it.prodId!==id); render(); };
 window._resetAthlete=()=>{ if(confirm('Reset all saved inputs to defaults? This clears your saved athlete profile in this browser.')) resetAthlete(); };
-// Light/dark theme toggle (nav bar). Default light; choice persists in this browser.
+// Light/dark theme toggle (nav bar). Default dark; choice persists in this browser. When embedded on
+// extrapickels.com the parent passes ?theme= and posts {type:'ep-theme'} on toggle so both stay in sync.
 window._toggleTheme=()=>{
   const dark=!document.documentElement.classList.contains('dark');
   document.documentElement.classList.toggle('dark', dark);
@@ -4075,7 +4109,14 @@ window._toggleTheme=()=>{
 };
 
 loadAthlete();                                   // restore last session's inputs (if any)
-try{ if(localStorage.getItem('hydra_theme')!=='light') document.documentElement.classList.add('dark'); }catch(e){}  // dark by default; honor explicit light choice
+try{ const tq=new URLSearchParams(location.search).get('theme');
+  if(tq==='dark'||tq==='light') document.documentElement.classList.toggle('dark', tq==='dark');      // embedding page's theme
+  else if(localStorage.getItem('hydra_theme')!=='light') document.documentElement.classList.add('dark'); }catch(e){}  // dark by default; honor explicit light choice
+// live theme sync from the extrapickels.com embed (origin-checked; not persisted — the parent owns it)
+const EMBED_ORIGINS=/^https:\/\/(www\.)?extrapickels\.com$|^https:\/\/[\w-]+\.netlify\.app$|^http:\/\/localhost(:\d+)?$/;
+window.addEventListener('message', e=>{ const d=e.data;
+  if(!EMBED_ORIGINS.test(e.origin) || !d || d.type!=='ep-theme' || (d.theme!=='dark'&&d.theme!=='light')) return;
+  if(document.documentElement.classList.contains('dark')!==(d.theme==='dark')){ document.documentElement.classList.toggle('dark', d.theme==='dark'); render(); } });
 window.addEventListener('beforeunload', saveAthlete);  // belt-and-suspenders save
 // resilient first paint: a malformed restored object (e.g. an old/partial saved course) must never
 // blank the whole app. Drop the most fragile restored state and retry; if it still fails, offer a reset.
