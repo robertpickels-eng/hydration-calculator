@@ -17,7 +17,7 @@
 <script>try{var _t=new URLSearchParams(location.search).get('theme');if(_t==='dark'||(_t!=='light'&&localStorage.getItem('hydra_theme')!=='light'))document.documentElement.classList.add('dark');}catch(e){}</script><!-- ?theme= from an embedding page wins; else dark by default, honoring an explicit light choice; no flash -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   /* ===========================================================
      ExtraPickels restyle — brand token values mapped onto the
@@ -48,12 +48,13 @@
     /* fonts */
     --font-display:'Schibsted Grotesk',system-ui,sans-serif;
     --font-body:'Hanken Grotesk',system-ui,-apple-system,sans-serif;
-    --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --font-mono:'Hanken Grotesk',system-ui,-apple-system,sans-serif;   /* numbers use the sans face + tabular figures — no monospace anywhere */
     color-scheme:light;
   }
   *{box-sizing:border-box}
+  code,pre,kbd,samp,tt{font-family:var(--font-body)}
   body{margin:0;background:var(--bg);color:var(--txt);
-    font:15px/1.55 var(--font-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+    font:15px/1.55 var(--font-body);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
 
   /* ---- Header: ExtraPickels wordmark + mono eyebrow tool name ---- */
   header{display:flex;align-items:center;gap:16px;padding:14px 24px;background:var(--panel);
@@ -226,6 +227,7 @@
   .z4{background:#ecdfd2;color:#6a4d39}   /* ember clay */
   .z5{background:#f1ddda;color:#86413b}   /* rose */
   .z6{background:#e7dde8;color:#5d4a66}   /* muted plum */
+  .z7{background:#e6e0dc;color:#4a3f3a}   /* warm grey (Coggan Z7, neuromuscular) */
   /* Zone × Time supplementation matrix cells (sequential feasibility scale) */
   table.zxt td.sc{font-variant-numeric:tabular-nums;font-weight:600;text-align:center}
   td.st-w{background:transparent;color:var(--muted)}
@@ -282,7 +284,7 @@
   }
   html.dark .z1{background:#203026;color:#a4d0a3} html.dark .z2{background:#232d45;color:#b0c1e8}
   html.dark .z3{background:#322e19;color:#dec380} html.dark .z4{background:#33271c;color:#daae88}
-  html.dark .z5{background:#321f23;color:#dfa0a7} html.dark .z6{background:#2a2434;color:#c4aed2}
+  html.dark .z5{background:#321f23;color:#dfa0a7} html.dark .z6{background:#2a2434;color:#c4aed2} html.dark .z7{background:#2b2724;color:#cfc2b8}
   html.dark td.st-w{background:transparent;color:var(--muted)}
   html.dark td.st-g, html.dark .st-g{background:#203026;color:#a4d0a3}
   html.dark td.st-y, html.dark .st-y{background:#322e19;color:#dec380}
@@ -494,7 +496,9 @@ const S = {
   course:null,                                 // parsed track: {name, distM, gainM, lossM, avgGrade, maxGrade, profile:[[d_m,ele_m],…]}
   pacingStrategy:'even',                        // performance-predictor pacing: even|climb5|climb10|neg|fade (off the selected average)
   athleteType:'balanced',                       // anaerobic-reserve profile → auto W′/D′ per kg: aerobic | balanced | anaerobic
-  wPrimeKJ:null,                                // W′ override (kJ, cycling anaerobic work capacity); null → auto by athleteType. CP = FTP.
+  wPrimeKJ:null,                                // W′ override (kJ, cycling anaerobic work capacity); null → auto by athleteType.
+  cpr:null,                                     // CP ÷ FTP override (cycling); null → auto by athleteType (1.07 / 1.05 / 1.02)
+  durability:'typical',                         // cycling durability: how fast CP & W′ fade with work done — low | typical | high
   dPrimeM:null,                                 // D′ override (m, running anaerobic distance capacity); null → auto by athleteType. CS = threshold pace.
   bikeType:'road',                             // Basic: bike style ('road'|'gravel'|'mtb'|'tt') — sets CdA (position) + Crr (tires) + bike weight presets
   bikeLbs:18,                                  // bike weight (lbs) — cycling course-time model (total mass = body + bike + gear)
@@ -539,7 +543,7 @@ const SALT_BASIC = [
   [80,1840,'Salty','White streaks drying on your kit; eyes sting on hard days.'],
   [100,2300,'Very salty','Salt-caked cap, gritty cheeks, eyes burning by the end.'],
 ];
-// RPE picker → zone index (works for both 5-zone cycling and 6-zone running lists)
+// RPE picker → zone index (works for both the 7 Coggan cycling levels and the 6 running zones)
 const RPE_BASIC = [
   [0,'Easy','Recovery spin — could do it all day.'],
   [1,'Steady Base','A steady effort where you can talk, but couldn\'t sing.'],
@@ -747,12 +751,16 @@ function isRun(){ return S.activity==='running'; }
 // small pointer to the Sources tab — used where the science prose was moved off the feature pages
 const srcLink = (label='methods → Models & Sources') => `<a onclick="active='sources';render()" style="color:var(--accent2);cursor:pointer">${label}</a>`;
 // zone sets per activity
+// cycling: Coggan's 7 power levels, % of FTP (Allen & Coggan 2010) — the same zones the ExtraPickels Workout Lab uses.
+// Metrics compute at each zone's MIDPOINT; Z1 is taken as 45–55% and Z7 (sprints, seconds long) as 151–200% for that.
 const ZONES_CYC = [
-  { label:'Recovery',  pct:55,  cls:'z1' },
-  { label:'Endurance', pct:70,  cls:'z2' },
-  { label:'Tempo',     pct:85,  cls:'z3' },
-  { label:'Threshold', pct:100, cls:'z4' },
-  { label:'VO₂max',    pct:120, cls:'z5' },
+  { label:'Active Recovery',    lo:45,  hi:55,  rng:'≤55%',    cls:'z1' },
+  { label:'Endurance',          lo:56,  hi:75,  rng:'56–75%',  cls:'z2' },
+  { label:'Tempo',              lo:76,  hi:90,  rng:'76–90%',  cls:'z3' },
+  { label:'Threshold',          lo:91,  hi:105, rng:'91–105%', cls:'z4' },
+  { label:'VO₂max',             lo:106, hi:120, rng:'106–120%',cls:'z5' },
+  { label:'Anaerobic Capacity', lo:121, hi:150, rng:'121–150%',cls:'z6' },
+  { label:'Neuromuscular',      lo:151, hi:200, rng:'>150%',   cls:'z7' },
 ];
 // running: Rob's "JD" (Jack Daniels) zones — % RANGES of THRESHOLD SPEED.
 // Ranges can overlap; metrics compute at each zone's MIDPOINT, the table shows the full range.
@@ -802,7 +810,7 @@ function applyFitnessEstimate(){
    steady state. We take CP = FTP and CS = threshold pace (within a few %; both already entered).
    W′ (J, cycling) / D′ (m, running) = the FINITE work/distance available ABOVE CP/CS; it depletes
    when over the line (T_lim = W′/(P−CP)) and reconstitutes below it (Skiba monoexponential). */
-function cpWatts(){ return Math.max(1,+S.ftp||0); }                                 // critical power (W)
+function cpWatts(){ return Math.max(1,(+S.ftp||0)*cpRatio()); }                    // critical power (W) = CP/FTP ratio × FTP (cpRatio: athlete type, or typed)
 function csSpeed(){ return Math.max(1,vThreshold()); }                              // critical speed (m/min, flat-equivalent)
 // anaerobic-reserve size per kg body mass by athlete type — endurance/diesel runs a smaller reserve
 // above CP/CS, a punchy/sprint type a larger one. Auto value unless the rider overrides W′/D′ directly.
@@ -878,7 +886,7 @@ function imetrics(item, grade=0){
   const choKcalHr=Math.min(1,Math.max(0,(336.3*rq-235.7)/100))*kcalHr;
   return { vo2:Math.max(0,vo2), rq, kcalHr, choKcalHr, fatKcalHr:kcalHr-choKcalHr };
 }
-function zoneWatts(zi){ return (zones()[zi].pct/100)*S.ftp; }
+function zoneWatts(zi){ return (zMid(zones()[zi])/100)*S.ftp; }
 
 // the active intensity list — zone set, or the athlete's custom workload (watts) / pace rows
 function intensities(){
@@ -890,7 +898,7 @@ function intensities(){
     if(isRun()){ const pct=zMid(z), sp=vThreshold()*pct/100;
       return {label:z.label, pct, lo:z.lo, hi:z.hi, speed:sp, pace:speedToPace(sp),
         paceLo:speedToPace(vThreshold()*z.lo/100), paceHi:speedToPace(vThreshold()*z.hi/100), cls:z.cls}; }
-    return {label:z.label, pct:z.pct, watts:zoneWatts(i), cls:z.cls};
+    return {label:z.label, pct:zMid(z), rng:z.rng, watts:zoneWatts(i), wLo:S.ftp*z.lo/100, wHi:S.ftp*z.hi/100, cls:z.cls};
   });
 }
 function intItem(i){ const L=intensities(); return L[Math.min(i,L.length-1)]||{}; }
@@ -940,8 +948,14 @@ function eventTotals(){
   } else {
     // MANUAL mode: sum the user's per-30-min zone plan (no terrain, no reserve surcharge).
     segs=segments();
+    // cycling: walk the plan through the durability model in 1-min steps so the efficiency drift (kcal per watt
+    // rising with fatigue, GE_DRIFT_K) applies here too; running has no drift term
+    const R = isRun()? null : makeReserve(0);
     segs.forEach(s=>{ const m=intMetricsByIdx(s.zi, s.grade);
-      kcal+=m.kcalHr*s.dur; choKcal+=m.choKcalHr*s.dur; fatKcal+=m.fatKcalHr*s.dur; });
+      let geSum=0, n=Math.max(1,Math.round(s.dur*60));
+      if(R){ const w=intItem(s.zi).watts||0; for(let k=0;k<n;k++){ geSum+=1+GE_DRIFT_K*R.fat(); R.advance(w,s.dur*3600/n); } }
+      const geM = R? geSum/n : 1;
+      kcal+=m.kcalHr*geM*s.dur; choKcal+=m.choKcalHr*geM*s.dur; fatKcal+=m.fatKcalHr*geM*s.dur; });
   }
   const gly=glycogenKcal(), usableGly=gly*(1-S.reservePct/100);
   // carbohydrate that must be eaten so endogenous glycogen stays above the reserve to the finish
@@ -1278,17 +1292,106 @@ const PACE_LABELS={ even:'Even (hold average)', climb5:'Climb +5% / ease descent
 // snap a representative intensity (W cyc · m/min run) to the nearest training zone — for the 30-min block labels
 function nearestZoneForIv(iv){ const run=isRun(), zv=intensities().map(z=> run?(z.speed||0):(z.watts||0));
   let best=0, bd=Infinity; zv.forEach((v,zi)=>{ const d=Math.abs(v-iv); if(d<bd){bd=d;best=zi;} }); return best; }
+/* ---- anaerobic reserve + durability engine (ported from the ExtraPickels Workout Lab, v75) ----
+   One stateful model the course walk steps through. CYCLING carries the Lab's physiology:
+   · CP = (CP ÷ FTP) × FTP by athlete type (1.07 aerobic / 1.05 balanced / 1.02 anaerobic), not CP = FTP.
+   · W′ refill is bi-exponential (Chorley, Marwood & Lamb 2023): a fast, PCr-like 36% share that empties
+     first and refills in ~1 min, and a slow share that refills over many minutes; both refill more slowly
+     the closer you ride to CP. After a DEEP drain (≥ half of W′ spent) part of the fast deficit only refills
+     at the slow rate on the next recovery (Chorley 2019/2023 repeated bouts) — short partial drains refill
+     normally (Skiba & Clarke 2021: W′bal under-predicts refill after them).
+   · Acidity: work above CP also builds a proton load (one W′ of above-CP work = 1) that clears slowly
+     below CP (pH half-recovery ~6 min, Bogdanis 1996); at 1.8 you're done even with W′ left (Black 2017;
+     limit set so Tabata 1996 fails at bout 7–8). MODEL ASSUMPTION.
+   · Durability: CP fades up to 20% and the W′ ceiling up to 36% with work done, each kJ weighted by
+     (P/FTP)³ (capped at CP) plus 3× the above-CP kJ, against a durability reference (Borszcz 2018 FTP hold
+     35/51/67 min; fitted to Clark 2019 & Hamilton 2024, checked against Spragg 2023 for long rides). 60% of
+     that fade is recoverable while riding easy (< 60% FTP, τ 5 min: McClean 2025, Grossl 2012); the rest
+     stays (Carroll 2017). MODEL ASSUMPTION.
+   RUNNING keeps the single-pool D′ model (Skiba-form, over-ground τ from Vassallo 2020) with CS = threshold
+   pace — the Lab's constants come from cycling studies and have no running equivalent yet. */
+const ATYPE_CPR = { aerobic:1.07, balanced:1.05, anaerobic:1.02 };   // CP ÷ FTP (20-min-test arithmetic FTP = 0.95·(CP + W′/1200))
+const DUR_KJ = { low:797, typical:1318, high:1885 };                // weighted-kJ fatigue reference at a 250-W FTP (scales with FTP)
+const DUR_LABELS = { low:'Low — fades early', typical:'Typical', high:'High — holds power late' };
+const DUR_DCP=0.20, DUR_DW=0.36, DUR_LAM=3, DUR_FTPREF=250;          // max CP fade · max W′-ceiling fade · above-CP kJ weight · kJ reference FTP
+const CPREC_R=0.6, CPREC_TAU=300, CPREC_PCT=0.60;                    // recoverable share of the fade · its τ (s) · "easy" threshold (% FTP)
+const W_PHI=0.36;                                                    // fast (PCr-like) share of W′ (Chorley 2023)
+const tauFC=d=>45*Math.exp(-0.014*d)+9999*Math.exp(-0.811*d);       // fast-pool refill τ (s); d = % below CP (Chorley 2023 eq 6b)
+const tauSC=d=>9999*Math.exp(-0.098*d)+429;                          // slow-pool refill τ (s) (eq 6c)
+const ACID_TAU=520, ACID_LIM=1.8;                                    // acidity clearance τ (s) · exhaustion limit (W′ units)
+// carbohydrate protects CP, not W′: after 3 h moderate riding CP fell 15% on water, 7% at 60 g/h and 4% at 120 g/h
+// (Norte 2026); after 2 h heavy riding CP was unchanged at 40 and 80 min with or without carbs and only the placebo trial
+// dropped by 2 h (Clark 2019); W′ fell regardless (both). So fueling protects the LATE fade: CP-fatigue accrued after the
+// start is scaled by 1 − (1 − e^(−g/DUR_CHO_K))·(1 − e^(−t/DUR_CHO_TAU)) — no protection early (keeps the ~35–67-min FTP
+// hold, Borszcz 2018), full dose effect after ~1.5 h. K & τ fitted to Norte's two doses over 3 h (model 0.43 / 0.29 of the
+// water fade vs 0.47 / 0.27 measured). The Lab's fade constants are the unfed case. MODEL FIT, moderate–heavy data only.
+const DUR_CHO_K=42, DUR_CHO_TAU=2700;
+// gross efficiency drifts down as fatigue builds — 18.4 → 17.4% over 2 h at 60% of max minute power (Hopker 2017; also
+// Passfield & Doust 2000, Stevenson 2022), so the same watts cost more kcal late in a long ride. Tied to the fatigue state:
+// kcal × (1 + GE_DRIFT_K·fatigue), K fitted so that 2-h ride gives +5%; tops out at +12.5% when fatigue saturates. MODEL ASSUMPTION
+// (Evans 2025 saw no GE change after 60–90 min).
+const GE_DRIFT_K=0.125;
+// VO₂ slow component (cycling): heavy domain (top of Zone 2 → CP) adds ~4% O₂ that levels off; severe domain (above CP)
+// keeps climbing toward V̇O₂max, ~11% by 9 min (Colosio 2020; Jones 2011). Severe part = the Lab's accumulating term:
+// +SC_K·(P−CP)/FTP L/min per second above CP, capped at SC_CAP, clearing with τ SC_TAU below CP.
+const SC_HEAVY=0.042, SC_K=0.014, SC_CAP=0.7, SC_TAU=100;
+function cpRatio(){ return S.cpr!=null && +S.cpr>0 ? +S.cpr : (ATYPE_CPR[S.athleteType] ?? 1.05); }
+function durKJref(){ return (DUR_KJ[S.durability] ?? DUR_KJ.typical) * Math.max(1,+S.ftp||0)/DUR_FTPREF; }
+function makeReserve(fuelG){
+  if(isRun()){
+    const CS=csSpeed(), Dp=dPrimeMeters(); let wb=Dp;
+    const tau=iv=>102 + 372*Math.exp(-3*Math.max(0,Math.min(1,(CS-iv)/CS)));   // over-ground reconstitution (Vassallo 2020)
+    return { cp0:CS, cap:Dp, cp:()=>CS, bal:()=>wb, ceil:()=>Dp, head:()=>Dp>0?Math.max(0,Math.min(1,wb/Dp)):1,
+      avail:()=>Math.max(0,wb), fat:()=>0, acid:()=>0,
+      advance(iv,dt,unit){ let spent=0;
+        if(iv>CS){ spent=Math.min(Math.max(0,wb),(iv-CS)*unit); wb-=spent; }
+        else wb=Dp-(Dp-wb)*Math.exp(-dt/Math.max(tau(iv),1));
+        return spent; } };
+  }
+  const FTP=Math.max(1,+S.ftp||0), CP0=cpWatts(), W=wPrimeJ(), KJREF=durKJref()*1000;   // KJREF in weighted J
+  const fuelDose=1-Math.exp(-Math.max(0,Math.min(+fuelG||0,carbCap()))/DUR_CHO_K);       // carbs eaten (gut-capped) → share of the late CP fade prevented
+  let Df=0, Ds=0, above=false, nDeep=0, acid=0, cumJ=0, cumAnJ=0, fRec=0, cumC=0, fRecC=0, tEl=0;   // cumC/fRecC = the CP-side (fuel-protected) fatigue
+  const fatNow=()=>Math.max(0,Math.min(1,(cumJ+DUR_LAM*cumAnJ-fRec)/KJREF));         // drives the W′ ceiling + efficiency drift
+  // CP-side fatigue is NOT capped at 1 (the Lab's ceiling is fitted to ≤ 2-h sessions): past it CP keeps fading, as in
+  // 3–4-h rides (Norte 2026 −15% on water; Gallo 2024 task failure at VT1 power after ~4 h). Floor at half of fresh CP.
+  const fatCP=()=>Math.max(0,Math.min(2.5,(cumC-fRecC)/KJREF));                       // drives the CP fade
+  const cpe=()=>CP0*(1-DUR_DCP*fatCP()), wme=()=>W*(1-DUR_DW*fatNow());
+  return { cp0:CP0, cap:W, cp:cpe, bal:()=>wme()-(Df+Ds), ceil:wme,
+    // pacing headroom 0–1: the tighter of W′ left (vs today's fatigued ceiling) and acidity left before its limit
+    head(){ const m=wme(); return Math.max(0,Math.min(1, m>0?(m-(Df+Ds))/m:0, 1-acid/ACID_LIM)); },
+    // work available above CP this step before W′ empties or acidity hits its limit (J)
+    avail(){ return Math.max(0, Math.min(wme()-(Df+Ds), (ACID_LIM-acid)*W)); },
+    fat:fatNow, acid:()=>acid,
+    advance(P,dt){
+      const CPe=cpe(), frac=P/FTP; let spent=0;
+      const dJ = P*dt*Math.pow(Math.min(frac, CP0/FTP),3);                 // intensity-weighted work (cube capped at CP — Ferguson 2010)
+      const prot = 1 - fuelDose*(1-Math.exp(-tEl/DUR_CHO_TAU)); tEl+=dt;   // fueling shields the late CP fade, not the early one
+      cumJ += dJ; cumC += dJ*prot;
+      if(frac<CPREC_PCT){ const pool=CPREC_R*(cumJ+DUR_LAM*cumAnJ)-fRec; if(pool>0) fRec+=pool*(1-Math.exp(-dt/CPREC_TAU));
+        const poolC=CPREC_R*cumC-fRecC; if(poolC>0) fRecC+=poolC*(1-Math.exp(-dt/CPREC_TAU)); }
+      if(P>CPe){ const dep=(P-CPe)*dt; spent=dep; cumAnJ+=dep; cumC+=DUR_LAM*dep*prot;
+        const toF=Math.min(dep,Math.max(0,W_PHI*W-Df)); Df+=toF; Ds+=dep-toF;   // the fast pool empties first
+        acid+=dep/W; above=true;
+      } else { const d=(CPe-P)/CPe*100;
+        if(Df+Ds>0){
+          if(above && (Df+Ds)/W>=0.5){                                       // recovery after a deep drain: part of the fast deficit refills slowly
+            const r=0.72+0.28*Math.min(1,d/80), F=Math.max(0.5,Math.pow(r,nDeep)), lock=(1-F)*Df; Df-=lock; Ds+=lock; nDeep+=(Df+Ds)/W; }
+          Df*=Math.exp(-dt/tauFC(d)); Ds*=Math.exp(-dt/tauSC(d)); }
+        acid*=Math.exp(-Math.max(0.25,Math.min(1,d/40))*dt/ACID_TAU);
+        above=false; }
+      return spent; } };
+}
 // THE course engine (single source of truth). Walks the GPS profile grade-by-grade holding the athlete's
 // selected average, shaped by the pacing strategy (surge on climbs / ease on descents) and by any per-30-min
-// effort override (S.segScale). Integrates time, W′/D′ reserve dynamics, substrate split & glycogen depletion,
-// and bins energy into 30-min blocks. Everything downstream (duration, fuel plan, chart) derives from this.
+// effort override (S.segScale). Integrates time, W′/D′ reserve dynamics, durability, substrate split & glycogen
+// depletion, and bins energy into 30-min blocks. Everything downstream (duration, fuel plan, chart) derives from this.
 function courseTime(opts){
   opts=opts||{};
   const c=S.course; if(!c||!c.profile||c.profile.length<2) return null;
-  const pr=c.profile, SEG=SEG_LEN*3600, totalD=pr[pr.length-1][0]||1;
+  const pr=c.profile, SEG=SEG_LEN*3600, totalD=pr[pr.length-1][0]||1, run=isRun();
   const strat=S.pacingStrategy||'even';
   const baseIt=eventBaseIt();                              // adjusted average (selected zone × manual fine-tune)
-  const baseIv = isRun()?(baseIt.speed||0):(baseIt.watts||0);
+  const baseIv = run?(baseIt.speed||0):(baseIt.watts||0);
   const sc = b => (S.segScale && S.segScale[b]!=null) ? +S.segScale[b] : 1;   // this block's effort multiplier (1 = average)
   // OPTIONAL — exogenous CHO supplementation + glycogen-driven Zone-2 cap (used by the Summary "with fuel plan"
   // predictor; both default OFF so every other call site keeps the no-fuel behaviour). choOxKcalHr = planned carbs
@@ -1297,124 +1400,116 @@ function courseTime(opts){
   // mirroring the W′ recovery cap) — a real athlete who runs the tank low must soft-pedal to recover.
   const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap(), EXO_OX_MAX)*4;   // ingested ≠ oxidised above ~105 g/hr
   const glyFloor = +opts.glyCapFrac||0;
-  // anaerobic-reserve boundary + capacity (W′ cyc in J vs CP=W · D′ run in m vs CS=m/min flat-equiv)
-  const CP = isRun()? csSpeed() : cpWatts();
-  const Wp = isRun()? dPrimeMeters() : wPrimeJ();
-  const tauOf = iv => isRun()                             // reconstitution time-constant below the boundary (s)
-      ? 102 + 372*Math.exp(-3*Math.max(0,Math.min(1,(CP-iv)/CP)))   // running: over-ground reconstitution (τ≈120–474s, ~2× faster than cycling — Vassallo et al. 2020)
-      : 546*Math.exp(-0.01*Math.max(0,CP-iv)) + 316;                // cycling: Skiba 2012 (DCP in watts)
+  const durFuelG = opts.durFuelG!=null ? +opts.durFuelG : (+opts.choGperHr||0);   // carbs eaten per hour — protects CP from fading
   // W′ RECOVERY MODE (blow-up → recover, not grind at CP): once the reserve empties, cap effort at top-of-Z2
-  // so it actually rebuilds (reconstitution is glacial at CP); hold that until W′ ≥ RC_MID, then allow CP,
-  // and only release to full pacing once W′ ≥ RC_HIGH (typically after a descent refills it). Hysteresis.
-  const Z2cap = 0.75*CP, RC_MID=0.20, RC_HIGH=0.95;
-  const recoveryCeil = (bl, wF) => bl ? (wF<RC_MID ? Z2cap : CP) : Infinity;   // effort ceiling while "blown"
-  // self-preservation taper: below TAPER_START W′ the athlete gets conservative and eases the supra-CP effort,
-  // more so the closer W′ gets to empty (curvilinear) — so they feather toward CP instead of holding flat-out.
+  // so it actually rebuilds (reconstitution is glacial at CP); hold that until headroom ≥ RC_MID, then allow CP,
+  // and only release to full pacing once headroom ≥ RC_HIGH (typically after a descent refills it). Hysteresis.
+  const Z2cap = 0.75*(run? csSpeed() : Math.max(1,+S.ftp||0)), RC_MID=0.20, RC_HIGH=0.95;   // top of Zone 2 = 75% FTP (Coggan) / 75% CS
+  // self-preservation taper: below TAPER_START headroom the athlete gets conservative and eases the supra-CP effort,
+  // more so the closer it gets to empty (curvilinear) — so they feather toward CP instead of holding flat-out.
   const TAPER_START=0.30, TAPER_P=1.5;
-  const supraTaper = (iv,wF) => (iv>CP && wF<TAPER_START) ? CP+(iv-CP)*Math.pow(Math.max(0,wF)/TAPER_START,TAPER_P) : iv;
+  const kg=S.bodyLbs/2.2, gly0=glycogenKcal();
+  // one walk of the course at a baseline effort scale. full=false → NP only (the solver); full=true → everything.
+  const walk = (scale, full) => {
+    const R=makeReserve(durFuelG);
+    let T=0, D=0, nextBound=SEG, blown=false, sumIvDt=0, sumIv4Dt=0;
+    let wMin=R.cap, headMin=1, anaerWork=0, supraSec=0, capSec=0, acidPeak=0, cpMinFrac=1;
+    let cumCho=0, cumOx=0, glyBlown=false, glyCapSec=0, glyCapEffSec=0, scL=0, fatEnd=0;   // scL = severe-domain slow-component O₂ (L/min)
+    const FTPw=Math.max(1,+S.ftp||0);
+    const segDist=[], segGr=[], segIv=[], bounds=[], series=[];   // series: [distM, sec, W′%, glyc%, CHO%, W′-ceiling%, CP% of fresh]
+    const blkKcal=[], blkCho=[], blkFat=[], blkDur=[]; let totKcal=0, totCho=0, totFat=0, totAnaer=0, totSlow=0;
+    for(let i=1;i<pr.length;i++){
+      const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
+      const grade=(pr[i][1]-pr[i-1][1])/dd;
+      const CPn=R.cp(), hd=R.head();
+      if(blown){ if(hd>=RC_HIGH) blown=false; } else if(hd<=0.01){ blown=true; }   // recovery hysteresis
+      if(full && glyFloor>0){ const glyFrac = gly0>0 ? Math.max(0,(gly0-cumCho+cumOx)/gly0) : 1;   // glycogen (net of exogenous CHO) below the floor → hold Z2
+        if(glyBlown){ if(glyFrac>=glyFloor) glyBlown=false; } else if(glyFrac<glyFloor){ glyBlown=true; } }
+      const m = paceMult(strat,grade,pr[i-1][0]/totalD) * descentMult(grade,hd) * scale * sc(Math.floor(T/SEG)); // strategy surge × reserve-driven descent × NP-solve scale × block effort
+      let iv=baseIv*m;                                     // iv = representative intensity (W cyc · flat-speed m/min run)
+      if(blown){ const ceil = hd<RC_MID ? Z2cap : CPn; if(iv>ceil) iv=ceil; }       // blown → back off to Z2, then hold CP
+      if(iv>CPn && hd<TAPER_START) iv=CPn+(iv-CPn)*Math.pow(hd/TAPER_START,TAPER_P); // self-preservation: ease supra-CP effort near empty
+      let glyCapHit=false;
+      if(glyBlown && iv>Z2cap){ iv=Z2cap; glyCapHit=true; }
+      let v = run? solveSpeedScaled(grade, baseIv>0?iv/baseIv:0, baseIt) : cycSpeedMS(iv,grade);
+      if(v<=0) continue;
+      let dt=dd/v;
+      // not enough reserve (W′ or acidity headroom) for this section above CP → clamp it to what's left
+      const unit = run? dt/60 : dt;                        // reserve units per unit of intensity above CP (m per m/min · J per W)
+      if(iv>CPn){ const av=R.avail();
+        if((iv-CPn)*unit>av){ const ivCap=CPn+av/Math.max(unit,1e-9);
+          v = run? solveSpeedScaled(grade, ivCap/(baseIt.speed||1), baseIt) : cycSpeedMS(ivCap,grade);
+          iv=ivCap; dt=dd/Math.max(v,1e-6); capSec+=dt; }
+        supraSec+=dt; }
+      const spent=R.advance(iv,dt,run?dt/60:dt);
+      anaerWork+=spent;
+      const bal=R.bal(); if(bal<wMin) wMin=bal;
+      const hNow=R.head(); if(hNow<headMin) headMin=hNow;
+      if(R.acid()>acidPeak) acidPeak=R.acid();
+      const cpF=R.cp()/R.cp0; if(cpF<cpMinFrac) cpMinFrac=cpF;
+      sumIvDt+=iv*dt; sumIv4Dt+=Math.pow(iv,4)*dt;
+      if(full){
+        while(T+dt>=nextBound){ const fr=Math.max(0,Math.min(1,(nextBound-T)/dt)); bounds.push(D+dd*fr); nextBound+=SEG; }
+        const b=Math.floor((T+dt/2)/SEG);                  // bucket by the pair's midpoint time
+        segDist[b]=(segDist[b]||0)+dd; segGr[b]=(segGr[b]||0)+dd*grade; segIv[b]=(segIv[b]||0)+iv*dd;
+        // per-step energy → CHO/fat split, 30-min bins & endogenous-glycogen depletion at the predicted workload
+        const hrStep=dt/3600;
+        const em = run? imetrics({speed:v*60}, grade*100) : imetrics({watts:iv}, 0);
+        const anaerK = spent>0 ? (run? spent*(1.04/1000)*kg : spent/0.24/4184) : 0;   // glycolytic work — charged to CHO
+        let slowK=0, slowCho=0, geM=1;
+        if(run){ slowK = iv>CPn ? VO2_SLOW_FRAC*em.kcalHr*hrStep : 0; slowCho=slowK; }   // running: flat severe-domain surcharge
+        else {
+          geM = 1 + GE_DRIFT_K*R.fat();                    // efficiency drift: same watts cost more as fatigue builds
+          if(iv>CPn) scL=Math.min(SC_CAP, scL+SC_K*((iv-CPn)/FTPw)*dt); else scL*=Math.exp(-dt/SC_TAU);
+          const sevK = scL*60*hrStep*(1.2*1.0+3.85);       // severe slow-component O₂ at RER ≈ 1 (Weir) → all CHO
+          const hvyK = (iv>Z2cap && iv<=CPn) ? SC_HEAVY*em.kcalHr*geM*hrStep : 0;   // heavy domain: levels off, split by RQ
+          slowK = sevK+hvyK; slowCho = sevK + (em.kcalHr>0 ? hvyK*em.choKcalHr/em.kcalHr : 0);
+        }
+        const stepKcal=em.kcalHr*geM*hrStep+anaerK+slowK, stepCho=em.choKcalHr*geM*hrStep+anaerK+slowCho, stepFat=stepKcal-stepCho;
+        cumCho+=stepCho;
+        cumOx=Math.min(cumOx+choOxKcalHr*hrStep, cumCho);  // exogenous CHO oxidised this step (kcal), capped at what's burned
+        if(glyBlown) glyCapSec+=dt;
+        if(glyCapHit) glyCapEffSec+=dt;
+        const glyRem=Math.max(0,gly0-cumCho+cumOx);        // endogenous glycogen spared 1:1 by exogenous CHO
+        totKcal+=stepKcal; totCho+=stepCho; totFat+=stepFat; totAnaer+=anaerK; totSlow+=slowK;
+        blkKcal[b]=(blkKcal[b]||0)+stepKcal; blkCho[b]=(blkCho[b]||0)+stepCho; blkFat[b]=(blkFat[b]||0)+stepFat; blkDur[b]=(blkDur[b]||0)+dt;
+        series.push([D+dd, T+dt, R.cap>0?Math.max(0,bal)/R.cap*100:100, gly0>0?glyRem/gly0*100:0,
+          stepKcal>0?Math.min(100,stepCho/stepKcal*100):0, R.cap>0?R.ceil()/R.cap*100:100, cpF*100]);
+      }
+      T+=dt; D+=dd;
+    }
+    fatEnd=R.fat();
+    return { T, D, fatEnd, np: T>0?Math.pow(sumIv4Dt/T,0.25):0, avgIv: T>0?sumIvDt/T:0, wMin, headMin, anaerWork, supraSec, capSec, acidPeak, cpMinFrac,
+      segDist, segGr, segIv, bounds, series, blkKcal, blkCho, blkFat, blkDur, totKcal, totCho, totFat, totAnaer, totSlow, glyCapSec, glyCapEffSec };
+  };
   // TARGET NORMALIZED POWER: your selected intensity is the target NP, not the flat effort. Solve a baseline
   // scale so the ride's NP = target. NP = (time-mean of iv⁴)^¼ charges the surges their true physiological
   // cost, so coasted descents don't demand make-up work — the flats stay ≤ CP (unlike an average hold).
-  const npAt = scale => {
-    let T2=0, s4=0, wb=Wp, bl=false;
-    for(let i=1;i<pr.length;i++){ const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
-      const grade=(pr[i][1]-pr[i-1][1])/dd, wF = Wp>0 ? Math.max(0,Math.min(1,wb/Wp)) : 1;
-      if(bl){ if(wF>=RC_HIGH) bl=false; } else if(wF<=0.01){ bl=true; }
-      const m=paceMult(strat,grade,pr[i-1][0]/totalD)*descentMult(grade,wF)*scale*sc(Math.floor(T2/SEG));   // same per-block effort as the main pass
-      let iv=baseIv*m; { const ceil=recoveryCeil(bl,wF); if(iv>ceil) iv=ceil; } iv=supraTaper(iv,wF);
-      let v=isRun()?solveSpeedScaled(grade,baseIv>0?iv/baseIv:0,baseIt):cycSpeedMS(iv,grade); if(v<=0) continue;
-      let dt=dd/v; const unit=isRun()?dt/60:dt;
-      if(iv>CP){ const demand=(iv-CP)*unit;
-        if(demand>wb){ const ivCap=CP+Math.max(0,wb)/Math.max(unit,1e-9);
-          if(isRun()){ const mc=ivCap/(baseIt.speed||1); v=solveSpeedScaled(grade,mc,baseIt); } else { v=cycSpeedMS(ivCap,grade); }
-          wb=0; iv=ivCap; dt=dd/Math.max(v,1e-6);
-        } else wb-=demand;
-      } else { const tau=tauOf(iv); wb=Wp-(Wp-wb)*Math.exp(-dt/Math.max(tau,1)); }
-      s4+=Math.pow(iv,4)*dt; T2+=dt; }
-    return T2>0? Math.pow(s4/T2,0.25) : 0;
-  };
-  // NP ∝ scale, so this converges in ~2 passes — unless W′/CP clamps eat the extra effort (target unreachable):
+  // NP ∝ scale, so this converges in ~2 passes — unless reserve/CP clamps eat the extra effort (target unreachable):
   // then stop when a pass gains <0.5% NP, keep the last useful scale, and cap the scale so surges stay realistic.
   const NP_SCALE_MAX=1.3;
   let scale=1, prevNp=0, prevScale=1;
-  for(let it=0; it<6; it++){ const np=npAt(scale); if(np<=1) break;
+  for(let it=0; it<6; it++){ const np=walk(scale,false).np; if(np<=1) break;
     if(it>0 && np<baseIv && np<prevNp*1.005){ scale=prevScale; break; }
     prevNp=np; prevScale=scale; const f=baseIv/np;
     scale=Math.max(0.2,Math.min(NP_SCALE_MAX,scale*f)); if(Math.abs(f-1)<0.004 || scale===prevScale) break; }
-  let T=0, D=0, nextBound=SEG; const segDist=[], segGr=[], segIv=[], bounds=[];
-  let wbal=Wp, wMin=Wp, anaerWork=0, supraSec=0, capSec=0, blown=false; // reserve state + recovery-mode flag
-  const kg=S.bodyLbs/2.2, gly0=glycogenKcal(); let cumCho=0, cumOx=0, glyBlown=false, glyCapSec=0, glyCapEffSec=0; const series=[]; // [distM, sec, W′%, glyc%, CHO%] · cumOx/glyBlown drive the optional supplemented Z2 cap
-  const blkKcal=[], blkCho=[], blkFat=[], blkDur=[]; let totKcal=0, totCho=0, totFat=0, totAnaer=0, totSlow=0; // energy binned per 30-min + totals
-  let sumIvDt=0, sumIv4Dt=0;                               // for average intensity + NP (4th-power mean)
-  for(let i=1;i<pr.length;i++){
-    const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue;
-    const grade=(pr[i][1]-pr[i-1][1])/dd;
-    const wFrac = Wp>0 ? Math.max(0,Math.min(1,wbal/Wp)) : 1;
-    if(blown){ if(wFrac>=RC_HIGH) blown=false; } else if(wFrac<=0.01){ blown=true; }   // recovery hysteresis
-    // glycogen (net of exogenous CHO) below the floor → force Z2 until it rebuilds above it (hysteresis)
-    if(glyFloor>0){ const glyFrac = gly0>0 ? Math.max(0,(gly0-cumCho+cumOx)/gly0) : 1;
-      if(glyBlown){ if(glyFrac>=glyFloor) glyBlown=false; } else if(glyFrac<glyFloor){ glyBlown=true; } }
-    const m = paceMult(strat,grade,pr[i-1][0]/totalD) * descentMult(grade,wFrac) * scale * sc(Math.floor(T/SEG)); // strategy surge × W′ descent × NP-solve scale × block effort
-    let iv=baseIv*m;                                       // iv = representative intensity (W cyc · flat-speed m/min run)
-    { const ceil=recoveryCeil(blown,wFrac); if(iv>ceil) iv=ceil; }   // blown → back off to Z2, then hold CP
-    iv=supraTaper(iv,wFrac);                               // self-preservation: ease supra-CP effort as W′ nears empty
-    let glyCapHit=false;
-    if(glyBlown && iv>Z2cap){ iv=Z2cap; glyCapHit=true; }  // glycogen below the floor → hold Zone 2 until it recovers (only "effective" when it actually cuts effort)
-    let v = isRun()? solveSpeedScaled(grade, baseIv>0?iv/baseIv:0, baseIt) : cycSpeedMS(iv,grade);
-    if(v<=0) continue;
-    let dt=dd/v;
-    // ---- reserve dynamics: deplete above CP/CS (clamp the effort if it would run the reserve dry),
-    //      reconstitute below it. T_lim = W′/(P−CP); depletion is linear in (intensity − boundary). ----
-    const unit = isRun()? dt/60 : dt;                     // reserve units consumed per step (m for D′ · W·s=J for W′)
-    let spent=0, supraStep=false;                         // anaerobic units drawn this step + whether it ran above the boundary
-    if(iv>CP){
-      supraStep=true;
-      const demand=(iv-CP)*unit;
-      if(demand>wbal){                                    // not enough reserve → clamp this section to sustainable
-        const ivCap=CP + Math.max(0,wbal)/Math.max(unit,1e-9);
-        if(isRun()){ const mc=ivCap/(baseIt.speed||1); v=solveSpeedScaled(grade,mc,baseIt); }
-        else        { v=cycSpeedMS(ivCap,grade); }
-        spent=Math.max(0,wbal); anaerWork+=spent; wbal=0; iv=ivCap; dt=dd/Math.max(v,1e-6); capSec+=dt;
-      } else { wbal-=demand; anaerWork+=demand; spent=demand; }
-      supraSec+=dt;
-    } else {
-      const tau=tauOf(iv); wbal=Wp-(Wp-wbal)*Math.exp(-dt/Math.max(tau,1));
-    }
-    if(wbal<wMin) wMin=wbal;
-    // record the distance reached at each 30-min boundary this pair crosses (interpolated)
-    while(T+dt>=nextBound){ const fr=Math.max(0,Math.min(1,(nextBound-T)/dt)); bounds.push(D+dd*fr); nextBound+=SEG; }
-    const b=Math.floor((T+dt/2)/SEG);                      // bucket by the pair's midpoint time
-    segDist[b]=(segDist[b]||0)+dd; segGr[b]=(segGr[b]||0)+dd*grade; segIv[b]=(segIv[b]||0)+iv*dd;
-    T+=dt; D+=dd;
-    { // per-step energy → CHO/fat split, 30-min bins & endogenous-glycogen depletion at the predicted workload
-      const hrStep=dt/3600;
-      const em = isRun()? imetrics({speed:v*60}, grade*100) : imetrics({watts:iv}, 0);
-      const anaerK = spent>0 ? (isRun()? spent*(1.04/1000)*kg : spent/0.24/4184) : 0;   // glycolytic work — charged to CHO
-      const slowK  = supraStep ? VO2_SLOW_FRAC*em.kcalHr*hrStep : 0;                     // VO₂ slow-component surcharge
-      const stepKcal=em.kcalHr*hrStep+anaerK+slowK, stepCho=em.choKcalHr*hrStep+anaerK+slowK, stepFat=em.fatKcalHr*hrStep;
-      cumCho+=stepCho;
-      cumOx=Math.min(cumOx+choOxKcalHr*hrStep, cumCho);    // exogenous CHO oxidised this step (kcal), capped at what's burned
-      if(glyBlown) glyCapSec+=dt;                          // time below the glycogen floor
-      if(glyCapHit) glyCapEffSec+=dt;                      // time the Z2 cap actually reduced effort (extends the ride)
-      const glyRem=Math.max(0,gly0-cumCho+cumOx);          // endogenous glycogen spared 1:1 by exogenous CHO
-      totKcal+=stepKcal; totCho+=stepCho; totFat+=stepFat; totAnaer+=anaerK; totSlow+=slowK;
-      sumIvDt+=iv*dt; sumIv4Dt+=Math.pow(iv,4)*dt;         // intensity work + 4th-power (NP)
-      blkKcal[b]=(blkKcal[b]||0)+stepKcal; blkCho[b]=(blkCho[b]||0)+stepCho; blkFat[b]=(blkFat[b]||0)+stepFat; blkDur[b]=(blkDur[b]||0)+dt;
-      series.push([D, T, Wp>0?Math.max(0,wbal)/Wp*100:100, gly0>0?glyRem/gly0*100:0, stepKcal>0?Math.min(100,stepCho/stepKcal*100):0]);
-    }
-  }
+  const w=walk(scale,true), T=w.T, Wp=makeReserve().cap, CP=makeReserve().cp0;
   const nSeg=Math.max(1, Math.ceil(T/SEG)), grades=[], ivs=[], blocks=[];
-  for(let b=0;b<nSeg;b++){ const w=segDist[b]||0, gr=+(((w>0?segGr[b]/w:0))*100).toFixed(1), iv=w>0?segIv[b]/w:0;
+  for(let b=0;b<nSeg;b++){ const dw=w.segDist[b]||0, gr=+(((dw>0?w.segGr[b]/dw:0))*100).toFixed(1), iv=dw>0?w.segIv[b]/dw:0;
     grades.push(gr); ivs.push(iv);
-    blocks.push({ idx:b, dur:(blkDur[b]||0)/3600, grade:gr, iv, zi:nearestZoneForIv(iv), scale:sc(b),
-      kcal:blkKcal[b]||0, choKcal:blkCho[b]||0, fatKcal:blkFat[b]||0 }); }
-  const avgIv=T>0?sumIvDt/T:0, NP=T>0?Math.pow(sumIv4Dt/T,0.25):0;   // average intensity & Normalized Power (NGP for run)
-  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds, distM:D, strat,
-    cpBound:CP, wpFull:Wp, wbalMin:wMin, wbalMinPct:Wp>0?Math.max(0,wMin)/Wp*100:100,
-    anaerWork, supraSec, capSec, capped:capSec>0.5,       // reserve diagnostics (W′/D′ units; capSec/supraSec in s)
-    glyCapSec, glyCapEffSec, glyCapped:glyCapSec>0.5,      // time (s) below the glycogen floor / where Z2 cap cut effort (Summary predictor)
-    avgIv, np:NP, targetNP:baseIv, npShort: baseIv>0 && NP<baseIv*0.98, vi: avgIv>0?NP/avgIv:1, intFactor: CP>0?NP/CP:0, npScale:scale,
-    series, gly0, blocks, kcal:totKcal, choKcal:totCho, fatKcal:totFat, anaerKcal:totAnaer, slowKcal:totSlow };
+    blocks.push({ idx:b, dur:(w.blkDur[b]||0)/3600, grade:gr, iv, zi:nearestZoneForIv(iv), scale:sc(b),
+      kcal:w.blkKcal[b]||0, choKcal:w.blkCho[b]||0, fatKcal:w.blkFat[b]||0 }); }
+  const NP=w.np, avgIv=w.avgIv;
+  return { totalSec:T, hours:T/3600, nSeg, segGrades:grades, segIv:ivs, bounds:w.bounds, distM:w.D, strat,
+    cpBound:CP, wpFull:Wp, wbalMin:w.wMin, wbalMinPct:Wp>0?Math.max(0,w.wMin)/Wp*100:100,
+    headMinPct:w.headMin*100, acidPeak:w.acidPeak, acidLimited: !run && w.acidPeak>=ACID_LIM*0.98,
+    cpEndPct: w.series.length? w.series[w.series.length-1][6] : 100, cpMinPct:w.cpMinFrac*100,
+    durFuelG, fatEnd:w.fatEnd, geDriftPct: run?0:GE_DRIFT_K*w.fatEnd*100,
+    anaerWork:w.anaerWork, supraSec:w.supraSec, capSec:w.capSec, capped:w.capSec>0.5,   // reserve diagnostics (W′/D′ units; capSec/supraSec in s)
+    glyCapSec:w.glyCapSec, glyCapEffSec:w.glyCapEffSec, glyCapped:w.glyCapSec>0.5,       // time (s) below the glycogen floor / where Z2 cap cut effort (Summary predictor)
+    avgIv, np:NP, targetNP:baseIv, npShort: baseIv>0 && NP<baseIv*0.98, vi: avgIv>0?NP/avgIv:1,
+    intFactor: run ? (CP>0?NP/CP:0) : (S.ftp>0?NP/S.ftp:0), npScale:scale,           // IF is NP ÷ FTP (Coggan), not ÷ CP
+    series:w.series, gly0, blocks, kcal:w.totKcal, choKcal:w.totCho, fatKcal:w.totFat, anaerKcal:w.totAnaer, slowKcal:w.totSlow };
 }
 // keep the EFFECTIVE activity duration (S.eventHours, used everywhere downstream) in sync with the
 // source of truth: the Performance-Predictor estimate while a course is loaded, else the user's
@@ -1422,8 +1517,11 @@ function courseTime(opts){
 function syncDuration(){
   applyFitnessEstimate();                                 // estimate mode: keep FTP/pace current with weight & sex (no-op in manual)
   const onCourse = S.activityMode==='course' && S.course;
-  const t = onCourse ? courseTime() : null;               // single terrain-fine pass drives everything
+  let t = onCourse ? courseTime() : null;                 // single terrain-fine pass drives everything
   S._ct = t; S._ctFine = t;                               // _ctFine kept as an alias for the chart/sustainability call sites
+  // the athlete is assumed to eat the plan: re-walk with that carb rate so it protects CP (durability), like the real ride
+  if(t && !isRun()){ S.eventHours=t.hours; const g=eventTotals().targetRateG;
+    if(g>0){ t=courseTime({durFuelG:g}); S._ct=t; S._ctFine=t; } }
   S.eventHours = t ? t.hours : Math.min(48, Math.max(0, +S.manualHours||0));   // clamp: a huge saved value would hang every reload
 }
 // diverging colour from a signed, normalized effort t ∈ [−1,1] (0 = average, cool = easier, warm = harder).
@@ -1490,6 +1588,7 @@ function courseEnergyChart(c, t, tc){
   const svg=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:150px;display:block;background:var(--panel2);border-radius:6px">
     ${grid}${resLine}${divs}
     ${poly(p=>p[3],CG,2)}
+    ${!run&&ser[0].length>5?`<polyline points="${pts.map(p=>X(p[0])+','+Y(p[5])).join(' ')}" fill="none" stroke="${CW}" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.7" vector-effect="non-scaling-stroke"></polyline>`:''}
     ${poly(p=>p[2],CW,2)}
   </svg>`;
   const glyStart=t.gly0||glycogenKcal(), glyEndPct=last[3], glyEnd=Math.max(0,glyStart*glyEndPct/100), bonk=glyEndPct<=0.5;
@@ -1499,6 +1598,7 @@ function courseEnergyChart(c, t, tc){
     <div style="position:relative;margin-top:6px">${svg}<div style="position:absolute;left:0;top:0;bottom:0;width:24px;pointer-events:none">${yLab}</div></div>
     <div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:7px;font-size:11px;color:var(--txt)">
       ${chip(CW,`${R} reserve <span class="muted">→ low ${fmt(wMinPctSafe(t),0)}%</span>`)}
+      ${!run?chip(CW,`<span class="muted">${R} ceiling (fatigue) → ${fmt(last[5]??100,0)}%</span>`,true):''}
       ${chip(CG,`Glycogen <span class="muted">${fmt(glyStart/4,0)}→${fmt(glyEnd/4,0)} g${bonk?' · <b style="color:var(--bad)">bonk</b>':''}</span>`)}
       ${rp>0?chip('#e0703a',`<span class="muted">${rp}% reserve floor</span>`,true):''}
     </div>
@@ -1593,14 +1693,17 @@ function courseBody(intOpts, totalsBlock){
                      : `<span style="color:var(--good)">✓ sustainable — ${R} stays ≥ ${fmt(minPct,0)}% of capacity</span>`);
       return `<div class="sub-h" style="margin-top:12px">Sustainability — anaerobic reserve</div>
         <div class="field" style="gap:6px;flex-wrap:wrap">
-          <label style="flex:0 0 auto;margin-right:6px" title="Critical ${run?'speed = your threshold pace':'power = your FTP'} — the sustainable boundary (~30-min limit)">${run?'Critical speed':'Critical power'}</label>
-          <span class="v" style="margin-right:14px">${cpLbl}</span>
+          <label style="flex:0 0 auto;margin-right:6px" title="Critical ${run?'speed = your threshold pace':'power = CP/FTP × your FTP'} — the sustainable boundary (~30-min limit)">${run?'Critical speed':'Critical power'}</label>
+          <span class="v" style="margin-right:${run?14:6}px">${cpLbl}</span>
+          ${run?'':`<input type="number" step="0.01" value="${numVal(cpRatio(),2)}" data-k="cpr" data-obj="S"${limAttrs('cpr')} style="width:58px" title="CP ÷ FTP — override the athlete-type default">
+          <span class="u" style="width:auto;margin-right:14px">× FTP ${S.cpr!=null&&S.cpr!==''?`<a onclick="window._resetCpr()" style="color:var(--accent2);cursor:pointer;font-size:11px;margin-left:4px">auto</a>`:`<span class="muted" style="font-size:11px">auto</span>`}</span>`}
           <label style="flex:0 0 auto;margin-right:6px" title="${run?'D′ — finite distance reserve above critical speed':'W′ — finite work capacity above critical power'}">${R}</label>
           <input type="number" step="${run?1:0.5}" value="${numVal(reserveEff,run?0:1)}" data-k="${reserveKey}" data-obj="S" style="width:64px" title="Override the auto value">
           <span class="u" style="width:auto">${run?'m':'kJ'}</span>
           ${overridden?`<a onclick="window._resetReserve()" style="color:var(--accent2);cursor:pointer;font-size:11px;margin-left:4px">auto</a>`:`<span class="muted" style="font-size:11px;margin-left:4px">auto · ${S.athleteType} · ${run?fmt(dPrimeCoef(),1)+' m/kg':fmt(wPrimeCoef(),2)+' kJ/kg'}</span>`}
         </div>
-        <div class="note" style="margin-top:2px">${status}. ${srcLink(`how the ${R} reserve works →`)}</div>`;
+        <div class="note" style="margin-top:2px">${status}.${!run&&tf&&tf.acidLimited?' Acidity, not W′, is what limits the hardest surges (repeated work above CP).':''} ${srcLink(`how the ${R} reserve works →`)}</div>
+        ${!run&&tf?`<div class="note" style="margin-top:2px">Durability (<b>${(DUR_LABELS[S.durability]||DUR_LABELS.typical).split(' — ')[0]}</b>): critical power fades to <b>${fmt(tf.cpMinPct,0)}%</b> of fresh (${Math.round(cpWatts()*tf.cpMinPct/100)} W) at its lowest${tf.cpEndPct>tf.cpMinPct+0.5?`, back to ${fmt(tf.cpEndPct,0)}% by the finish after easy riding`:''}. Set it on the Athlete tab.</div>`:''}`;
     })();
   // Cycling time model now lives in its own panel (cyclingModelBody) adjacent to Activity Information.
   // elevation sparkline + overlays: proposed avg watts/pace inside each band, time + cumulative distance under each divider
@@ -1967,7 +2070,7 @@ const escHtml=s=>(''+(s==null?'':s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt
 // sane bounds for numeric inputs [min, max]; REQUIRED_POS keys must stay > 0 (blank/0 → keep the previous value)
 const NUM_LIMITS={ bodyLbs:[50,500], ftp:[30,800], manualHours:[0,48], bottlesPerHour:[0,10], bottleOz:[1,128],
   maltoDE:[1,100], testDrankOz:[0,400], pre:[50,500], post:[50,500], manualSweat:[0,5], time:[0.05,24], acceptLoss:[0,10],
-  gearLbs:[0,50], maxDescentKmh:[5,150], sweatNa:[0,4000] };
+  gearLbs:[0,50], maxDescentKmh:[5,150], sweatNa:[0,4000], cpr:[0.85,1.25] };
 const REQUIRED_POS=new Set(['bodyLbs','ftp','bottleOz','time']);
 // plain number for <input type=number> value= (fmt() is locale-formatted: "1,5"/"1,234" are invalid there)
 function numVal(x,d){ return +(+x||0).toFixed(d); }
@@ -2298,7 +2401,7 @@ function viewRider(){
   const intLbl = z => run ? paceFmt(z.pace)+'/mi' : Math.round(z.watts)+'W';
   const intOpts = (sel)=>ints.map((z,i)=>{
     const lab = z.lo!=null ? `${z.label} — ${z.lo}–${z.hi}% · ~${paceFmt(z.pace)}/mi`
-              : z.pct!=null ? `${z.label} — ${z.pct}% · ${intLbl(z)}` : z.label;
+              : z.pct!=null ? `${z.label} — ${z.rng||z.pct+'%'} · ${intLbl(z)}` : z.label;
     return `<option value="${i}"${i==sel?' selected':''}>${lab}</option>`;
   }).join('');
   // intensity-anchor input: FTP (cycling) or threshold pace mi+km twin (running)
@@ -2339,7 +2442,13 @@ function viewRider(){
             <option value="balanced"${S.athleteType==='balanced'?' selected':''}>Balanced — default</option>
             <option value="anaerobic"${S.athleteType==='anaerobic'?' selected':''}>Anaerobic / punchy — larger reserve</option>
           </select></div>
-        <div class="note">Sets your auto <b>${run?'D′':'W′'}</b> reserve (${run?fmt(dPrimeCoef(),1)+' m/kg → '+fmt(dPrimeMeters(),0)+' m':fmt(wPrimeCoef(),2)+' kJ/kg → '+fmt(wPrimeKJeff(),1)+' kJ'}), the finite capacity above ${run?'critical speed':'critical power'} the Performance Predictor draws on. Override it directly in the predictor's Sustainability box. ${srcLink('reserve model →')}</div>
+        <div class="note">Sets your auto <b>${run?'D′':'W′'}</b> reserve (${run?fmt(dPrimeCoef(),1)+' m/kg → '+fmt(dPrimeMeters(),0)+' m':fmt(wPrimeCoef(),2)+' kJ/kg → '+fmt(wPrimeKJeff(),1)+' kJ'})${run?'':`, and critical power at <b>${Math.round((ATYPE_CPR[S.athleteType]??1.05)*100)}% of FTP</b> (${Math.round(cpWatts())} W)`} — what the Performance Predictor draws on. Override either in the predictor's Sustainability box. ${srcLink('reserve model →')}</div>
+        ${run?'':`<div class="sub-h">Durability <span class="muted" style="text-transform:none">(how well you hold power late in a long ride)</span></div>
+        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Durability</label>
+          <select onchange="window._setDurability(this.value)" style="flex:1;min-width:0">
+            ${Object.keys(DUR_LABELS).map(k=>`<option value="${k}"${(S.durability||'typical')===k?' selected':''}>${DUR_LABELS[k]}</option>`).join('')}
+          </select></div>
+        <div class="note">Critical power and W′ fade as work piles up — hard kilojoules count far more than easy ones — and partly come back while you ride easy. Low / Typical / High = holding FTP for about 35 / 51 / 67 min when fresh. ${srcLink('durability model →')}</div>`}
         <div class="sub-h">Sweat sodium</div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Concentration</label>
           <select id="sweatNaSel" style="flex:1;min-width:0">
@@ -2703,7 +2812,7 @@ function viewCaloric(){
   // dropdown options for the active intensity list (avg + per-segment)
   const intOpts = (sel)=>ints.map((z,i)=>{
     const lab = z.lo!=null ? `${z.label} — ${z.lo}–${z.hi}% · ~${paceFmt(z.pace)}/mi`
-              : z.pct!=null ? `${z.label} — ${z.pct}% · ${intLbl(z)}` : z.label;
+              : z.pct!=null ? `${z.label} — ${z.rng||z.pct+'%'} · ${intLbl(z)}` : z.label;
     return `<option value="${i}"${i==sel?' selected':''}>${lab}</option>`;
   }).join('');
   // the reference table body (zone or workload mode)
@@ -2729,8 +2838,8 @@ function viewCaloric(){
           <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th></tr></thead>
         <tbody>${ints.map((z,i)=>{const m=imetrics(z,0), b=bonkHours(i);return `<tr>
           <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.label}</span></td>
-          <td>${z.lo!=null?`${z.lo}–${z.hi}%`:z.pct+'%'}</td>
-          <td>${run?(z.paceLo!=null?`${paceFmt(z.paceLo)}–${paceFmt(z.paceHi)}`:paceFmt(z.pace)):Math.round(z.watts)+'W'}</td>
+          <td>${z.lo!=null?`${z.lo}–${z.hi}%`:(z.rng||z.pct+'%')}</td>
+          <td>${run?(z.paceLo!=null?`${paceFmt(z.paceLo)}–${paceFmt(z.paceHi)}`:paceFmt(z.pace)):(z.wLo!=null?(z.rng&&z.rng[0]==='>'?`${Math.round(z.wLo)}+ W`:z.rng&&z.rng[0]==='≤'?`≤${Math.round(z.wHi)}W`:`${Math.round(z.wLo)}–${Math.round(z.wHi)}W`):Math.round(z.watts)+'W')}</td>
           <td>${fmt(m.vo2,1)}</td><td>${fmt(m.kcalHr,0)}</td>
           <td>${fmt(m.choKcalHr,0)}</td><td>${fmt(m.choKcalHr/4,0)}</td><td>${fmt(m.fatKcalHr,0)}</td>
           <td>${b>=12?'&gt;12':b.toFixed(1)}</td></tr>`;}).join('')}
@@ -3174,8 +3283,17 @@ function viewSources(){
   <div class="note">The calculations in this tool are built on established exercise-physiology and sports-nutrition methods; the works below are the published bases for each model. This page goes deep on purpose — the detail lives here so the working tabs stay uncluttered. Per-product nutrition values are <span class="est">estimates</span> read from public labels and vary by batch and region. <b>For education and planning only — not medical or dietary advice.</b></div>
 
   ${sec('Energy expenditure &amp; substrate use',
-    'Power (cycling) or pace and grade (running) → oxygen cost → calories, split into fat vs carbohydrate by respiratory quotient. The fat-vs-carbohydrate balance is shifted by training status: fitter athletes oxidize more fat at a given relative intensity and reach all-carbohydrate later (the crossover concept / maximal-fat-oxidation “Fatmax”).',
-    ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — metabolic equations for cycling power and running speed/grade.')
+    'Power (cycling) or pace and grade (running) → oxygen cost → calories, split into fat vs carbohydrate by respiratory quotient. The fat-vs-carbohydrate balance is shifted by training status: fitter athletes oxidize more fat at a given relative intensity and reach all-carbohydrate later (the crossover concept / maximal-fat-oxidation “Fatmax”).'
+    + '<div style="margin-top:10px"><b>Efficiency check.</b> The ACSM cycling equation implies a gross efficiency of ~20.5% at 150 W, ~22% at 200 W and ~23% at 300 W — at the high end of what’s measured (19.8 ± 0.6% across 95–305 W, Moseley &amp; Jeukendrup 2001; ~19.4–20.6% over a season, Hopker 2009; 24.5% only in world-class pros, Lucía 2002), and it under-predicted V̇O₂ in untrained men (Lang 1992). So the calorie numbers are, if anything, slightly <i>low</i> for most riders — they are not lowered further. (The ExtraPickels Workout Lab calibrates to ~24% at FTP; that was deliberately not carried over.) Fatigue then raises the cost per watt over a long ride — see Durability.</div>'
+    + '<div style="margin-top:10px"><b>Cycling zones</b> are Coggan’s 7 power levels as % of FTP — Active Recovery ≤55 · Endurance 56–75 · Tempo 76–90 · Threshold 91–105 · V̇O₂max 106–120 · Anaerobic Capacity 121–150 · Neuromuscular &gt;150 — the same zones as the Workout Lab; each zone’s numbers are computed at its midpoint. Running keeps the Daniels-style zones on threshold speed.</div>',
+    ref('Allen H, Coggan AR','2010','Training and Racing with a Power Meter (2nd ed.).','VeloPress. — the 7 power levels (% of FTP) used for the cycling zones. Coaching framework, not a controlled trial.')
+    + ref('Moseley L, Jeukendrup AE','2001','The reliability of cycling efficiency.','Medicine &amp; Science in Sports &amp; Exercise, 33(4), 621–627. doi:10.1097/00005768-200104000-00017 — GE 19.8 ± 0.6%, rising with power.')
+    + ref('Moseley L, Achten J, Martin JC, Jeukendrup AE','2004','No differences in cycling efficiency between world-class and recreational cyclists.','International Journal of Sports Medicine, 25(5), 374–379. doi:10.1055/s-2004-815848 — GE 17.9–18.8% at 165 W regardless of fitness.')
+    + ref('Hopker J, Coleman D, Passfield L','2009','Changes in cycling efficiency during a competitive season.','Medicine &amp; Science in Sports &amp; Exercise, 41(4), 912–919. doi:10.1249/mss.0b013e31818f2ab2 — GE 19.4–20.6% across a season.')
+    + ref('Lucía A, Hoyos J, Pérez M, Santalla A, Chicharro JL','2002','Inverse relationship between V̇O₂max and economy/efficiency in world-class cyclists.','Medicine &amp; Science in Sports &amp; Exercise, 34(12), 2079–2084. doi:10.1249/01.mss.0000039306.92778.df — GE 24.5% at 385 W in world-class pros.')
+    + ref('Lang PB, Latin RW, Berg KE, Mellion MB','1992','The accuracy of the ACSM cycle ergometry equation.','Medicine &amp; Science in Sports &amp; Exercise, 24(2), 272–276. doi:10.1249/00005768-199202000-00019 — the equation under-estimated V̇O₂ by 0.16–0.29 L/min at 30–150 W.')
+    + ref('Barstow TJ, Molé PA','1991','Linear and nonlinear characteristics of oxygen uptake kinetics during heavy exercise.','Journal of Applied Physiology, 71(6), 2099–2106. doi:10.1152/jappl.1991.71.6.2099 — V̇O₂ slope ~11 mL·min⁻¹ per W in trained cyclists, matching the ACSM net slope; slow-component onset ~105 s.')
+    + ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — metabolic equations for cycling power and running speed/grade.')
     + ref('Weir JB de V','1949','New methods for calculating metabolic rate with special reference to protein metabolism.','The Journal of Physiology, 109(1–2), 1–9.')
     + ref('Péronnet F, Massicotte D','1991','Table of nonprotein respiratory quotient: an update.','Canadian Journal of Sport Sciences, 16(1), 23–29. — %carbohydrate vs respiratory exchange ratio.')
     + ref('Frayn KN','1983','Calculation of substrate oxidation rates in vivo from gaseous exchange.','Journal of Applied Physiology, 55(2), 628–634.')
@@ -3200,22 +3318,59 @@ function viewSources(){
 
   ${sec('The anaerobic reserve — W′/D′, depletion, taper &amp; recovery',
     'How you spend and refill your finite reserve drives the whole ride. The tool models it the way it actually feels:'
-    + '<div style="margin-top:10px"><b>The boundary.</b> Critical power (CP, taken as your FTP) for cycling, or critical speed (CS, your threshold pace) for running, is the highest intensity you can hold in aerobic steady state. Above it you draw on a <i>finite</i> reserve — W′ (cycling, kJ) or D′ (running, m) — sized by the athlete-type selector and body mass: W′ ≈ 0.20 / 0.30 / 0.45 kJ·kg⁻¹ and D′ ≈ 1.8 / 2.5 / 3.5 m·kg⁻¹ for aerobic / balanced / anaerobic types, and directly editable.</div>'
+    + '<div style="margin-top:10px"><b>The boundary.</b> Critical power (CP) for cycling, or critical speed (CS, your threshold pace) for running, is the highest intensity you can hold in aerobic steady state. Above it you draw on a <i>finite</i> reserve — W′ (cycling, kJ) or D′ (running, m) — sized by the athlete-type selector and body mass: W′ ≈ 0.20 / 0.30 / 0.45 kJ·kg⁻¹ and D′ ≈ 1.8 / 2.5 / 3.5 m·kg⁻¹ for aerobic / balanced / anaerobic types, and directly editable. CP sits a little <i>above</i> FTP — 1.07 / 1.05 / 1.02 × FTP for the three types, from the 20-min-test arithmetic FTP = 0.95 × (CP + W′/1200 s) with each type’s W′ (a modelling choice carried over from the ExtraPickels Workout Lab; type your own CP/FTP in the Sustainability box). So a steady effort at FTP no longer touches W′ — it’s the durability fade below that makes it un-holdable for hours.</div>'
     + '<div style="margin-top:10px"><b>Depletion.</b> Above CP the reserve drains at a rate set by how far over you are; time-to-empty T<sub>lim</sub> = W′ ÷ (P − CP). On a long climb even a modest surge empties the tank well before the top — which is why, over sustained climbs, the strategies converge on holding CP.</div>'
-    + '<div style="margin-top:10px"><b>Reconstitution.</b> Below CP the reserve rebuilds along an exponential whose time-constant τ depends on how far below CP you drop — the further below (e.g. coasting), the faster. Cycling uses the Skiba 2012 form (τ ≈ 320–860 s). <b>Running rebuilds roughly twice as fast</b> — over-ground running data put τ at ≈ 120–470 s, attributed to the elastic (stretch-shortening) contribution of the stride — so the tool uses running-specific constants, not the cycling values.</div>'
+    + '<div style="margin-top:10px"><b>Reconstitution.</b> Below CP the reserve rebuilds along an exponential whose time-constant τ depends on how far below CP you drop — the further below (e.g. coasting), the faster. <b>Cycling refills in two parts</b> (Chorley 2023): a fast, phosphocreatine-like 36% share that empties first and comes back within about a minute, and a slow share that takes many minutes — both slower the closer you ride to CP. After a <i>deep</i> drain (more than half of W′ spent) part of the fast deficit only refills at the slow rate on the next recovery (Chorley 2019, 2023); short partial drains refill normally, since the W′-balance model is known to under-predict refill after them (Skiba &amp; Clarke 2021). <b>Running rebuilds roughly twice as fast</b> — over-ground running data put τ at ≈ 120–470 s, attributed to the elastic (stretch-shortening) contribution of the stride — so the tool uses running-specific constants (single pool), not the cycling values.</div>'
+    + '<div style="margin-top:10px"><b>Acidity (cycling).</b> Work above CP also builds a proton load that clears far more slowly than W′ refills — after a 30-s sprint PCr was 79% back in 3.8 min while muscle pH had barely moved (Bogdanis 1996). The tool tracks it (one W′ of above-CP work = 1, clearing with a ~9-min time constant when riding easy, barely at all near CP) and stops further supra-CP effort at 1.8, the level at which Tabata’s 20/10s fail at bout 7–8; exhaustion above CP coincides with limiting metabolite levels (Black 2017). So repeated punchy surges can be cut short with W′ still in the bank. Your pacing headroom is the tighter of W′ left and acidity left. <i>Model assumption</i>, from the ExtraPickels Workout Lab.</div>'
     + '<div style="margin-top:10px"><b>Self-preservation (the taper).</b> A real athlete doesn’t hold flat-out until they crumple — as the tank nears empty they get conservative. Below ~30% of reserve the tool curvilinearly eases the supra-CP effort, <b>feathering you toward CP</b> rather than a hard blow-up. Most of the time this alone keeps you off the floor.</div>'
     + '<div style="margin-top:10px"><b>Blow-up &amp; recovery.</b> If the reserve still empties, you don’t grind on at CP (where recovery is glacial) — you sit up. The model drops you to the top of Zone 2 until the reserve rebuilds to ~20%, lets you hold CP through ~95%, then releases you to full pacing (typically after a descent refills the tank). This “empty → soft-pedal → recover → go again” cycle, and holding reserve for the finish, is what the D′-balance literature finds distinguishes the strongest pacers.</div>'
-    + '<div style="margin-top:10px"><b>Energy cost.</b> Work done above CP is charged to carbohydrate (it’s largely glycolytic) plus a VO₂ slow-component surcharge for time in the severe domain — so hard, surgy courses deplete glycogen faster than their <i>average</i> power suggests.</div>',
+    + '<div style="margin-top:10px"><b>Energy cost.</b> Work done above CP is charged to carbohydrate (it’s largely glycolytic) plus a VO₂ slow-component surcharge — for cycling it levels off at ~4% in the heavy domain (top of Zone 2 up to CP) and keeps climbing above CP, ~11% by 9 min (Colosio 2020), clearing within a few minutes of easing off; running keeps a flat 6% above CS — so hard, surgy courses deplete glycogen faster than their <i>average</i> power suggests.</div>',
     ref('Monod H, Scherrer J','1965','The work capacity of a synergic muscular group.','Ergonomics, 8(3), 329–338. — original critical-power concept.')
     + ref('Jones AM, Vanhatalo A, Burnley M, Morton RH, Poole DC','2010','Critical power: implications for determination of V̇O₂max and exercise tolerance.','Medicine &amp; Science in Sports &amp; Exercise, 42(10), 1876–1890. — CP as the heavy/severe-domain boundary and W′ above it.')
     + ref('Skiba PF, Chidnok W, Vanhatalo A, Jones AM','2012','Modeling the expenditure and reconstitution of work capacity above critical power.','Medicine &amp; Science in Sports &amp; Exercise, 44(8), 1526–1532. — the W′-balance depletion/reconstitution model; the cycling τ used here.')
     + ref('Skiba PF, Clarke D, Vanhatalo A, Jones AM','2014','Effect of work and recovery durations on W′ reconstitution during intermittent exercise.','Medicine &amp; Science in Sports &amp; Exercise, 46(7), 1433–1440. — recovery-intensity dependence of τ.')
+    + ref('Chorley A, Marwood S, Lamb KL','2023','A dynamic model of the bi-exponential reconstitution and expenditure of W′ in trained cyclists.','European Journal of Sport Science, 23(12), 2368–2378. doi:10.1080/17461391.2023.2238679 — the fast (36%) and slow refill pools and their time constants vs how far below CP you ride; the cycling refill used here.')
+    + ref('Chorley A, Bott RP, Marwood S, Lamb KL','2019','Slowing the reconstitution of W′ in recovery with repeated bouts of maximal exercise.','International Journal of Sports Physiology and Performance, 14(2), 149–155. doi:10.1123/ijspp.2018-0256 — less W′ returns on each later recovery after deep drains; applied here only when more than half of W′ was spent.')
+    + ref('Skiba PF, Clarke DC','2021','The W′ balance model: mathematical and methodological considerations.','International Journal of Sports Physiology and Performance, 16(11), 1561–1572. doi:10.1123/ijspp.2021-0205 — W′bal under-predicts refill after short partial drains, so shallow drains refill at the normal rate here.')
+    + ref('Bogdanis GC, Nevill ME, Boobis LH, Lakomy HKA','1996','Contribution of phosphocreatine and aerobic metabolism to energy supply during repeated sprint exercise.','Journal of Applied Physiology, 80(3), 876–884. doi:10.1152/jappl.1996.80.3.876 — PCr back far faster than pH; basis for the slow acidity clearance.')
+    + ref('Black MI, Jones AM, Blackwell JR, et al.','2017','Muscle metabolic and neuromuscular determinants of fatigue during cycling in different exercise intensity domains.','Journal of Applied Physiology, 122(3), 446–459. doi:10.1152/japplphysiol.00942.2016 — exhaustion above CP coincides with limiting metabolite levels; basis for the acidity limit.')
+    + ref('Tabata I, Nishimura K, Kouzaki M, et al.','1996','Effects of moderate-intensity endurance and high-intensity intermittent training on anaerobic capacity and V̇O₂max.','Medicine &amp; Science in Sports &amp; Exercise, 28(10), 1327–1330. doi:10.1097/00005768-199610000-00018 — 20/10s at ~170% V̇O₂max fail at bout 7–8; the calibration point for the acidity limit (1.8).')
+    + ref('ExtraPickels Workout Lab','2026','Athlete-type CP/FTP defaults (1.07 / 1.05 / 1.02).','Modelling choice — physiologist call, from FTP = 0.95 × (CP + W′/1200 s) with each type’s W′ default; not a controlled trial.')
     + ref('Vassallo C, Gray A, Cummins C, Murphy A, Waldron M','2020','Exercise tolerance during flat over-ground intermittent running: modelling the expenditure and reconstitution kinetics of work done above critical power.','European Journal of Applied Physiology, 120(1), 219–230. — running-specific W′ reconstitution (τ ≈ 120–470 s), ~2× faster than cycling; the running τ used here.')
     + ref('Kirby BS, Winn BJ, Wilkins BW, Jones AM','2021','Interaction of exercise bioenergetics with pacing behavior predicts track distance running performance.','Journal of Applied Physiology, 131(5), 1532–1542. — D′ balance predicts finishing position; strong runners hold reserve until the final lap (basis for the taper &amp; “hold for the finish” behavior).')
     + ref('Jones AM, Vanhatalo A','2017','The ‘critical power’ concept: applications to sports performance with a focus on intermittent high-intensity exercise.','Sports Medicine, 47(Suppl 1), 65–78. — critical speed / D′ in running.')
     + ref('Abbiss CR, Laursen PB','2008','Describing and understanding pacing strategies during athletic competition.','Sports Medicine, 38(3), 239–252. — pacing taxonomy and the teleoanticipation framework behind the self-preservation taper.')
     + ref('Jones AM, Grassi B, Christensen PM, Krustrup P, Bangsbo J, Poole DC','2011','Slow component of V̇O₂ kinetics: mechanistic bases and practical applications.','Medicine &amp; Science in Sports &amp; Exercise, 43(11), 2046–2062. — extra O₂ cost of severe-domain work behind the slow-component surcharge.')
+    + ref('Colosio AL, Caen K, Bourgois JG, Boone J, Pogliaghi S','2020','Bioenergetics of the VO₂ slow component between exercise intensity domains.','Pflügers Archiv – European Journal of Physiology, 472(10), 1447–1456. doi:10.1007/s00424-020-02437-7 — slow component +4.2 ± 3.4% (heavy, levels off) and +11.4 ± 4.9% (severe) of end-exercise V̇O₂; the cycling sizes used here.')
     + ref('Minetti AE, Moia C, Roi GS, Susta D, Ferretti G','2002','Energy cost of walking and running at extreme uphill and downhill slopes.','Journal of Applied Physiology, 93(3), 1039–1046. — gradient energy cost underpinning the running anaerobic-work charge.'))}
+
+  ${sec('Durability — how CP &amp; W′ fade over a long ride (cycling)',
+    'A fresh CP doesn’t last all day. Critical power, W′ and efficiency all fall as work piles up, and the tool now models that the way the ExtraPickels Workout Lab does, re-checked against long-ride studies:'
+    + '<div style="margin-top:10px"><b>Hard kilojoules count most.</b> Each kJ is weighted by (P/FTP)³ — capped at CP, since CP is unchanged after short exhaustive severe work (Ferguson 2010) — and work above CP counts 3× extra. Steady Zone 2 work fades you slowly; intervals and surges above CP fade you fast. That matches the field data: work above CP cut later power 10–20% after 2.5–15 kJ/kg, while the same work below CP cost much less (Sánchez-Jiménez 2026 review; Mateo-March 2024: no CP change; Spragg 2024).</div>'
+    + '<div style="margin-top:10px"><b>How much.</b> At full fatigue CP is ~20% and the W′ ceiling ~36% lower. The scale is your <b>Durability</b> setting — Low / Typical / High = holding FTP for about 35 / 51 / 67 min fresh, the mean ± 1 SD of trained cyclists (Borszcz 2018) — fitted so 2 h of heavy riding cuts CP ~11% and W′ ~20% (Clark 2019: −9% and −23%) and 150 min moderate cuts 5-min power ~7% (Hamilton 2024: −9 ± 10%). Past the Lab’s range (≥ 3 h) CP keeps fading rather than stopping at −20% — riders reach task failure at VT1 power after ~4 h (Gallo 2024).</div>'
+    + '<div style="margin-top:10px"><b>Riding easy gives some back.</b> 60% of the fade is recoverable while you ride below 60% of FTP (descents, regroups), returning with a ~5-min time constant (McClean 2025: ~45% of the force loss back in 8 min; Grossl 2012); the rest stays for the day (Carroll 2017).</div>'
+    + '<div style="margin-top:10px"><b>Eating protects CP — late in the ride.</b> After 3 h of moderate riding CP fell 15% on water, 7% at 60 g/h and 4% at 120 g/h of carbohydrate (Norte 2026); after 2 h heavy, CP held at 40 and 80 min either way and only the placebo trial dropped by 2 h (Clark 2019). W′ fell regardless in both. So the tool shields the CP fade (not W′) by your planned carbs, ramping in over the first ~1.5 h (fitted to Norte’s two doses: 0.43 / 0.29 of the water fade vs 0.47 / 0.27 measured). The predictor assumes you eat the plan’s carb target; under-fuelling makes the late hours slower.</div>'
+    + '<div style="margin-top:10px"><b>Efficiency drifts.</b> Gross efficiency fell 18.4 → 17.4% over 2 h at 60% of maximal minute power (Hopker 2017; also Passfield &amp; Doust 2000; part of the VT1 loss in Stevenson 2022), so the same watts cost more calories late on. The tool raises kcal (and carbohydrate burn) with the same fatigue state, +5% after that 2-h ride and at most +12.5%. Not every study sees it — Evans 2025 found no change after 60–90 min.</div>'
+    + '<div style="margin-top:10px"><i>Model assumptions</i>, labelled as such: the fade weights, the recoverable share, the fuel ramp and the efficiency drift are fits to the studies above, not measurements of you. Elite riders fade less (Mateo-March 2022: WorldTour −5 to −9% vs ProTeam −8 to −12% of power after 45 kJ/kg; Leo 2024), which the High setting covers. Running keeps a fixed CS — the durability data here are from cycling.</div>',
+    ref('Borszcz FK, Tramontin AF, Bossi AH, Carminatti LJ, Costa VP','2018','Functional threshold power in cyclists: validity of the concept and physiological responses.','International Journal of Sports Medicine, 39(10), 737–742. doi:10.1055/s-0044-101546 — time to exhaustion at FTP 50.9 ± 15.7 min; the anchor for the three durability levels.')
+    + ref('Clark IE, Vanhatalo A, Thompson C, et al.','2019','Dynamics of the power-duration relationship during prolonged endurance exercise and influence of carbohydrate ingestion.','Journal of Applied Physiology, 127(3), 726–736. doi:10.1152/japplphysiol.00207.2019 — CP −9% and W′ −23% after 2 h heavy; 60 g/h carbohydrate kept CP but not W′.')
+    + ref('Norte BR, Slinn MM, Johnson KO, et al.','2026','Graded carbohydrate ingestion up to 120 g·h⁻¹ attenuates the reduction in critical power following 3 h of moderate-intensity exercise in a dose-dependent manner.','Scandinavian Journal of Medicine &amp; Science in Sports, 36(6), e70326. doi:10.1111/sms.70326 — CP −15% (water), −7% (60 g/h), −4% (120 g/h) after 3 h; W′ fell regardless. Basis for the fuel protection.')
+    + ref('Hamilton K, Kilding AE, Plews DJ, et al.','2024','Durability of the moderate-to-heavy-intensity transition is related to the effects of prolonged exercise on severe-intensity performance.','European Journal of Applied Physiology, 124(8), 2427–2438. doi:10.1007/s00421-024-05459-6 — 150 min moderate: 5-min power −9%, VT1 power −6%.')
+    + ref('Gallo G, Faelli EL, Ruggeri P, et al.','2024','Power output at the moderate-to-heavy intensity transition decreases in a non-linear fashion during prolonged exercise.','European Journal of Applied Physiology, 124(8), 2353–2364. doi:10.1007/s00421-024-05440-3 — VT1 power falls non-linearly; task failure at ~234 min.')
+    + ref('Ferguson C, Rossiter HB, Whipp BJ, et al.','2010','Effect of recovery duration from prior exhaustive exercise on the parameters of the power-duration relationship.','Journal of Applied Physiology, 108(4), 866–874. doi:10.1152/japplphysiol.91425.2008 — CP unchanged after exhaustive severe work; why the fade weight is capped at CP.')
+    + ref('Mateo-March M, Valenzuela PL, Muriel X, et al.','2022','The record power profile of male professional cyclists: fatigue matters.','International Journal of Sports Physiology and Performance, 17(6), 926–931. doi:10.1123/ijspp.2021-0403 — −1.6 to −3.0% after 15 kJ/kg and −6.0 to −9.7% after 45 kJ/kg; less in WorldTour riders.')
+    + ref('Mateo-March M, Leo P, Muriel X, et al.','2024','Is all work the same? Performance after accumulated work of differing intensities in male professional cyclists.','Journal of Science and Medicine in Sport, 27(6), 430–434. doi:10.1016/j.jsams.2024.03.005 — CP fell after work above CP, not after the same work below it.')
+    + ref('Spragg J, Leo P, Giorgi A, et al.','2024','The intensity rather than the quantity of prior work determines the subsequent downward shift in the power duration relationship in professional cyclists.','European Journal of Sport Science, 24(4), 449–457. doi:10.1002/ejsc.12077 — ~2000 kJ below 70% CP left the power profile intact; intervals above CP lowered it.')
+    + ref('Sánchez-Jiménez JL, Salas-Montoro JA, Mateo-March M, et al.','2026','Is intensity the most important factor in determining the amount of prior work accumulated that affects cyclists’ acute durability? A systematic review.','European Journal of Applied Physiology, 126(1), 163–179. doi:10.1007/s00421-025-05885-0 — work above CP cut power 10–20% after 2.5–15 kJ/kg; work below CP gave smaller decrements.')
+    + ref('Leo P, Mateo-March M, Giorgi A, et al.','2024','The influence of high-intensity work on the record power profile of under-23, Pro Team, and World Tour cyclists.','International Journal of Sports Physiology and Performance, 19(6), 545–549. doi:10.1123/ijspp.2023-0451 — U23 riders fade after 5 kJ/kg above CP, pros after 7.5.')
+    + ref('Klaris MB, Cubel C, Bruun TR, et al.','2024','Performance and fatigue patterns in elite cyclists during 6 h of simulated road racing.','Scandinavian Journal of Medicine &amp; Science in Sports, 34(7), e14699. doi:10.1111/sms.14699 — time-trial power −7% over 6 h with ~90 g/h carbohydrate.')
+    + ref('McClean ZJ, MacDougall KB, Jordan MJ, et al.','2025','Performance fatigability at task failure and beyond: distinct patterns of recovery following constant load versus intermittent cycling exercise.','International Journal of Exercise Science, 18(7), 971–983. doi:10.70252/MJTH7186 — partial recovery of force within 8 min (~40–48% of the loss, read from the paper’s data by the Workout Lab); the 5-min recovery time constant.')
+    + ref('Grossl T, de Lucas RD, de Souza KM, Guglielmo LGA','2012','Time to exhaustion at intermittent maximal lactate steady state is longer than continuous cycling exercise.','Applied Physiology, Nutrition, and Metabolism, 37(6), 1047–1053. doi:10.1139/h2012-088 — brief rests extend time at MLSS; basis for partial recovery.')
+    + ref('Carroll TJ, Taylor JL, Gandevia SC','2017','Recovery of central and peripheral neuromuscular fatigue after exercise.','Journal of Applied Physiology, 122(5), 1068–1076. doi:10.1152/japplphysiol.00775.2016 — peripheral fatigue needs 20–30+ min; why only part of the fade recovers.')
+    + ref('Hopker JG, O’Grady C, Pageaux B','2017','Prolonged constant load cycling exercise is associated with reduced gross efficiency and increased muscle oxygen uptake.','Scandinavian Journal of Medicine &amp; Science in Sports, 27(4), 408–417. doi:10.1111/sms.12673 — GE 18.4 → 17.4% over 2 h; the efficiency-drift anchor.')
+    + ref('Passfield L, Doust JH','2000','Changes in cycling efficiency and performance after endurance exercise.','Medicine &amp; Science in Sports &amp; Exercise, 32(11), 1935–1941. doi:10.1097/00005768-200011000-00018 — efficiency fell after ~60 min at 60% V̇O₂peak, tracking the loss in 5-min power.')
+    + ref('Stevenson JD, Kilding AE, Plews DJ, Maunder E','2022','Prolonged cycling reduces power output at the moderate-to-heavy intensity transition.','European Journal of Applied Physiology, 122(12), 2673–2682. doi:10.1007/s00421-022-05036-9 — VT1 power −10% after 2 h, partly from lost efficiency.')
+    + ref('Evans G, Chorley A, Highton J','2025','Durability of the major determinants of endurance performance is not different after 15 kJ·kg⁻¹ of moderate or heavy exercise.','European Journal of Sport Science, 25(9), e70039. doi:10.1002/ejsc.70039 — a dissenting result: CP and GE unchanged after 15 kJ/kg, W′ roughly halved.'))}
 
   ${sec('Glycogen stores &amp; depletion',
     'Muscle-glycogen concentration per kg of engaged muscle (×4.18 kcal/g) plus a liver contribution; time-to-bonk = stored glycogen ÷ carbohydrate burn rate. The engaged-muscle mass is estimated from sex-specific skeletal-muscle mass and the fraction actively recruited by the sport (cycling engages less than running). Muscle-glycogen states used here: typical training ≈ 110 mmol/kg (a normal training day, not topped off), tapered &amp; rested ≈ 150 mmol/kg (recovered and carb-replete), carb-loaded ≈ 220 mmol/kg (supercompensated); liver glycogen scales with the same state plus lean body mass and assumes a well-fed start (an overnight fast would be lower).',
@@ -4008,7 +4163,9 @@ window._setActivityMode=(m)=>{
 };
 window._resetReserve=()=>{ if(isRun()) S.dPrimeM=null; else S.wPrimeKJ=null; render(); };  // revert W′/D′ to the body-mass auto default
 // athlete type sets the auto W′/D′ size; picking one clears any manual override so the new default takes effect
-window._setAthleteType=(v)=>{ if(S.athleteType===v) return; S.athleteType=v; S.wPrimeKJ=null; S.dPrimeM=null; render(); };
+window._setAthleteType=(v)=>{ if(S.athleteType===v) return; S.athleteType=v; S.wPrimeKJ=null; S.dPrimeM=null; S.cpr=null; render(); };
+window._resetCpr=()=>{ S.cpr=null; render(); };                                   // revert CP/FTP to the athlete-type default
+window._setDurability=(v)=>{ if(DUR_KJ[v]==null) return; S.durability=v; render(); };
 // cycling time-model params via preset dropdown (manual number input commits through the generic data-k handler)
 window._setCourseParam=(key,val)=>{ if(val==='') return; S[key]=+val; render(); };
 // Basic bike style → sets position (CdA) + tires (Crr) + weight (lbs) presets in one pick
