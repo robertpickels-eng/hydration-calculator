@@ -1200,6 +1200,15 @@ function heatManualItem(s, hrs, taFn){
   const L=heatLoss(taFn((s.idx*SEG_LEN + s.dur/2)/hrs));
   return Object.assign({}, it, { watts:(it.watts||0)*(1 - L) });
 }
+// manual mode, power loss on: the plan's target NP lowered for heat beside the planned one (S41, 11A). NP of the
+// 30-min plan, each segment's watts held for its duration: (Σ w⁴·dur / Σ dur)^¼; one average gives that average.
+function heatManualNP(){
+  if(!heatPowerActive() || S.activityMode==='course') return '';
+  const segs=segments(), hrs=S.eventHours, taFn=heatTaFn(); let a=0, b=0, d=0;
+  segs.forEach(s=>{ const w0=intItem(s.zi).watts||0, w=heatManualItem(s, hrs, taFn).watts||0; a+=Math.pow(w,4)*s.dur; b+=Math.pow(w0,4)*s.dur; d+=s.dur; });
+  if(!(d>0)) return '';
+  return `<div class="note" style="margin-top:2px"><b>Target NP ${Math.round(Math.pow(a/d,0.25))} W</b> (${Math.round(Math.pow(b/d,0.25))} W planned, lowered for heat)</div>`;
+}
 // the activity at time t (h): {frac, eff}. Course mode samples per 30-min block (spec 14.46), manual per segment.
 function heatMoment(t){
   t=Math.max(0, +t||0);
@@ -2066,6 +2075,7 @@ function courseBody(intOpts, totalsBlock){
   const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
   const strat=S.pacingStrategy||'even';
   const wlLbl = strat==='even' ? wl : `${wl}, ${PACE_LABELS[strat].toLowerCase()}`;   // strategy redistributes the average
+  const heatNP = (!run && t && t.heatLbar!=null) ? [Math.round(t.targetNP), Math.round(t.targetNP0)] : null;   // lowered for heat: S41 (11A)
   const anyScaled = (S.segScale||[]).some(x=>x!=null && x!==1);
   const segEditor = `<div class="sub-h" style="margin-top:12px">30-min blocks <span class="muted" style="text-transform:none">(derived from your effort on the terrain — nudge any block harder / easier)</span></div>
     <div class="scroll" style="max-height:240px;margin-top:6px">
@@ -2090,7 +2100,7 @@ function courseBody(intOpts, totalsBlock){
     ${S.eventIntPct!=100?`<div class="note" style="margin-top:2px">Manually set to <b>${fmt(S.eventIntPct,0)}%</b> of the zone midpoint — <a onclick="window._setEventZone(${S.eventZone})" style="color:var(--accent2);cursor:pointer">reset to midpoint</a>.</div>`:''}`;
   const pacingRow = `<div class="field"><label style="flex:0 0 auto;margin-right:8px">Pacing strategy</label>
       <select onchange="window._setPacing(this.value)" style="flex:1;min-width:0">${Object.keys(PACE_LABELS).map(k=>`<option value="${k}"${strat===k?' selected':''}>${PACE_LABELS[k]}</option>`).join('')}</select></div>
-    <div class="note" style="margin-top:6px">Your <b>${wl}</b> is the <b>target ${run?'NGP':'NP'}</b> — the model solves the baseline effort so the ride's normalized ${run?'pace':'power'} lands there (the strategy surges climbs, W′ recovery eases descents), so your <i>average</i> settles below it. Blocks, time, fuel &amp; the depletion chart update live — nudge any 30-min block to fine-tune. ${srcLink('how pacing works →')}</div>`;
+    <div class="note" style="margin-top:6px">${heatNP?`<b>Target NP ${heatNP[0]} W</b> (${heatNP[1]} W planned, lowered for heat)`:`Your <b>${wl}</b> is the <b>target ${run?'NGP':'NP'}</b>`} — the model solves the baseline effort so the ride's normalized ${run?'pace':'power'} lands there (the strategy surges climbs, W′ recovery eases descents), so your <i>average</i> settles below it. Blocks, time, fuel &amp; the depletion chart update live — nudge any 30-min block to fine-tune. ${srcLink('how pacing works →')}</div>`;
   const sustainBlock = (()=>{
       const cpLbl = run ? paceFmt(speedToPace(csSpeed()))+'/mi' : Math.round(cpWatts())+' W';
       const reserveKey = run ? 'dPrimeM' : 'wPrimeKJ';
@@ -2154,7 +2164,7 @@ function courseBody(intOpts, totalsBlock){
       <div style="font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;font-size:12px;color:var(--accent2)">Est. moving time</div>
       <div style="font-family:var(--font-display);font-size:44px;font-weight:700;color:var(--accent);line-height:1.05;font-variant-numeric:tabular-nums;margin:4px 0 3px">${t?hm(t.hours):'—'}</div>
       <div class="muted" style="font-size:11.5px">@ <b>${run?paceFmt(speedToPace(t.np))+'/mi':Math.round(t.np)+' W'} ${run?'NGP':'NP'}</b> · IF ${fmt(t.intFactor,2)} · ${PACE_LABELS[strat]}</div>
-      ${t.npShort?`<div class="note" style="color:var(--warn);margin-top:4px">Target ${run?'NGP '+paceFmt(speedToPace(t.targetNP))+'/mi':'NP '+Math.round(t.targetNP)+' W'} isn't sustainable on this course — your W′/CP limits cap it at ${run?paceFmt(speedToPace(t.np))+'/mi':Math.round(t.np)+' W'}. Pick a lower intensity for a realistic plan.</div>`:''}
+      ${t.npShort?`<div class="note" style="color:var(--warn);margin-top:4px">Target ${run?'NGP '+paceFmt(speedToPace(t.targetNP))+'/mi':'NP '+Math.round(t.targetNP)+' W'}${heatNP?` (${heatNP[1]} W planned, lowered for heat)`:''} isn't sustainable on this course — your W′/CP limits cap it at ${run?paceFmt(speedToPace(t.np))+'/mi':Math.round(t.np)+' W'}. Pick a lower intensity for a realistic plan.</div>`:''}
     </div>
     <div class="grid cols3" style="margin-top:10px">
       <div class="res"><span>Normalized ${run?'pace (NGP)':'power (NP)'}</span><span class="v">${run?paceFmt(speedToPace(t.np))+'/mi':Math.round(t.np)+' W'} · IF ${fmt(t.intFactor,2)}</span></div>
@@ -2987,6 +2997,7 @@ function viewRider(){
         ${numField('Activity duration','manualHours','hr',0.5)}
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg ${run?'pace':'intensity'}</label>
           <select id="eventZoneSel" style="flex:1;min-width:0" onchange="window._setEventZone(this.value)">${intOpts(S.eventZone)}</select></div>
+        ${heatManualNP()}
         ${run&&!S.segBreakdown?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">Avg grade</label>
           <input type="number" step="0.5" value="${S.eventGrade}" style="width:72px" onchange="window._setEventGrade(this.value)"><span class="u">%</span></div>`:''}
         <div class="sub-h">${run?'Run':'Ride'} breakdown</div>
