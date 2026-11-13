@@ -2565,7 +2565,7 @@ function sweatSodiumPanel(){
         <div class="res"><span>Total ECF (≈20% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
         <div class="sub-h">Sweat rate</div>
-        <div class="res"><span class="muted">Sweat rate used</span><span class="v">${fmt(sr,2)} L/hr</span></div>${heatActive()?`<div class="res"><span class="muted">${HEAT_STR.actRate}</span><span class="v">${fmt(srAct,2)} L/hr</span></div>`:''}
+        <div class="res"><span class="muted">Sweat rate used</span><span class="v">${fmt(sr,2)} L/hr</span></div>${heatActive()?(heatStatus().status==='notAdjusted'?`<div class="res"><span class="v" style="color:var(--warn)">${HEAT_STR.notAdjusted}</span></div>`:`<div class="res"><span class="muted">${HEAT_STR.actRate}</span><span class="v">${fmt(srAct,2)} L/hr</span></div>`):''}
         <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*srAct,0)} mg <span class="muted">@ ${fmt(S.sweatNa,0)} mg/L</span></span></div>
         <div class="note">Set <b>sweat sodium concentration</b> on the <b>Athlete</b> tab.</div>
         <div class="sub-h">Targets</div>
@@ -2856,7 +2856,7 @@ function heatResultLines(){
   const st=heatStatus();
   if(st.status==='needHeight') return `<div class="state bad"><span>${HEAT_STR.addHeight}</span><a role="button" tabindex="0" onclick="window._goHeight()">Athlete Profile</a></div>`;   // S36
   if(st.status==='notAdjusted') return `<div class="state warn"><span class="v">${HEAT_STR.notAdjusted}</span></div>`;   // S35
-  return `<div class="state"><span>${HEAT_STR.actRate}</span><span class="v">${fmt(st.rate,2)} L/hr (sweat test ${fmt(sweatRateLhr(),2)})</span></div>`;   // S34 (8B)
+  return `<div class="state"><span>${HEAT_STR.actRate}</span><span class="v">${fmt(st.rate,2)} L/hr (${sweatAnswerEff()==='none'?'estimate':'sweat test'} ${fmt(sweatRateLhr(),2)})</span></div>`;   // S34 (8B); under Nothing "(estimate …)" (13A)
 }
 function heatActivityBoxes(){
   const on=S.heatOn===true;
@@ -2866,7 +2866,7 @@ function heatActivityBoxes(){
     h+=hBox('Finish', hChk('Add finish conditions', S.heatFinishOn===true, `window._heatFinish(this.checked)`)   // S28, S29 (8B)
       + (S.heatFinishOn===true ? heatCondFields('heatFinish', heatFinishCond(), !!(S.heatFinish&&S.heatFinish.more)) : ''));
     h+=hChk(HEAT_ACCL_LBL, heatActAccl(), `window._heatAccl('act',this.checked)`);   // S30
-    if(!isRun()) h+=hFrow('Lower planned power in the heat', hSeg([['off','Off'],['on','On']], S.heatPowerOn===true?'on':'off', v=>`window._heatPower(${v==='on'})`) + '<span class="tag">Cycling only</span>');   // S31 (8B), S32
+    if(!isRun() && heatActive()) h+=hFrow('Lower planned power in the heat', hSeg([['off','Off'],['on','On']], S.heatPowerOn===true?'on':'off', v=>`window._heatPower(${v==='on'})`) + '<span class="tag">Cycling only</span>');   // S31 (8B), S32
   }
   return hBox('Activity conditions', h) + (on ? hBox('Result', heatResultLines()) : '');   // S26, S33
 }
