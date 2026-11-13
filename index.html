@@ -1187,8 +1187,8 @@ function heatMoments(){
 // time-weighted mean activity sweat rate (L/hr)
 function sweatRateMean(){
   if(!heatActive()) return sweatRateLhr();
-  let sum=0, T=0; heatMoments().forEach(m=>{ sum+=sweatRateAt(m.t)*m.dur; T+=m.dur; });
-  return T>0 ? sum/T : sweatRateLhr();
+  let sum=0, T=0; heatMoments().forEach(m=>{ const f=heatFactorAt(m.t); sum+=f.factor*f.accl*m.dur; T+=m.dur; });
+  return T>0 ? sweatRateLhr()*(sum/T) : sweatRateLhr();      // base × time-weighted factor: exactly the base rate when every factor is 1
 }
 // midpoint of hour h (1-based) of the activity, clipped to its end for the last part-hour; past the end, the hour's own midpoint
 function heatHourMid(h){ const end=+S.eventHours||0, s=h-1; return s<end ? (s + Math.min(h, end))/2 : h - 0.5; }
@@ -3932,7 +3932,7 @@ function viewDebrief(){
     const drinks=allProducts().filter(p=>p.cat==='drink').map(p=>opt(p._id,p.name,productCarb(p),p.sodium,gfTag(p))).join('');
     return `<optgroup label="Foods">${foods}</optgroup><optgroup label="Carb drinks">${drinks}</optgroup><optgroup label="Electrolyte mixes &amp; tablets">${lyteMix}</optgroup>`;
   };
-  const nBlk=segCount();
+  const nBlk=nh ? Math.max(1, Math.ceil(t.hours/SEG_LEN)) : segCount();   // heat: blocks of the unadjusted pass
   const blkItems=b=>(d.actualItems||[]).filter(it=>it.block===b);
   const blkCho=b=>blkItems(b).reduce((s,it)=>{const p=planProd(it.prodId);return s+(p?p.carbG*(+it.qty||0):0);},0);
   const blkNa=b=>blkItems(b).reduce((s,it)=>{const p=planProd(it.prodId);return s+(p?p.sodium*(+it.qty||0):0);},0);
@@ -3941,7 +3941,7 @@ function viewDebrief(){
   let aCho=0,aNa=0,aFluid=0,pCho=0,pNa=0,pFluid=0;
   const gridRows=[];
   for(let b=0;b<nBlk;b++){
-    const dur=Math.min(SEG_LEN,(+S.eventHours||0)-b*SEG_LEN); if(dur<=0) continue;
+    const dur=Math.min(SEG_LEN,(nh?t.hours:(+S.eventHours||0))-b*SEG_LEN); if(dur<=0) continue;
     const tgtCho=ev.targetRateG*dur, actCho=blkCho(b);
     aCho+=actCho; aNa+=blkNa(b); aFluid+=blkFluid(b);
     pCho+=tgtCho; pNa+=tg.naMg*dur; pFluid+=tg.fluidOz*dur;
