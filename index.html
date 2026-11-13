@@ -362,7 +362,6 @@ const MW = { glucose:180.16, fructose:180.16, sucrose:342.30, nacl:58.44, citrat
 const OZ_PER_L = 33.814;      // 1 L = 33.814 US fl oz
 const ML_PER_OZ = 29.5735;
 const NA_MW = 22.99;
-const PLASMA_OSM = 290;       // reference plasma osmolality, mOsm/L
 
 // maltodextrin: glucose polymer. number-average MW ≈ 18016 / DE (DE100 dextrose => 180)
 const maltoMW = de => 18016 / Math.max(1, de);
@@ -563,11 +562,11 @@ function sweatRateLhr(){
     return (+S.time>0) ? sweatLossL(S.pre, S.post, S.testDrankOz)/S.time : 0;  // (lbs->kg, *0.95 CHO-burn correction) L/hr
   return (S.manualSweat!=null && S.manualSweat!=='') ? +S.manualSweat : 0; // estimate / manual
 }
-function bodyKg(){ return S.bodyLbs/2.2; }
+function bodyKg(){ return S.bodyLbs/LB_PER_KG; }
 const LB_PER_KG=2.2046;
 function totalECF(){ return bodyKg()*0.20; }            // L — extracellular fluid ≈ 20% of body mass
 function totalTBW(){ return bodyKg()*(S.gender==='female'?0.50:0.60); }   // L — total body water (Watson-style rule of thumb)
-function bodyNaContentG(){ return (bodyNaContentMmol()*23)/1000; }
+function bodyNaContentG(){ return (bodyNaContentMmol()*NA_MW)/1000; }
 function bodyNaContentMmol(){ return S.bodyNaConc*totalECF(); }
 // ---- per-hour drink mix --------------------------------------------------
 // An hour can override the global bottle with a custom mix: plain-water base
@@ -623,34 +622,34 @@ let PRODUCTS = [
   // brand, product, unit, cat('drink'|'lyte'), oz(serving), sodium_mg, kcal, {glucose,sucrose,malto,fructose}, de, conf
   // --- carbohydrate drink mixes ---
   // unit = manufacturer dose (scoops/sachets/etc); oz = recommended fluid volume it's mixed into
-  ['Skratch Labs','Sport Hydration Mix','1 scoop','drink',16,380,80,{glucose:7,sucrose:14,malto:0,fructose:0},100,'est'],
-  ['Skratch Labs','Super High-Carb','2 scoops','drink',10,200,400,{glucose:0,sucrose:0,malto:67,fructose:33},15,'est'],
+  ['Skratch Labs','Sport Hydration Mix','1 scoop','drink',16,400,80,{glucose:7,sucrose:14,malto:0,fructose:0},100,'est'],
+  ['Skratch Labs','Super High-Carb','2 scoops','drink',10,200,200,{glucose:0,sucrose:0,malto:33,fructose:17},15,'est'],
   ['Gatorade','Thirst Quencher','1 scoop','drink',12,160,80,{glucose:11,sucrose:9,malto:0,fructose:0},100,'est'],
   ['Gatorade','Endurance Formula','per 12 oz','drink',12,310,90,{glucose:0,sucrose:9,malto:9,fructose:4},15,'est'],
   ['First Endurance','EFS Drink Mix','1 scoop','drink',16,300,96,{glucose:8,sucrose:4,malto:12,fructose:0},15,'est'],
-  ['First Endurance','EFS-PRO','1 scoop','drink',16,380,120,{glucose:5,sucrose:0,malto:20,fructose:5},12,'est'],
-  ['Tailwind Nutrition','Endurance Fuel','1 scoop','drink',24,303,100,{glucose:17,sucrose:8,malto:0,fructose:0},100,'est'],
+  ['First Endurance','EFS-PRO','1 scoop','drink',16,190,120,{glucose:5,sucrose:0,malto:20,fructose:5},12,'est'],
+  ['Tailwind Nutrition','Endurance Fuel','1 scoop','drink',24,310,100,{glucose:17,sucrose:8,malto:0,fructose:0},100,'est'],
   ['Tailwind Nutrition','High-Carb','3 scoops (1 pouch)','drink',24,680,360,{glucose:30,sucrose:0,malto:30,fructose:30},18,'est'],   // label: 90 g carb, 2:1 dextrose+malto : fructose
   ['Infinit Nutrition','Go Far','2 scoops','drink',20,379,280,{glucose:10,sucrose:0,malto:55,fructose:5},15,'est'],
   ['Maurten','Drink Mix 320','1 sachet','drink',17,245,320,{glucose:14,sucrose:0,malto:30,fructose:36},15,'est'],
   ['Maurten','Drink Mix 160','1 sachet','drink',17,123,160,{glucose:7,sucrose:0,malto:15,fructose:18},15,'est'],
-  ['Styrkr','MIX90','1 sachet','drink',16.9,200,372,{glucose:0,sucrose:0,malto:50,fructose:40},15,'lbl'],
-  ['Styrkr','MIX90 Caffeine','1 sachet','drink',16.9,200,372,{glucose:0,sucrose:0,malto:50,fructose:40},15,'lbl'],
-  ['Styrkr','MIX60','1 sachet','drink',16.9,140,256,{glucose:0,sucrose:0,malto:33,fructose:27},15,'lbl'],
+  ['Styrkr','MIX90','1 sachet','drink',16.9,80,372,{glucose:0,sucrose:0,malto:50,fructose:40},15,'lbl'],
+  ['Styrkr','MIX90 Caffeine','1 sachet','drink',16.9,80,372,{glucose:0,sucrose:0,malto:50,fructose:40},15,'lbl'],
+  ['Styrkr','MIX60','1 sachet','drink',16.9,56,256,{glucose:0,sucrose:0,malto:33,fructose:27},15,'lbl'],
   ['Styrkr','MIX+ Carb & Electrolyte','1 scoop','drink',16.9,360,160,{glucose:0,sucrose:0,malto:17,fructose:13},15,'lbl'],
-  ['Flow Formulas','Endurance','1 scoop','drink',16,390,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
-  ['Flow Formulas','Endurance (High Sodium)','1 scoop','drink',16,780,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
+  ['Flow Formulas','Endurance','2 scoops','drink',16,390,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
+  ['Flow Formulas','Endurance (High Sodium)','2 scoops','drink',16,780,240,{glucose:0,sucrose:0,malto:40,fructose:20},15,'est'],
   ['NeverSecond','C30 Drink Mix','1 sachet','drink',17,20,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
   ['NeverSecond','C30 Fuel+Hydrate','1 sachet','drink',17,300,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'est'],
   ['SiS','Beta Fuel 80 Drink','1 sachet','drink',20,10,320,{glucose:0,sucrose:0,malto:44,fructose:36},15,'lbl'],
-  ['Carbs Fuel','Energy Drink Mix','1 scoop','drink',16,100,200,{glucose:0,sucrose:0,malto:50,fructose:0},15,'est'],
+  ['Carbs Fuel','Energy Drink Mix','2 scoops','drink',16,333,200,{glucose:0,sucrose:0,malto:50,fructose:0},15,'est'],
   ['Precision Fuel & Hydration','PF 30 Drink Mix','1 sachet','drink',17,250,116,{glucose:0,sucrose:0,malto:16.7,fructose:13.3},15,'est'],
   ['Precision Fuel & Hydration','PF 60 Drink Mix','1 sachet','drink',17,500,232,{glucose:0,sucrose:0,malto:33,fructose:27},15,'est'],
   ['Precision Fuel & Hydration','PF 90 Drink Mix','1 sachet','drink',17,750,348,{glucose:0,sucrose:0,malto:50,fructose:40},15,'est'],
   // --- added brand suites (per public labels; carb-source splits estimated) ---
   ['NeverSecond','C30 Sports Drink','1 scoop','drink',17,200,120,{glucose:0,sucrose:0,malto:20,fructose:10},15,'lbl'],
   ['NeverSecond','C90 High Carb Mix','1 sachet','drink',17,200,360,{glucose:0,sucrose:0,malto:60,fructose:30},15,'lbl'],
-  ['SiS','GO Electrolyte','2 scoops','drink',17,475,144,{glucose:0,sucrose:0,malto:36,fructose:0},15,'lbl'],
+  ['SiS','GO Electrolyte','2 scoops','drink',17,237,144,{glucose:0,sucrose:0,malto:36,fructose:0},15,'lbl'],
   ['UnTapped','Mapleaid','1 packet','drink',12,250,80,{glucose:1,sucrose:18,malto:0,fructose:1},100,'lbl'],
   ['Infinit Nutrition','Speed','2 scoops','drink',20,379,230,{glucose:15,sucrose:21,malto:21,fructose:0},15,'lbl'],
   ['Infinit Nutrition','Jet Fuel','2 scoops (+125 mg caffeine)','drink',24,379,230,{glucose:15,sucrose:21,malto:21,fructose:0},15,'lbl'],
@@ -671,11 +670,11 @@ let PRODUCTS = [
   ['Liquid I.V.','Hydration Multiplier','per stick (16 oz)','lyte',16,510,45,{glucose:5,sucrose:6,malto:0,fructose:0},100,'est',380,0,0],
   ['DripDrop','ORS','per stick (8 oz)','lyte',8,330,35,{glucose:4,sucrose:5,malto:0,fructose:0},100,'est',185,39,0],
   ['Mortal Hydration','Electrolyte Mix','per stick','lyte',16,600,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',200,50,0],
-  ['Hammer Nutrition','Endurolytes Fizz','per tablet','lyte',16,100,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',80,25,50],
-  ['Thorne','Catalyte','per scoop','lyte',16,250,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',100,20,20],
+  ['Hammer Nutrition','Endurolytes Fizz','per tablet','lyte',16,200,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',100,50,100],
+  ['Thorne','Catalyte','per scoop','lyte',16,485,30,{glucose:0,sucrose:0,malto:5,fructose:0},15,'lbl',96,40,80],
   ['Tailwind Nutrition','Active Hydration','per serving','lyte',16,200,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',90,14,26],
-  ['GU','Roctane Electrolyte Caps','per capsule','lyte',0,100,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',63,12,50],
-  ['SaltStick','FastChews','per 2 chews','lyte',0,60,10,{glucose:1,sucrose:1,malto:0,fructose:0},100,'est',16,4,6],
+  ['GU','Roctane Electrolyte Caps','per capsule','lyte',0,140,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',0,9,0],
+  ['SaltStick','FastChews','per 2 chews','lyte',0,100,10,{glucose:1,sucrose:1,malto:0,fructose:0},100,'lbl',30,6,10],
   ['Precision Fuel & Hydration','PH Electrolyte Caps','per capsule','lyte',0,250,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'est',0,0,0],
   // --- added brand electrolytes (per public labels) ---
   ['NeverSecond','S200 Sodium Booster','per capful','lyte',0,200,0,{glucose:0,sucrose:0,malto:0,fructose:0},100,'lbl',0,0,0,'mix'],
@@ -688,7 +687,7 @@ let PRODUCTS = [
   ['Gas Station','Coca-Cola (20 oz, 57mg caf)','20 oz bottle','drink',20,75,240,{glucose:30,sucrose:0,malto:0,fructose:35},100,'lbl'],
   ['Gas Station','Mountain Dew (20 oz, 91mg caf)','20 oz bottle','drink',20,105,290,{glucose:35,sucrose:0,malto:0,fructose:42},100,'lbl'],
   ['Gas Station','Gatorade Thirst Quencher (20 oz)','20 oz bottle','drink',20,270,140,{glucose:20,sucrose:16,malto:0,fructose:0},100,'lbl'],
-  ['Gas Station','Powerade (20 oz)','20 oz bottle','drink',20,250,130,{glucose:20,sucrose:0,malto:0,fructose:15},100,'lbl'],
+  ['Gas Station','Powerade (20 oz)','20 oz bottle','drink',20,400,130,{glucose:20,sucrose:0,malto:0,fructose:15},100,'lbl'],
   ['Gas Station','Red Bull (8.4 oz, 80mg caf)','8.4 oz can','drink',8.4,105,110,{glucose:13,sucrose:14,malto:0,fructose:0},100,'lbl'],
   ['Gas Station','Monster Energy (16 oz, 160mg caf)','16 oz can','drink',16,370,210,{glucose:27,sucrose:27,malto:0,fructose:0},100,'lbl'],
   ['Gas Station','Chocolate Milk (8 oz)','8 oz','drink',8,150,130,{glucose:11,sucrose:13,malto:0,fructose:0},100,'lbl'],
@@ -786,7 +785,7 @@ function parsePace(str){ if(typeof str==='number') return str; const p=(''+str).
 function miToKmPace(secMi){ return secMi/MI_PER_KM; }
 function kmToMiPace(secKm){ return secKm*MI_PER_KM; }
 
-function ftpPerKg(){ return S.ftp / (S.bodyLbs/2.2); }
+function ftpPerKg(){ return S.ftp / (S.bodyLbs/LB_PER_KG); }
 
 /* ---- Basic mode: estimate fitness from weekly training time ----
    Most casual users don't know their FTP or threshold pace, so we infer a
@@ -801,7 +800,7 @@ function applyFitnessEstimate(){
   if(S.fitnessMode!=='estimate') return;            // user typed their own FTP/pace — leave it alone
   const h=+S.weeklyHours||6, fem=S.gender==='female';
   // women reach ~88% of men's W/kg and run threshold ~10% slower at similar training (power-profile norms)
-  S.ftp = Math.round(estWkg(h)*(fem?0.88:1)*(S.bodyLbs/2.2)/5)*5;  // nearest 5 W
+  S.ftp = Math.round(estWkg(h)*(fem?0.88:1)*(S.bodyLbs/LB_PER_KG)/5)*5;  // nearest 5 W
   S.runThreshold = Math.round(estRunPaceSec(h)*(fem?1.10:1));
 }
 
@@ -818,8 +817,8 @@ const WPRIME_KJ_KG = { aerobic:0.20, balanced:0.30, anaerobic:0.45 };
 const DPRIME_M_KG  = { aerobic:1.8,  balanced:2.5,  anaerobic:3.5  };
 function wPrimeCoef(){ return WPRIME_KJ_KG[S.athleteType] ?? 0.30; }
 function dPrimeCoef(){ return DPRIME_M_KG[S.athleteType] ?? 2.5; }
-function wPrimeJ(){ return (S.wPrimeKJ!=null ? +S.wPrimeKJ : wPrimeCoef()*(S.bodyLbs/2.2))*1000; } // W′ in joules
-function dPrimeMeters(){ return S.dPrimeM!=null ? +S.dPrimeM : dPrimeCoef()*(S.bodyLbs/2.2); }      // D′ in metres
+function wPrimeJ(){ return (S.wPrimeKJ!=null ? +S.wPrimeKJ : wPrimeCoef()*(S.bodyLbs/LB_PER_KG))*1000; } // W′ in joules
+function dPrimeMeters(){ return S.dPrimeM!=null ? +S.dPrimeM : dPrimeCoef()*(S.bodyLbs/LB_PER_KG); }      // D′ in metres
 function wPrimeKJeff(){ return wPrimeJ()/1000; }                                     // effective W′ (kJ) for display
 
 // glycogen stores (kcal) = liver glycogen + active-muscle glycogen.
@@ -835,7 +834,7 @@ const GLY = { male:{ lean:0.88, musc:0.53 }, female:{ lean:0.82, musc:0.48 } };
 // (so gender flows through LEAN), × concentration g/kg liver ww (~5.5–7.8%) × 4.18 kcal/g.
 const LIVER_CONC = { training:55, rested:71, loaded:78 };
 const LIVER_MAX_G = 150;   // physiological ceiling on liver glycogen (g), caps large/loaded athletes
-function liverMassKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*0.025; }
+function liverMassKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/LB_PER_KG)*g.lean*0.025; }
 function liverGlyConc(){ return LIVER_CONC[S.glyState] ?? 71; }
 function liverGlyG(){ return Math.min(LIVER_MAX_G, liverMassKg()*liverGlyConc()); }
 function liverKcal(){ return liverGlyG()*4.18; }
@@ -846,11 +845,11 @@ const ACTIVE = {
 function activeFrac(){ return (ACTIVE[S.activity]||ACTIVE.cycling)[S.gender] ?? 0.27; }
 const GLY_KCAL_G=4.18;   // kcal per g of stored glycogen (glucose units) — same factor the store is built with
 function glycogenKcal(){
-  const kg=S.bodyLbs/2.2, g=GLY[S.gender]||GLY.male, conc=glyConc();
+  const kg=S.bodyLbs/LB_PER_KG, g=GLY[S.gender]||GLY.male, conc=glyConc();
   return liverKcal() + (kg*g.lean*g.musc*activeFrac())*conc*GLY_KCAL_G;
 }
 // active (engaged) muscle mass in kg — exposed for display
-function activeMuscleKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/2.2)*g.lean*g.musc*activeFrac(); }
+function activeMuscleKg(){ const g=GLY[S.gender]||GLY.male; return (S.bodyLbs/LB_PER_KG)*g.lean*g.musc*activeFrac(); }
 
 /* ---- metabolic core (activity-aware: ACSM cycling power or ACSM running pace+grade) ---- */
 // training status, 0 = recreational → 1 = elite. cycling: 2.5→5.5 W/kg ; running: 9:00→6:00/mi threshold.
@@ -871,7 +870,7 @@ function rqFromFrac(frac){
 }
 // metrics for an intensity item: {watts} (cycling) or {speed m/min} (running), at % grade (running only)
 function imetrics(item, grade=0){
-  const kg=S.bodyLbs/2.2; let vo2, frac;
+  const kg=S.bodyLbs/LB_PER_KG; let vo2, frac;
   if(isRun()){
     const v=item.speed||0, gr=(+grade||0)/100;
     vo2 = (0.2*v + 0.9*v*gr + 3.5)*kg/1000;     // ACSM running VO₂ (mL/kg/min)×kg÷1000 → L/min
@@ -1230,7 +1229,7 @@ function buildPerf(pts){
 // gravity + rolling + aero drag (simplified Martin et al. 1998). Cubic → bisection.
 const WALK_MS=0.85;   // ≈3 km/h: below this a rider walks/pushes the bike rather than riding slower
 function cycSpeedMS(P, grade){
-  const m=(S.bodyLbs + (+S.bikeLbs||0) + (+S.gearLbs||0))/2.2;   // total system mass (kg): rider + bike + gear/clothing allowance
+  const m=(S.bodyLbs + (+S.bikeLbs||0) + (+S.gearLbs||0))/LB_PER_KG;   // total system mass (kg): rider + bike + gear/clothing allowance
   const g=9.8067, th=Math.atan(grade||0);
   const Gf=m*g*(Math.sin(th) + (+S.crr||0)*Math.cos(th)); // resistive force from gravity+rolling (N)
   const A=0.5*(+S.airRho||1.2)*(+S.cda||0.32);            // aero coefficient
@@ -1408,7 +1407,7 @@ function courseTime(opts){
   // self-preservation taper: below TAPER_START headroom the athlete gets conservative and eases the supra-CP effort,
   // more so the closer it gets to empty (curvilinear) — so they feather toward CP instead of holding flat-out.
   const TAPER_START=0.30, TAPER_P=1.5;
-  const kg=S.bodyLbs/2.2, gly0=glycogenKcal();
+  const kg=S.bodyLbs/LB_PER_KG, gly0=glycogenKcal();
   // one walk of the course at a baseline effort scale. full=false → NP only (the solver); full=true → everything.
   const walk = (scale, full) => {
     const R=makeReserve(durFuelG);
@@ -1790,7 +1789,7 @@ let FUEL_PRODUCTS = [
   ['Precision Fuel & Hydration','PF 30 Gel','Each',         116, 10, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
   ['Precision Fuel & Hydration','PF 90 Gel','Each',         348, 30, {glucose:0,  fructose:40,   sucrose:0,  malto:50  }, 15],
   ['Maurten','Gel 100','Each',                              100, 22, {glucose:0,  fructose:14,   sucrose:0,  malto:11  }, 15],
-  ['Maurten','Gel 160','Each',                              160, 38, {glucose:0,  fructose:22,   sucrose:0,  malto:18  }, 15],
+  ['Maurten','Gel 160','Each',                              160, 30, {glucose:0,  fructose:22,   sucrose:0,  malto:18  }, 15],
   ['Maurten','Solid 225 Bar','Each',                        225, 30, {glucose:0,  fructose:10,   sucrose:9,  malto:25  }, 15],
   ['SiS','Beta Fuel Gel','Each',                            156, 26, {glucose:0,  fructose:18,   sucrose:0,  malto:22  }, 15],
   ['SiS','GO Isotonic Gel','Each',                           87, 10, {glucose:0,  fructose:0,    sucrose:0,  malto:22  }, 15],
@@ -1800,18 +1799,18 @@ let FUEL_PRODUCTS = [
   ['Styrkr','GEL30 Dual-Carb Gel','Each',                   128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
   ['Styrkr','GEL30 Caffeine Gel','Each',                    128,  0, {glucose:0,  fructose:13.3, sucrose:0,  malto:16.7}, 15],
   ['Styrkr','BAR50 Rice Energy Bar','Each',                 260,250, {glucose:0,  fructose:0,    sucrose:10, malto:40  }, 20],
-  ['Styrkr','BAR30 Rice Energy Bar','Each',                 170,190, {glucose:0,  fructose:0,    sucrose:7,  malto:23  }, 20],
+  ['Styrkr','BAR30 Rice Energy Bar','Each',                 170,160, {glucose:0,  fructose:0,    sucrose:7,  malto:23  }, 20],
   ['Honey Stinger','Energy Gel','Each',                     100, 50, {glucose:12, fructose:12,   sucrose:0,  malto:0   }, 15],
-  ['Honey Stinger','Waffle','Each',                         150, 50, {glucose:7,  fructose:0,    sucrose:14, malto:0   }, 15],
-  ['Skratch','Energy Chews','Pack (2 servings)',            160,160, {glucose:14, fructose:0,    sucrose:24, malto:0   }, 15],
+  ['Honey Stinger','Waffle','Each (Honey)',                 140, 80, {glucose:7,  fructose:0,    sucrose:14, malto:0   }, 15],
+  ['Skratch','Energy Chews','Pack (2 servings)',            160, 70, {glucose:14, fructose:0,    sucrose:24, malto:0   }, 15],
   ['Clif','Shot Bloks','3 chews',                           100, 50, {glucose:10, fructose:0,    sucrose:14, malto:0   }, 15],
   ['Clif','Bar','Each',                                     250,150, {glucose:20, fructose:10,   sucrose:14, malto:0   }, 15],
   ['Gatorade','Endurance Carb Gel','Each',                   80, 90, {glucose:0,  fructose:6,    sucrose:0,  malto:14  }, 15],
   ['Carbs Fuel','Energy Gel','Each',                        200,100, {glucose:0,  fructose:0,    sucrose:0,  malto:50  }, 15],
   ['UnTapped','Maple Syrup Gel','Each',                     100,  5, {glucose:1,  fructose:1,    sucrose:24, malto:0   }, 100],
-  ['UnTapped','Waffle','Each',                              170, 70, {glucose:7,  fructose:0,    sucrose:14, malto:0   }, 15],
+  ['UnTapped','Waffle','Each',                              170, 60, {glucose:7,  fructose:0,    sucrose:14, malto:0   }, 15],
   ['GU','Stroopwafel','Each',                               130, 65, {glucose:3,  fructose:0,    sucrose:14, malto:5   }, 15],
-  ['GU','Liquid Energy Gel','Each',                          90, 65, {glucose:0,  fructose:7,    sucrose:0,  malto:14  }, 15],
+  ['GU','Liquid Energy Gel','Each',                          90, 75, {glucose:0,  fructose:7,    sucrose:0,  malto:14  }, 15],
   ['ProBar','Bolt Chews','Pack',                            100, 50, {glucose:8,  fructose:5,    sucrose:12, malto:0   }, 15],
   // --- added brand suites (per public labels; carb-source splits estimated) ---
   ['NeverSecond','C30 Energy Gel + Caffeine','Each',        120,200, {glucose:0,  fructose:10,   sucrose:0,  malto:20  }, 15],
@@ -1839,7 +1838,7 @@ let FUEL_PRODUCTS = [
   ['Whole Food','Banana (medium)','Each',                   105,  1, {glucose:5,  fructose:6,    sucrose:6,  malto:10  }, 20],
   ['Whole Food','PB&J Sandwich','Each',                     380,400, {glucose:5,  fructose:8,    sucrose:10, malto:27  }, 20],
   ['Whole Food','Medjool Dates','2 dates',                  130,  0, {glucose:16, fructose:16,   sucrose:2,  malto:0   }, 100],
-  ['Whole Food','Boiled Potato (salted)','Medium',          130,250, {glucose:0,  fructose:0,    sucrose:1,  malto:29  }, 20],
+  ['Whole Food','Boiled Potato (salted)','Medium (~150 g)',  130,360, {glucose:0,  fructose:0,    sucrose:1,  malto:29  }, 20],
   ['Whole Food','Pretzels','1 oz',                          110,350, {glucose:0,  fructose:0,    sucrose:1,  malto:22  }, 20],
   ['Whole Food','Orange (medium)','Each',                    62,  0, {glucose:6,  fructose:6,    sucrose:3,  malto:0   }, 100],
   // --- Gas Station Finds: pre-packaged convenience-store snacks (totals from public labels; carb-source splits estimated). No overlap with Whole Food rows (pretzels already live there). ---
@@ -1848,7 +1847,7 @@ let FUEL_PRODUCTS = [
   ['Gas Station','Peanut M&M’s','1.74 oz bag',         250, 25, {glucose:2,  fructose:0,    sucrose:26, malto:2   }, 100],
   ['Gas Station','Skittles','2.17 oz bag',                  250, 20, {glucose:8,  fructose:8,    sucrose:40, malto:0   }, 100],
   ['Gas Station','Sour Patch Kids','2 oz bag',              200, 25, {glucose:12, fructose:10,   sucrose:25, malto:0   }, 100],
-  ['Gas Station','Pop-Tarts (2, frosted)','Package',        370,340, {glucose:12, fructose:12,   sucrose:20, malto:24  }, 20 ],
+  ['Gas Station','Pop-Tarts (2, frosted)','Package (Frosted Strawberry)', 370,310, {glucose:12, fructose:12,   sucrose:20, malto:24  }, 20 ],
   ['Gas Station','Rice Krispies Treat','Each',               90,105, {glucose:4,  fructose:0,    sucrose:8,  malto:5   }, 20 ],
   ['Gas Station','Fig Newtons (2)','Package',               110,125, {glucose:4,  fructose:4,    sucrose:10, malto:4   }, 20 ],
   ['Gas Station','Honey Bun','Each',                        330,240, {glucose:8,  fructose:7,    sucrose:15, malto:10  }, 20 ],
@@ -1867,7 +1866,7 @@ sortFuel();
 const FUEL_DEFAULTS = FUEL_PRODUCTS.map(p=>({...p, split:{...p.split}}));
 // Bump this when the factory food list changes (new items OR corrections to existing ones) so saved
 // profiles refresh their factory foods on next load while keeping any custom foods the user added.
-const FUEL_LIB_VERSION = 5;   // v5: Skratch chews per full pack, Styrkr BAR50 sodium (label-verified 2026-10-16)
+const FUEL_LIB_VERSION = 6;   // v6: sodium re-read from label panels 2026-11-12 (Maurten Gel 160, Styrkr BAR30, Honey Stinger, Skratch chews, UnTapped Waffle, GU Liquid, potato, Pop-Tarts)
 function fuelById(id){ return FUEL_PRODUCTS.find(p=>p.id===id); }
 function fuelCarbG(p){ const s=(p&&p.split)||{}; return (+s.glucose||0)+(+s.fructose||0)+(+s.sucrose||0)+(+s.malto||0); }
 function fuelLabel(p){ return p ? `${p.brand?p.brand+' ':''}${p.product||''}${p.unit?' ('+p.unit+')':''}`.trim() : ''; }
@@ -2426,7 +2425,7 @@ function viewRider(){
         <div class="fgrid" style="margin-top:10px">
           ${numField('Body weight','bodyLbs','lbs')}
           <div class="field"><label>Body Mass</label>
-            <input type="number" step="0.1" value="${numVal(bodyKg(),1)}" data-kgmass title="Linked to body weight (kg = lbs ÷ 2.2)">
+            <input type="number" step="0.1" value="${numVal(bodyKg(),1)}" data-kgmass title="Linked to body weight (kg = lbs ÷ 2.2046)">
             <span class="u">kg</span></div>
         </div>
         <div class="field"><label>Gender</label>
@@ -2722,15 +2721,15 @@ function projectionRows(hours=8){
     drinkNaMg     += naFromSaltsMg(h)*bH + foodNaFor(h);  // that hour's mix + planned food/capsule Na
     const replOz   = bottles*C5;                  // fluid consumed (oz)
     const replL    = replOz/OZ_PER_L;             // fluid consumed (L)
-    const lossLbs  = (lostL-replL)*2.2;           // net body-mass change (lbs; + = lost)
+    const lossLbs  = (lostL-replL)*LB_PER_KG;           // net body-mass change (lbs; + = lost)
     const lossPct  = C3 ? lossLbs/C3*100 : 0;     // % of body weight
     const wt       = C3-lossLbs;                  // current body weight (lbs)
     const tbw      = TBW0-lostL+replL;            // total body water now (L)
-    const lostNaMmol=((H6*lostL)-drinkNaMg)/23;   // net sodium lost (mmol) = sweat Na − drink/food Na
+    const lostNaMmol=((H6*lostL)-drinkNaMg)/NA_MW;   // net sodium lost (mmol) = sweat Na − drink/food Na
     const pool     = pool0-lostNaMmol;            // osmotically effective cation pool (mmol)
     const mM       = tbw>0 ? pool/tbw : 0;        // plasma Na⁺ (mM)
     const Ommol    = ecfNa0-lostNaMmol;           // extracellular Na content (mmol)
-    const Ng       = Ommol*23/1000;               // extracellular Na (g)
+    const Ng       = Ommol*NA_MW/1000;               // extracellular Na (g)
     const ecf      = mM>0 ? Ommol/mM : 0;         // ECF volume at osmotic equilibrium (L)
     rows.push({h, lostL, bottles, replOz, lossLbs, lossPct, wt, ecf, tbw, pool, Ng, Ommol, mM});
   }
@@ -2742,7 +2741,7 @@ function projectionRows(hours=8){
    (sodium you add is diluted across all body water at equilibrium — same Edelman model as the projection). */
 function recoFor(x){
   const acceptableLbs = S.bodyLbs * S.acceptLoss/100;       // allowed net loss (lbs)
-  const lbsToOz = lbs => lbs/2.2*OZ_PER_L;                  // lbs of water → fluid oz
+  const lbsToOz = lbs => lbs/LB_PER_KG*OZ_PER_L;                  // lbs of water → fluid oz
   const naToSaltG = mg => mg/1000/0.3934;                   // mg Na⁺ → g of NaCl (table salt)
   const naPerOz = calcDrinkNaPerOz();                       // the bottle's sodium rides along with any fluid change
   const parts=[]; let cls='good';
@@ -2752,23 +2751,23 @@ function recoFor(x){
   let tbwAdj = x.tbw, poolAdj = x.pool;
   if(x.lossPct > S.acceptLoss){                              // drying out → drink more, up to the floor
     const addOz = lbsToOz(x.lossLbs - acceptableLbs);        // cumulative extra fluid
-    tbwAdj = x.tbw + addOz/OZ_PER_L; poolAdj = x.pool + addOz*naPerOz/23;
+    tbwAdj = x.tbw + addOz/OZ_PER_L; poolAdj = x.pool + addOz*naPerOz/NA_MW;
     parts.push(`Add ≈ <b>${fmt(addOz/x.h,0)} oz/hr</b> fluid`);
     cls='bad';
   } else if(x.wt > S.bodyLbs){                               // gaining weight → ease back to start weight
     const cutOz = lbsToOz(x.wt - S.bodyLbs);
-    tbwAdj = x.tbw - cutOz/OZ_PER_L; poolAdj = x.pool - cutOz*naPerOz/23;
+    tbwAdj = x.tbw - cutOz/OZ_PER_L; poolAdj = x.pool - cutOz*naPerOz/NA_MW;
     parts.push(`Cut ≈ <b>${fmt(cutOz/x.h,0)} oz/hr</b> fluid`);
     if(cls==='good') cls='warn';
   }
   // --- 2) Sodium: judged at the CORRECTED state so volume + Na⁺ move together (mM green 135–145) ---
   const mMadj = tbwAdj>0 ? poolAdj/tbwAdj : x.mM;           // plasma Na⁺ once the fluid fix lands
   if(mMadj < NA_LO){                                         // too dilute → add sodium
-    const mg = (NA_LO - mMadj)*tbwAdj*23/x.h;                // extra mg Na⁺ PER HOUR
+    const mg = (NA_LO - mMadj)*tbwAdj*NA_MW/x.h;                // extra mg Na⁺ PER HOUR
     parts.push(`Add ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺ (~${fmt(naToSaltG(mg),1)} g salt)`);
     if(cls!=='bad') cls='warn';
   } else if(mMadj > NA_HI){                                  // too concentrated → ease off salt
-    const mg = (mMadj - NA_HI)*tbwAdj*23/x.h;
+    const mg = (mMadj - NA_HI)*tbwAdj*NA_MW/x.h;
     parts.push(`Cut ≈ <b>${fmt(mg,0)} mg/hr</b> Na⁺`);
     cls='bad';
   }
@@ -3794,7 +3793,7 @@ function bind(){
     el.oninput=()=>{ commit(); refreshOutputs(); };
   });
   // Body Mass (kg) is the twin of Body weight (lbs) — editing it writes back to lbs
-  const bm=$('input[data-kgmass]'); if(bm){ const commit=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*2.2).toFixed(1); };
+  const bm=$('input[data-kgmass]'); if(bm){ const commit=()=>{ const v=+bm.value; if(v>0) S.bodyLbs=+(v*LB_PER_KG).toFixed(1); };
     bm.onchange=()=>{ commit(); render(); }; bm.oninput=()=>{ commit(); refreshOutputs(); }; }
   // Bottle size in liters is the twin of oz — editing it writes back to oz
   const bv=$('input[data-lvol]'); if(bv){ bv.onchange=()=>{ const v=+bv.value; if(v>0) applyBottleVolume(v*OZ_PER_L); render(); }; }
