@@ -4172,8 +4172,10 @@ function bind(){
   };
   // Basic-mode pickers
   const wh=$('#weeklyHoursSel'); if(wh) wh.onchange=()=>{ S.weeklyHours=+wh.value; applyFitnessEstimate(); render(); };
-  const bsw=$('#basicSweatSel'); if(bsw) bsw.onchange=()=>{ S.manualSweat=+bsw.value; render(); };
-  const bsa=$('#basicSaltSel'); if(bsa) bsa.onchange=()=>{ S.sweatNa=+bsa.value; render(); };
+  // Basic and Advanced share the sweat and sodium picks (Rob 9A): a Basic pick writes the stores Advanced reads,
+  // so it carries into Advanced (as at 76598b1, where Basic's forced 'estimate' left Advanced on the Basic value)
+  const bsw=$('#basicSweatSel'); if(bsw) bsw.onchange=()=>{ S.manualSweat=+bsw.value; S.sweatGuess=+bsw.value; S.sweatAnswer='none'; render(); };
+  const bsa=$('#basicSaltSel'); if(bsa) bsa.onchange=()=>{ S.sweatNa=+bsa.value; S.sweatNaPresetMode='preset'; S.sweatNaPresetVal=+bsa.value; S.sweatNaTest=null; render(); };
   // product table edits (role-aware)
   document.querySelectorAll('input[data-id]').forEach(el=>el.onchange=()=>{
     const f=el.dataset.f, sub=el.dataset.sub;
