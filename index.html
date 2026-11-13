@@ -1398,7 +1398,7 @@ function courseTime(opts){
   // oxidised per hour (gut-capped, kcal), which spares endogenous glycogen 1:1 up to what's being burned. glyFloor =
   // glycogen fraction below which effort is held at top-of-Z2 until it rebuilds back above the floor (hysteresis,
   // mirroring the W′ recovery cap) — a real athlete who runs the tank low must soft-pedal to recover.
-  const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap(), EXO_OX_MAX)*4;   // ingested ≠ oxidised above ~90 g/hr sustained
+  const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap(), EXO_OX_MAX)*CHO_KCAL_G_BURN;   // ingested ≠ oxidised above ~90 g/hr sustained
   const glyFloor = +opts.glyCapFrac||0;
   const durFuelG = opts.durFuelG!=null ? +opts.durFuelG : (+opts.choGperHr||0);   // carbs eaten per hour — protects CP from fading
   // W′ RECOVERY MODE (blow-up → recover, not grind at CP): once the reserve empties, cap effort at top-of-Z2
