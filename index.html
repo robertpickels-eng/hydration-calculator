@@ -1224,9 +1224,15 @@ function segments(){
 // fraction of extra (slow-component) O₂ cost charged to time spent above CP/CS — severe-domain VO₂ drift
 const VO2_SLOW_FRAC = 0.06;
 // roll the segments up into event totals + the carbohydrate fueling target
-function eventTotals(){
-  const ct=S._ct, onCourse = S.activityMode==='course' && ct;
-  const hrs=Math.max(0.001,+S.eventHours||0);
+// opts.noHeat (Debrief, 14.42): no heat terms — course mode reads the unadjusted pass (ctNoHeat)
+function eventTotals(opts){
+  const nh=!!(opts&&opts.noHeat) && heatActive();
+  const ctNH = (nh && S.activityMode==='course' && S._ct) ? ctNoHeat() : null;
+  return eventTotalsFor(ctNH || S._ct, ctNH ? ctNH.hours : S.eventHours, !nh && heatActive());
+}
+function eventTotalsFor(ctIn, hoursIn, heat){
+  const ct=ctIn, onCourse = S.activityMode==='course' && ct;
+  const hrs=Math.max(0.001,+hoursIn||0);
   let segs, kcal=0, choKcal=0, fatKcal=0, anaerKcal=0, slowKcal=0;
   if(onCourse){
     // COURSE mode: energy integrates straight off the single terrain-fine pass — CHO already includes the
@@ -1813,6 +1819,16 @@ function syncDuration(){
   if(t && !isRun()){ S.eventHours=t.hours; const g=eventTotals().targetRateG;
     if(g>0){ t=courseTime({durFuelG:g}); S._ct=t; S._ctFine=t; } }
   S.eventHours = t ? t.hours : Math.min(48, Math.max(0, +S.manualHours||0));   // clamp: a huge saved value would hang every reload
+  S._ctNH = null;                                         // the unadjusted course pass (Debrief) is rebuilt on demand
+}
+// the course pass with no heat terms, as syncDuration builds it (fueled re-walk included); cached until the next render
+function ctNoHeat(){
+  if(!heatActive()) return S._ct;
+  if(S._ctNH) return S._ctNH;
+  if(!(S.activityMode==='course' && S.course)) return null;
+  let t=courseTime({noHeat:true});
+  if(t && !isRun()){ const g=eventTotalsFor(t, t.hours, false).targetRateG; if(g>0) t=courseTime({durFuelG:g, noHeat:true}); }
+  S._ctNH=t; return t;
 }
 // diverging colour from a signed, normalized effort t ∈ [−1,1] (0 = average, cool = easier, warm = harder).
 // a mild gamma pulls mid-range values away from neutral so nearby workloads read as distinct shades.
@@ -2411,7 +2427,7 @@ function headWithAdd(label, onclick){
 
 /* shared athlete-inputs summary bar (shown atop Caloric Needs + In the Bottle) */
 function athleteSummary(){
-  const sr=sweatRateLhr();
+  const sr=sweatRateMean();                       // activity sweat rate when heat is active (spec 5), else the base rate
   const it=(l,v)=>`<div style="display:flex;flex-direction:column;line-height:1.15">
     <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">${l}</span>
     <span style="font-weight:700;font-variant-numeric:tabular-nums">${v}</span></div>`;
@@ -2435,7 +2451,8 @@ function athleteSummary(){
 
 /* Sweat & Sodium inputs — sweat rate lives on the In the Bottle tab */
 function sweatSodiumPanel(){
-  const sr = sweatRateLhr();
+  const sr = sweatRateLhr();                      // "Sweat rate used" stays the base rate (spec 5)
+  const srAct = heatActive() ? sweatRateMean() : sr;   // activity rate: the Na loss line uses it when heat is active (14.43)
   return `<div class="panel" style="margin-top:16px">
         <h2>Sweat & Sodium</h2>
         <div class="res"><span>Total body water (≈${S.gender==='female'?50:60}% mass)</span><span class="v">${fmt(totalTBW(),1)} L</span></div>
@@ -2459,9 +2476,9 @@ function sweatSodiumPanel(){
             ${SWEAT_GUESS.map(([v,label])=>`<option value="${v}"${(+S.manualSweat===v)?' selected':''}>${label} — ${v.toFixed(1)} L/hr</option>`).join('')}
           </select></div>`:''}
         ${S.sweatMethod==='manual'?numField('Sweat rate','manualSweat','L/hr',0.01):''}
-        <div class="res"><span class="muted">Sweat rate used</span><span class="v">${fmt(sr,2)} L/hr</span></div>
+        <div class="res"><span class="muted">Sweat rate used</span><span class="v">${fmt(sr,2)} L/hr</span></div>${heatActive()?`<div class="res"><span class="muted">${HEAT_STR.actRate}</span><span class="v">${fmt(srAct,2)} L/hr</span></div>`:''}
         <div class="note">Want a precise number? Use the detailed <a href="https://sweatratecalculator.com" target="_blank" rel="noopener" style="color:var(--accent)">sweatratecalculator.com</a>, then enter the result above.</div>
-        <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*sr,0)} mg <span class="muted">@ ${fmt(S.sweatNa,0)} mg/L</span></span></div>
+        <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*srAct,0)} mg <span class="muted">@ ${fmt(S.sweatNa,0)} mg/L</span></span></div>
         <div class="note">Set <b>sweat sodium concentration</b> on the <b>Athlete</b> tab. With heat acclimatization sweat [Na⁺] <b>drops</b> — you lose less sodium per liter.</div>
         <div class="sub-h">Targets</div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Accept. loss</label>
@@ -2475,8 +2492,10 @@ function sweatSodiumPanel(){
 }
 
 // Per-hour Basic targets (carb g/hr · fluid oz/hr · sodium mg/hr) — one source for the bars + the Suggest options
-function basicTargets(){
-  const ev=eventTotals(), sr=sweatRateLhr(), hrs=Math.max(0.001,+S.eventHours||0);
+// opts.noHeat (Debrief): unshifted carbohydrate and the base sweat rate (14.42). Basic: gating returns the base rate.
+function basicTargets(opts){
+  const nh=!!(opts&&opts.noHeat) && heatActive(), ctNH=nh ? ctNoHeat() : null;
+  const ev=nh?eventTotals({noHeat:true}):eventTotals(), sr=nh?sweatRateLhr():sweatRateMean(), hrs=Math.max(0.001,ctNH?ctNH.hours:(+S.eventHours||0));
   const sweatLossL=sr*hrs, accFluidL=(S.acceptLoss/100)*bodyKg();
   return {
     carb: ev.targetRateG,
@@ -2850,7 +2869,7 @@ function viewRider(){
 
 /* ---------- TAB: HYDRATION  (bottle + osmolality + projection) ---------- */
 function viewHydration(){
-  const sr = sweatRateLhr(), ev=eventTotals();
+  const sr = sweatRateMean(), ev=eventTotals();   // activity sweat rate when heat is active (spec 5)
   // hydration & electrolyte targets, scaled by the chosen activity duration and held within the
   // acceptable body-mass-loss window (same as the Fueling Plan), so they aren't strict 1:1 replacement.
   const hrs=Math.max(0.001,+S.eventHours||0);
@@ -3006,10 +3025,11 @@ function projectionRows(hours=8){
   // osmotically: ECFt = ECF Na content ÷ [Na⁺]t. (An ECF-only water model overstates the swing ~2.5×.)
   const C6=sweatRateLhr(), C5=S.bottleOz, C3=S.bodyLbs, C0=S.bodyNaConc,
         TBW0=totalTBW(), ECF0=totalECF(), H6=S.sweatNa, pool0=C0*TBW0, ecfNa0=C0*ECF0;
-  const rows=[];
-  let bottles=0, drinkNaMg=0;
+  const rows=[], heatOn=heatActive();
+  let bottles=0, drinkNaMg=0, heatLost=0;
   for(let h=1;h<=hours;h++){
-    const lostL    = h*C6;                       // sweat lost (L)
+    if(heatOn) heatLost += sweatRateAt(heatHourMid(h));   // heat: sum of per-hour activity rates (spec 5)
+    const lostL    = heatOn ? heatLost : h*C6;  // sweat lost (L)
     const bH       = planBottlesFor(h,1);         // this hour's bottles: plan override, else Bottles/hr
     bottles       += bH;                          // cumulative bottles consumed
     drinkNaMg     += naFromSaltsMg(h)*bH + foodNaFor(h);  // that hour's mix + planned food/capsule Na
@@ -3315,7 +3335,7 @@ function viewEventPlan(){
       </tr>
     </thead>
     <tbody>${rows.map(r=>{
-      const sr=sweatRateLhr();
+      const sr=heatActive() ? sweatRateAt(heatHourMid(r.h)) : sweatRateLhr();   // this hour's activity rate when heat is active
       const need=ev.targetRateG*r.dur, dr=drinkCarbFor(r.h,r.dur), food=foodCarbFor(r.h), gap=need-dr-food;
       const items=planItemsFor(r.h), btl=planBottlesFor(r.h,r.dur);
       const drinkNa=btl*naFromSaltsMg(r.h), foodNa=foodNaFor(r.h), naIn=drinkNa+foodNa;
@@ -3836,7 +3856,8 @@ function effortOverlaySVG(c,t,perf){
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:120px;display:block;background:var(--panel2);border-radius:6px">${predLine}${actLine}</svg>`;
 }
 function viewDebrief(){
-  const run=isRun(), c=S.course, t=S._ct, ev=eventTotals();
+  // the debrief describes an activity already done: no heat terms anywhere (14.42, judgment)
+  const nh=heatActive(), run=isRun(), c=S.course, t=nh?ctNoHeat():S._ct, ev=nh?eventTotals({noHeat:true}):eventTotals();
   const d=S.debrief||(S.debrief={track:null,actualItems:[],actualFluid:{},notes:''});
   if(!d.actualFluid) d.actualFluid={};
   const perf=d.track;
@@ -3892,7 +3913,7 @@ function viewDebrief(){
   const blkCho=b=>blkItems(b).reduce((s,it)=>{const p=planProd(it.prodId);return s+(p?p.carbG*(+it.qty||0):0);},0);
   const blkNa=b=>blkItems(b).reduce((s,it)=>{const p=planProd(it.prodId);return s+(p?p.sodium*(+it.qty||0):0);},0);
   const blkFluid=b=>+((d.actualFluid||{})[b]||0);
-  const tg=basicTargets();
+  const tg=nh?basicTargets({noHeat:true}):basicTargets();
   let aCho=0,aNa=0,aFluid=0,pCho=0,pNa=0,pFluid=0;
   const gridRows=[];
   for(let b=0;b<nBlk;b++){
@@ -3936,7 +3957,7 @@ function viewDebrief(){
       const dmax=c.profile[c.profile.length-1][0]||1, gly0=de.gly0;
       // predicted-with-plan trace = the SAME integrated model as the Summary (planned CHO intake + Zone-2 cap
       // below the 25% glycogen floor), so the reference line matches what the Summary shows.
-      const tS=courseTime({choGperHr:ev.targetRateG, glyCapFrac:0.25});
+      const tS=nh?courseTime({choGperHr:ev.targetRateG, glyCapFrac:0.25, noHeat:true}):courseTime({choGperHr:ev.targetRateG, glyCapFrac:0.25});
       const ser=(tS&&tS.series&&tS.series.length>1)?tS.series:t.series;
       const MAXP=200, k=Math.max(1,Math.ceil(ser.length/MAXP)); const pPred=[]; for(let i=0;i<ser.length;i+=k) pPred.push(ser[i]); if(pPred[pPred.length-1]!==ser[ser.length-1]) pPred.push(ser[ser.length-1]);
       const kA=Math.max(1,Math.ceil(de.series.length/MAXP)); const pAct=[]; for(let i=0;i<de.series.length;i+=kA) pAct.push(de.series[i]); if(pAct[pAct.length-1]!==de.series[de.series.length-1]) pAct.push(de.series[de.series.length-1]);
