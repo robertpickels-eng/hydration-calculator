@@ -1209,7 +1209,7 @@ function heatManualNP(){
   if(!heatPowerActive() || S.activityMode==='course') return '';
   const segs=segments(), hrs=S.eventHours, taFn=heatTaFn(); let a=0, b=0, d=0;
   segs.forEach(s=>{ const w0=intItem(s.zi).watts||0, w=heatManualItem(s, hrs, taFn).watts||0; a+=Math.pow(w,4)*s.dur; b+=Math.pow(w0,4)*s.dur; d+=s.dur; });
-  if(!(d>0)) return '';
+  if(!(d>0) || Math.round(Math.pow(a/d,0.25))>=Math.round(Math.pow(b/d,0.25))) return '';   // nothing lowered: no line
   return `<div class="note" style="margin-top:2px"><b>Target NP ${Math.round(Math.pow(a/d,0.25))} W</b> (${Math.round(Math.pow(b/d,0.25))} W planned, lowered for heat)</div>`;
 }
 // the activity at time t (h): {frac, eff}. Course mode samples per 30-min block (spec 14.46), manual per segment.
@@ -2078,7 +2078,7 @@ function courseBody(intOpts, totalsBlock){
   const wl = run ? paceFmt(it.pace)+'/mi' : Math.round(it.watts)+' W';
   const strat=S.pacingStrategy||'even';
   const wlLbl = strat==='even' ? wl : `${wl}, ${PACE_LABELS[strat].toLowerCase()}`;   // strategy redistributes the average
-  const heatNP = (!run && t && t.heatLbar!=null) ? [Math.round(t.targetNP), Math.round(t.targetNP0)] : null;   // lowered for heat: S41 (11A)
+  const heatNP = (!run && t && t.heatLbar!=null && Math.round(t.targetNP)<Math.round(t.targetNP0)) ? [Math.round(t.targetNP), Math.round(t.targetNP0)] : null;   // nothing lowered: no line   // lowered for heat: S41 (11A)
   const anyScaled = (S.segScale||[]).some(x=>x!=null && x!==1);
   const segEditor = `<div class="sub-h" style="margin-top:12px">30-min blocks <span class="muted" style="text-transform:none">(derived from your effort on the terrain — nudge any block harder / easier)</span></div>
     <div class="scroll" style="max-height:240px;margin-top:6px">
