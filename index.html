@@ -1248,9 +1248,10 @@ function eventTotalsFor(ctIn, hoursIn, heat){
     // rising with fatigue, GE_DRIFT_K) applies here too; running has no drift term
     const R = isRun()? null : makeReserve(0);
     const heatTa = heat ? heatTaFn() : null;              // heat (spec 7): air temperature at each segment's midpoint
-    segs.forEach(s=>{ const m=intMetricsByIdx(s.zi, s.grade);
+    const pow = heat && heatPowerActive();               // heat power loss (spec 9): each segment's watts × (1 − heatLoss at its midpoint)
+    segs.forEach(s=>{ const it = pow ? heatManualItem(s, hrs, heatTa) : null, m = pow ? imetrics(it, s.grade) : intMetricsByIdx(s.zi, s.grade);
       let geSum=0, n=Math.max(1,Math.round(s.dur*60));
-      if(R){ const w=intItem(s.zi).watts||0; for(let k=0;k<n;k++){ geSum+=1+GE_DRIFT_K*R.fat(); R.advance(w,s.dur*3600/n); } }
+      if(R){ const w=pow ? (it.watts||0) : intItem(s.zi).watts||0; for(let k=0;k<n;k++){ geSum+=1+GE_DRIFT_K*R.fat(); R.advance(w,s.dur*3600/n); } }
       const geM = R? geSum/n : 1;
       if(heat){                                            // aerobic shift only: CHO × (1 + 0.25·r), capped at kcal; fat = the rest
         const r=heatRamp(heatTa((s.idx*SEG_LEN + s.dur/2)/hrs)), sk=m.kcalHr*geM*s.dur, sc=Math.min(m.choKcalHr*geM*s.dur*(1 + HEAT_C.GLY_SHIFT*r), sk);
@@ -1691,7 +1692,14 @@ function courseTime(opts){
   const pr=c.profile, SEG=SEG_LEN*3600, totalD=pr[pr.length-1][0]||1, run=isRun();
   const strat=S.pacingStrategy||'even';
   const baseIt=eventBaseIt();                              // adjusted average (selected zone × manual fine-tune)
-  const baseIv = run?(baseIt.speed||0):(baseIt.watts||0);
+  const baseIv0 = run?(baseIt.speed||0):(baseIt.watts||0);
+  // HEAT power loss (spec 9, 14.41): cycling NP target × (1 − Lbar), Lbar = step-distance-weighted mean of heatLoss at each
+  // step's midpoint air temperature. Applied before the solve; iv is not scaled inside the walk.
+  let heatLbar=null;
+  if(!opts.noHeat && !run && heatPowerActive()){ const taF=heatTaFn(); let sL=0, sD=0;
+    for(let i=1;i<pr.length;i++){ const dd=pr[i][0]-pr[i-1][0]; if(dd<=0) continue; sL+=dd*heatLoss(taF(((pr[i-1][0]+pr[i][0])/2)/totalD)); sD+=dd; }
+    heatLbar = sD>0 ? sL/sD : 0; }
+  const baseIv = heatLbar!=null ? baseIv0*(1-heatLbar) : baseIv0;
   const sc = b => (S.segScale && S.segScale[b]!=null) ? +S.segScale[b] : 1;   // this block's effort multiplier (1 = average)
   // OPTIONAL — exogenous CHO supplementation + glycogen-driven Zone-2 cap (used by the Summary "with fuel plan"
   // predictor; both default OFF so every other call site keeps the no-fuel behaviour). choOxKcalHr = planned carbs
@@ -1819,7 +1827,7 @@ function courseTime(opts){
     durFuelG, fatEnd:w.fatEnd, geDriftPct: run?0:GE_DRIFT_K*w.fatEnd*100,
     anaerWork:w.anaerWork, supraSec:w.supraSec, capSec:w.capSec, capped:w.capSec>0.5,   // reserve diagnostics (W′/D′ units; capSec/supraSec in s)
     glyCapSec:w.glyCapSec, glyCapEffSec:w.glyCapEffSec, glyCapped:w.glyCapSec>0.5,       // time (s) below the glycogen floor / where Z2 cap cut effort (Summary predictor)
-    avgIv, np:NP, targetNP:baseIv, npShort: baseIv>0 && NP<baseIv*0.98, vi: avgIv>0?NP/avgIv:1,
+    avgIv, np:NP, targetNP:baseIv, targetNP0:baseIv0, heatLbar, npShort: baseIv>0 && NP<baseIv*0.98, vi: avgIv>0?NP/avgIv:1,
     intFactor: run ? (CP>0?NP/CP:0) : (S.ftp>0?NP/S.ftp:0), npScale:scale,           // IF is NP ÷ FTP (Coggan), not ÷ CP
     series:w.series, gly0, blocks, kcal:w.totKcal, choKcal:w.totCho, fatKcal:w.totFat, anaerKcal:w.totAnaer, slowKcal:w.totSlow };
 }
@@ -1869,7 +1877,7 @@ function courseSpark(c, t){
   const edges=[0,...bs,dmax];
   // tint each 30-min band by its effort vs the selected average, scaled to THIS course's spread so distinct
   // workloads read as distinct shades (a fixed ±% band washes out once many segments sit far from average)
-  const segIv=(t&&t.segIv)||[], baseIt=eventBaseIt(), baseIv=isRun()?(baseIt.speed||0):(baseIt.watts||0);
+  const segIv=(t&&t.segIv)||[], baseIt=eventBaseIt(), baseIv=(t&&t.heatLbar!=null) ? t.targetNP : (isRun()?(baseIt.speed||0):(baseIt.watts||0));   // heat power loss: vs the reduced baseline (spec 9)
   const nB=edges.length-1, vals=[]; for(let i=0;i<nB;i++){ if(segIv[i]>0) vals.push(segIv[i]); }
   const lo=vals.length?Math.min.apply(null,vals):baseIv, hi=vals.length?Math.max.apply(null,vals):baseIv;
   const floor=Math.max(baseIv*0.08,1e-6);                 // min spread → a near-flat course stays muted, not over-tinted
