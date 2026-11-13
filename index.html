@@ -718,7 +718,7 @@ function productOsm(p){
 
 /* ============================================================
    CALORIC / POWER MODEL  (ported from the Cycling Nutrition
-   Calculator — ACSM ergometry VO₂, Weir caloric equivalent,
+   Calculator — ACSM ergometry VO₂, Jeukendrup & Wallis 2005 caloric equivalent,
    substrate-oxidation RQ model). Reads the shared rider profile in S.
    ============================================================ */
 const EXO_OX_MAX = 105;   // g/hr peak exogenous CHO oxidation (~1.75 g/min, glucose+fructose; Jentjens 2004, Jeukendrup 2014)
@@ -882,7 +882,7 @@ function imetrics(item, grade=0){
     frac = S.ftp>0 ? w/S.ftp : 0;
   }
   const rq=rqFromFrac(frac);
-  const kcalHr=(1.2*rq+3.85)*Math.max(0,vo2)*60; // Weir caloric equivalent
+  const kcalHr=(4.471+0.550*rq)*Math.max(0,vo2)*60; // Jeukendrup & Wallis 2005 Table 5 (50–75% V̇O₂max): kcal = 4.471·V̇O₂ + 0.550·V̇CO₂
   const choKcalHr=Math.min(1,Math.max(0,(336.3*rq-235.7)/100))*kcalHr;
   return { vo2:Math.max(0,vo2), rq, kcalHr, choKcalHr, fatKcalHr:kcalHr-choKcalHr };
 }
@@ -1461,7 +1461,7 @@ function courseTime(opts){
         else {
           geM = 1 + GE_DRIFT_K*R.fat();                    // efficiency drift: same watts cost more as fatigue builds
           if(iv>CPn) scL=Math.min(SC_CAP, scL+SC_K*((iv-CPn)/FTPw)*dt); else scL*=Math.exp(-dt/SC_TAU);
-          const sevK = scL*60*hrStep*(1.2*1.0+3.85);       // severe slow-component O₂ at RER ≈ 1 (Weir) → all CHO
+          const sevK = scL*60*hrStep*(4.471+0.550*1.0);    // severe slow-component O₂ at RER ≈ 1 (Jeukendrup & Wallis 2005) → all CHO
           const hvyK = (iv>Z2cap && iv<=CPn) ? SC_HEAVY*em.kcalHr*geM*hrStep : 0;   // heavy domain: levels off, split by RQ
           slowK = sevK+hvyK; slowCho = sevK + (em.kcalHr>0 ? hvyK*em.choKcalHr/em.kcalHr : 0);
         }
@@ -3294,7 +3294,7 @@ function viewSources(){
     + ref('Lang PB, Latin RW, Berg KE, Mellion MB','1992','The accuracy of the ACSM cycle ergometry equation.','Medicine &amp; Science in Sports &amp; Exercise, 24(2), 272–276. doi:10.1249/00005768-199202000-00019 — the equation under-estimated V̇O₂ by 0.16–0.29 L/min at 30–150 W.')
     + ref('Barstow TJ, Molé PA','1991','Linear and nonlinear characteristics of oxygen uptake kinetics during heavy exercise.','Journal of Applied Physiology, 71(6), 2099–2106. doi:10.1152/jappl.1991.71.6.2099 — V̇O₂ slope ~11 mL·min⁻¹ per W in trained cyclists, matching the ACSM net slope; slow-component onset ~105 s.')
     + ref('American College of Sports Medicine','current ed.','ACSM’s Guidelines for Exercise Testing and Prescription.','Wolters Kluwer. — metabolic equations for cycling power and running speed/grade.')
-    + ref('Weir JB de V','1949','New methods for calculating metabolic rate with special reference to protein metabolism.','The Journal of Physiology, 109(1–2), 1–9.')
+    + ref('Jeukendrup AE, Wallis GA','2005','Measurement of substrate oxidation during exercise by means of gas exchange measurements.','International Journal of Sports Medicine, 26(Suppl 1), S28–S37. — calories from oxygen use: energy expenditure = 4.471·V̇O₂ + 0.550·V̇CO₂ (Table 5, moderate to high intensity, 50–75% V̇O₂max).')
     + ref('Péronnet F, Massicotte D','1991','Table of nonprotein respiratory quotient: an update.','Canadian Journal of Sport Sciences, 16(1), 23–29. — %carbohydrate vs respiratory exchange ratio.')
     + ref('Frayn KN','1983','Calculation of substrate oxidation rates in vivo from gaseous exchange.','Journal of Applied Physiology, 55(2), 628–634.')
     + ref('Brooks GA, Mercier J','1994','Balance of carbohydrate and lipid utilization during exercise: the “crossover” concept.','Journal of Applied Physiology, 76(6), 2253–2261. — basis for the training-status shift in fat vs carbohydrate use.')
