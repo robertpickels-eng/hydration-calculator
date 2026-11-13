@@ -720,7 +720,7 @@ function productOsm(p){
    Calculator — ACSM ergometry VO₂, Jeukendrup & Wallis 2005 caloric equivalent,
    substrate-oxidation RQ model). Reads the shared rider profile in S.
    ============================================================ */
-const EXO_OX_MAX = 89;    // g/hr sustained exogenous CHO oxidation: 1.49 g/min mean over the last 90 min with 2.4 g/min glucose+fructose (Jentjens & Jeukendrup 2005, Br J Nutr 93:485; peak 1.75 g/min)
+const EXO_OX_MAX = 90;    // g/hr sustained exogenous CHO oxidation with glucose+fructose: 1.51 g/min over 120–180 min at 120 g/hr (Podlogar 2022, Eur J Appl Physiol 122:2393), 1.50 g/min mean at 120 g/hr (Martyn 2026, J Appl Physiol 140:1373), 1.49 g/min over the last 90 min at 144 g/hr (Jentjens & Jeukendrup 2005, Br J Nutr 93:485)
 const CHO_KCAL_G_BURN = 4.07; // kcal per g of carbohydrate oxidised during exercise (Jeukendrup & Wallis 2005, Table 5: 20% glucose / 80% glycogen)
 const GUT_LEVELS = { unadapted:90, adapted:120, highcarb:150 };   // g/hr carb-absorption ceiling by gut-training level
 function carbCap(){ return GUT_LEVELS[S.gutAdapt] || 120; }        // gut-absorption ceiling for the selected level
@@ -1398,7 +1398,7 @@ function courseTime(opts){
   // oxidised per hour (gut-capped, kcal), which spares endogenous glycogen 1:1 up to what's being burned. glyFloor =
   // glycogen fraction below which effort is held at top-of-Z2 until it rebuilds back above the floor (hysteresis,
   // mirroring the W′ recovery cap) — a real athlete who runs the tank low must soft-pedal to recover.
-  const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap(), EXO_OX_MAX)*4;   // ingested ≠ oxidised above ~89 g/hr sustained
+  const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap(), EXO_OX_MAX)*4;   // ingested ≠ oxidised above ~90 g/hr sustained
   const glyFloor = +opts.glyCapFrac||0;
   const durFuelG = opts.durFuelG!=null ? +opts.durFuelG : (+opts.choGperHr||0);   // carbs eaten per hour — protects CP from fading
   // W′ RECOVERY MODE (blow-up → recover, not grind at CP): once the reserve empties, cap effort at top-of-Z2
@@ -3384,7 +3384,9 @@ function viewSources(){
     ref('Jeukendrup AE','2014','A step towards personalized sports nutrition: carbohydrate intake during exercise.','Sports Medicine, 44(Suppl 1), S25–S33. — duration-based intake guidance (Fig. 1: 30 g/hr for 1–2 h, up to 60 g/hr for 2–3 h, up to 90 g/hr beyond 2.5 h with multiple transportable carbohydrates). The calculator’s minimum carb target (30 g/hr for 1–2.5 h, 60 g/hr beyond) is a conservative floor set below these.')
     + ref('Thomas DT, Erdman KA, Burke LM','2016','American College of Sports Medicine joint position statement: Nutrition and athletic performance.','Medicine &amp; Science in Sports &amp; Exercise, 48(3), 543–568. — 30–60 g/hr for 1–2.5 h; up to 90 g/hr for longer events.')
     + ref('Jentjens RLPG, Moseley L, Waring RH, Harding LK, Jeukendrup AE','2004','Oxidation of combined ingestion of glucose and fructose during exercise.','Journal of Applied Physiology, 96(4), 1277–1284.')
-    + ref('Jentjens RLPG, Jeukendrup AE','2005','High rates of exogenous carbohydrate oxidation from a mixture of glucose and fructose ingested during prolonged cycling exercise.','British Journal of Nutrition, 93(4), 485–492. — 2.4 g/min of glucose + fructose: peak oxidation 1.75 g/min, 1.49 g/min (about 89 g/hr) over the last 90 min; the calculator uses 89 g/hr as the sustained ceiling on carbohydrate burned from food and drink.')
+    + ref('Jentjens RLPG, Jeukendrup AE','2005','High rates of exogenous carbohydrate oxidation from a mixture of glucose and fructose ingested during prolonged cycling exercise.','British Journal of Nutrition, 93(4), 485–492. — 2.4 g/min of glucose + fructose: peak oxidation 1.75 g/min, 1.49 g/min (about 89 g/hr) over the last 90 min.')
+    + ref('Podlogar T, Bokal Š, Cirnski S, Wallis GA','2022','Increased exogenous but unaltered endogenous carbohydrate oxidation with combined fructose-maltodextrin ingested at 120 g h⁻¹ versus 90 g h⁻¹ at different ratios.','European Journal of Applied Physiology, 122(11), 2393–2401. — 120 g/hr of fructose + maltodextrin (0.8:1): 1.51 g/min (about 90 g/hr) burned over the last hour of 3 h cycling, with no extra sparing of the body\'s own stores compared with 90 g/hr.')
+    + ref('Martyn HJ, Cameron NE, Edmondson JA, et al.','2026','Ketone monoester reduces blood glucose, exogenous CHO oxidation, and oxidation efficiency in trained male cyclists when fed 120 g/h of CHO during exercise.','Journal of Applied Physiology, 140(5), 1373–1388. — carbohydrate-only trial: 120 g/hr burned at 1.50 g/min (about 90 g/hr) on average over 3 h of cycling. With Podlogar 2022 and Jentjens & Jeukendrup 2005, the basis for the calculator\'s sustained ceiling of 90 g/hr on carbohydrate burned from food and drink.')
     + ref('Jeukendrup AE','2017','Training the gut for athletes.','Sports Medicine, 47(Suppl 1), 101–110. — adaptation of carbohydrate absorption with training (supports the trained-gut ~90–120 g/hr range; the 150 g/hr tier is beyond what this review tested).'))}
 
   ${sec('Hydration, sweat &amp; sodium',
