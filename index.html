@@ -461,7 +461,7 @@ const S = {
   projHours:8,                                 // hour-by-hour table length (expandable)
   loadedProduct:null,                          // name of last-loaded product (cleared on manual edit)
   // bottle composition (grams per bottle)
-  comp:{ glucose:0, sucrose:130, malto:0, fructose:0, nacl:0, citrate:4.3 },
+  comp:{ glucose:0, sucrose:70, malto:0, fructose:0, nacl:0, citrate:4.3 },
   extraCarbs:[],                               // custom add-on carbs  {id,name,grams,mw,particles}
   extraLytes:[],                               // custom add-on salts  {id,name,grams,mw,particles,naFrac}
   // --- caloric / power model (ported from the Cycling Nutrition Calculator) ---
@@ -720,7 +720,8 @@ function productOsm(p){
    Calculator — ACSM ergometry VO₂, Jeukendrup & Wallis 2005 caloric equivalent,
    substrate-oxidation RQ model). Reads the shared rider profile in S.
    ============================================================ */
-const EXO_OX_MAX = 105;   // g/hr peak exogenous CHO oxidation (~1.75 g/min, glucose+fructose; Jentjens 2004, Jeukendrup 2014)
+const EXO_OX_MAX = 89;    // g/hr sustained exogenous CHO oxidation: 1.49 g/min mean over the last 90 min with 2.4 g/min glucose+fructose (Jentjens & Jeukendrup 2005, Br J Nutr 93:485; peak 1.75 g/min)
+const CHO_KCAL_G_BURN = 4.07; // kcal per g of carbohydrate oxidised during exercise (Jeukendrup & Wallis 2005, Table 5: 20% glucose / 80% glycogen)
 const GUT_LEVELS = { unadapted:90, adapted:120, highcarb:150 };   // g/hr carb-absorption ceiling by gut-training level
 function carbCap(){ return GUT_LEVELS[S.gutAdapt] || 120; }        // gut-absorption ceiling for the selected level
 // guideline minimum carb intake (g/hr) by event duration — low end of Jeukendrup 2014 / ACSM-AND-DC 2016:
@@ -959,7 +960,7 @@ function eventTotals(){
   const gly=glycogenKcal(), usableGly=gly*(1-S.reservePct/100);
   // carbohydrate that must be eaten so endogenous glycogen stays above the reserve to the finish
   const reqSuppKcal=Math.max(0, choKcal-usableGly);
-  const reserveRateG=(reqSuppKcal/4)/hrs;               // steady g/hr to FULLY hold the reserve (uncapped)
+  const reserveRateG=(reqSuppKcal/CHO_KCAL_G_BURN)/hrs;               // steady g/hr to FULLY hold the reserve (uncapped)
   // performance floor: intake guidelines apply even when glycogen alone wouldn't run short (blood glucose,
   // liver glycogen, central effects) — low end of Jeukendrup 2014 / ACSM 2016: 30 g/hr for 1–2.5 h, 60 beyond
   const floorRateG=carbFloorG(hrs);
@@ -967,13 +968,13 @@ function eventTotals(){
   const targetBasis=floorRateG>reserveRateG ? 'guideline' : 'reserve';
   const cap=carbCap();                                  // gut-absorption ceiling for the selected level
   const targetRateG=Math.min(targetRateGRaw, cap);      // plan target — capped at what the gut can absorb
-  return { segs, kcal, choKcal, fatKcal, choG:choKcal/4,
-    gly, usableGly, reqSuppKcal, reqSuppG:reqSuppKcal/4,
+  return { segs, kcal, choKcal, fatKcal, choG:choKcal/CHO_KCAL_G_BURN,
+    gly, usableGly, reqSuppKcal, reqSuppG:reqSuppKcal/CHO_KCAL_G_BURN,
     targetRateGRaw, targetRateGCap:cap, reserveRateG, floorRateG, targetBasis,
     targetRateG, targetRateKcal:targetRateG*4,
     overGut: targetRateGRaw>cap,                         // true requirement exceeds the gut ceiling
     anaerKcal, slowKcal, supraKcal:anaerKcal+slowKcal,   // physiological supra-threshold surcharge (kcal)
-    kcalHr:kcal/hrs, choGhr:(choKcal/4)/hrs };
+    kcalHr:kcal/hrs, choGhr:(choKcal/CHO_KCAL_G_BURN)/hrs };
 }
 // over-fueling check: is carb intake ≥20% above the gut-absorption ceiling (the rate the gut can
 // actually take up)? Carb beyond that is malabsorbed → GI distress. Measuring against the gut
@@ -1397,7 +1398,7 @@ function courseTime(opts){
   // oxidised per hour (gut-capped, kcal), which spares endogenous glycogen 1:1 up to what's being burned. glyFloor =
   // glycogen fraction below which effort is held at top-of-Z2 until it rebuilds back above the floor (hysteresis,
   // mirroring the W′ recovery cap) — a real athlete who runs the tank low must soft-pedal to recover.
-  const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap(), EXO_OX_MAX)*4;   // ingested ≠ oxidised above ~105 g/hr
+  const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap(), EXO_OX_MAX)*4;   // ingested ≠ oxidised above ~89 g/hr sustained
   const glyFloor = +opts.glyCapFrac||0;
   const durFuelG = opts.durFuelG!=null ? +opts.durFuelG : (+opts.choGperHr||0);   // carbs eaten per hour — protects CP from fading
   // W′ RECOVERY MODE (blow-up → recover, not grind at CP): once the reserve empties, cap effort at top-of-Z2
@@ -2909,7 +2910,7 @@ function viewCaloric(){
     const usableGly=glycogenKcal()*(1-S.reservePct/100);
     const cap=carbCap();
     // supplemental CHO (g/hr) so glycogen never drops below the reserve over a T-hour effort
-    const suppG=(choKcalHr,T)=>Math.max(carbFloorG(T), (choKcalHr - usableGly/T)/4);   // reserve need, floored at the guideline minimum
+    const suppG=(choKcalHr,T)=>Math.max(carbFloorG(T), (choKcalHr - usableGly/T)/CHO_KCAL_G_BURN);   // reserve need, floored at the guideline minimum
     const cls=g=> g<=0?'st-w' : g<=60?'st-g' : g<=90?'st-y' : g<=cap?'st-o' : 'st-r';
     const cell=g=> g<=0?'—' : (g>cap ? '✕' : fmt(g,0));
     return `<div class="panel" style="margin-top:16px">
@@ -2921,7 +2922,7 @@ function viewCaloric(){
       <div class="scroll" style="margin-top:8px"><table class="tc zxt">
         <thead><tr><th style="text-align:left">${wl?(run?'Pace':'Workload'):'Zone'}</th><th>CHO burn (g/hr)</th>
           ${DURS.map(d=>`<th>${d} hr</th>`).join('')}</tr></thead>
-        <tbody>${ints.map((z,i)=>{const m=imetrics(z,0); const burnG=m.choKcalHr/4; return `<tr>
+        <tbody>${ints.map((z,i)=>{const m=imetrics(z,0); const burnG=m.choKcalHr/CHO_KCAL_G_BURN; return `<tr>
           <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.pct!=null?z.label:((run?'P':'WL')+' '+(i+1))}</span> <span class="muted" style="font-size:10px">${intLbl(z)}</span></td>
           <td style="text-align:center">${fmt(burnG,0)}</td>
           ${DURS.map(d=>{const g=suppG(m.choKcalHr,d);return `<td class="sc ${cls(g)}">${cell(g)}</td>`;}).join('')}
@@ -3380,9 +3381,10 @@ function viewSources(){
 
   ${sec('Carbohydrate intake &amp; gut absorption',
     'Hourly carbohydrate targets and the gut-absorption ceiling: ≈ 60 g/hr from single-transportable (glucose-only) vs ≈ 90 g/hr from multiple-transportable (glucose + fructose) carbohydrate. The higher trained ceilings (adapted 120, high-carb 150 g/hr) reflect deliberate gut training, which up-regulates intestinal transporters and raises tolerable intake.',
-    ref('Jeukendrup AE','2014','A step towards personalized sports nutrition: carbohydrate intake during exercise.','Sports Medicine, 44(Suppl 1), S25–S33. — duration-based intake guidance; its low end sets the minimum carb target (30 g/hr for 1–2.5 h, 60 g/hr beyond).')
+    ref('Jeukendrup AE','2014','A step towards personalized sports nutrition: carbohydrate intake during exercise.','Sports Medicine, 44(Suppl 1), S25–S33. — duration-based intake guidance (Fig. 1: 30 g/hr for 1–2 h, up to 60 g/hr for 2–3 h, up to 90 g/hr beyond 2.5 h with multiple transportable carbohydrates). The calculator’s minimum carb target (30 g/hr for 1–2.5 h, 60 g/hr beyond) is a conservative floor set below these.')
     + ref('Thomas DT, Erdman KA, Burke LM','2016','American College of Sports Medicine joint position statement: Nutrition and athletic performance.','Medicine &amp; Science in Sports &amp; Exercise, 48(3), 543–568. — 30–60 g/hr for 1–2.5 h; up to 90 g/hr for longer events.')
     + ref('Jentjens RLPG, Moseley L, Waring RH, Harding LK, Jeukendrup AE','2004','Oxidation of combined ingestion of glucose and fructose during exercise.','Journal of Applied Physiology, 96(4), 1277–1284.')
+    + ref('Jentjens RLPG, Jeukendrup AE','2005','High rates of exogenous carbohydrate oxidation from a mixture of glucose and fructose ingested during prolonged cycling exercise.','British Journal of Nutrition, 93(4), 485–492. — 2.4 g/min of glucose + fructose: peak oxidation 1.75 g/min, 1.49 g/min (about 89 g/hr) over the last 90 min; the calculator uses 89 g/hr as the sustained ceiling on carbohydrate burned from food and drink.')
     + ref('Jeukendrup AE','2017','Training the gut for athletes.','Sports Medicine, 47(Suppl 1), 101–110. — adaptation of carbohydrate absorption with training (supports the trained-gut ~90–120 g/hr range; the 150 g/hr tier is beyond what this review tested).'))}
 
   ${sec('Hydration, sweat &amp; sodium',
