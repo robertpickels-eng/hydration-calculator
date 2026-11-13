@@ -656,7 +656,8 @@ function heatSetField(which, key, val){
   const lim=NUM_LIMITS[key];
   if(key==='band'){ o.band=val; const f=HEAT_BAND_FILL[val]; if(f){ o.ta=f.ta; o.rh=f.rh; } return; }
   if(key==='more'){ o.more=!!val; return; }
-  if(lim){ o[key] = (val==null||val===''||!isFinite(+val)) ? ((key==='power'||key==='pace')?null:o[key]) : Math.min(lim[1],Math.max(lim[0],+val)); return; }
+  if(key==='power'||key==='pace'){ o[key] = (val==null||val===''||!isFinite(+val)||!(+val>0)) ? null : Math.min(lim[1],Math.max(lim[0],+val)); return; }   // 0 = blank (audit P4)
+  if(lim){ o[key] = (val==null||val===''||!isFinite(+val)) ? o[key] : Math.min(lim[1],Math.max(lim[0],+val)); return; }
   o[key]=val;
 }
 function heatSetAcclAct(on){ heatActMaterialize(); S.heatAcclAct=!!on; }
@@ -686,8 +687,8 @@ function heatUseSweatEntry(r){
   if(has(r.temp)) T.ta=clamp('ta', +(((+r.temp)-32)*5/9).toFixed(1));     // log temp is °F; stored °C to 0.1
   if(has(r.rh)) T.rh=clamp('rh',r.rh);
   ['sun','place','fan'].forEach(k=>{ if(r[k]!=null && r[k]!=='') T[k]=r[k]; });
-  if(!isRun() && has(r.power)) T.power=clamp('power',r.power);
-  if(isRun() && has(r.pace)) T.pace=clamp('pace',r.pace);
+  if(!isRun() && has(r.power) && +r.power>0) T.power=clamp('power',r.power);     // a 0 in the log is blank (audit P4)
+  if(isRun() && has(r.pace) && +r.pace>0) T.pace=clamp('pace',r.pace);
   setSweatAnswer('pre');
 }
 // ---- per-hour drink mix --------------------------------------------------
@@ -1129,7 +1130,7 @@ function heatEffortOf(item, grade, vOut){
   if(isRun()) return { M, W:0, vOut: vOut!=null ? vOut : (item.speed||0)/60 };
   return { M, W:item.watts||0, vOut: vOut!=null ? vOut : cycSpeedMS(item.watts||0, 0) };
 }
-// the test's own effort (power cycling, pace running), or null when blank / not scaling (then effort cancels: spec 3)
+// the test's own effort (power cycling, pace running), or null when blank / not scaling. A power or pace of 0 is blank (audit P4).
 function heatTestEffort(){
   if(!HEAT_EFFORT_SCALES || sweatAnswerEff()==='none') return null;
   const T=S.heatTest||{};
@@ -1160,12 +1161,24 @@ function heatMoment(t){
   const item=heatManualItem(s, hrs, heatTaFn());
   return { frac: Math.min(1, t/hrs), eff: heatEffortOf(item, s.grade) };
 }
+// blank test effort (audit P3, replaces spec 3's "equal at each moment"): the activity's time-weighted mean effort
+// (M, W, v) over its course blocks or manual segments, one constant, so a harder stretch still gets a higher rate
+// (Rob, spec 15: sweat rises with metabolic rate). When every moment has the same effort it is that effort exactly.
+function heatMeanEffort(){
+  const ms=heatMoments(), es=ms.map(m=>heatMoment(m.t).eff);
+  if(!es.length) return { M:0, W:0, vOut:0 };
+  if(es.every(e=>e.M===es[0].M && e.W===es[0].W && e.vOut===es[0].vOut)) return es[0];
+  let T=0, M=0, W=0, v=0; es.forEach((e,i)=>{ const d=ms[i].dur; T+=d; M+=e.M*d; W+=e.W*d; v+=e.vOut*d; });
+  return T>0 ? { M:M/T, W:W/T, vOut:v/T } : es[0];
+}
+// the test side's effort for one pass over the activity: entered effort, else the activity's mean (built once per pass)
+function heatCtx(){ return { te: heatTestEffort() || heatMeanEffort() }; }
 // sweat factor and acclimatization at time t (spec 5). Out of range (test or this moment): 1 and 1.
-function heatFactorAt(t){
+function heatFactorAt(t, ctx){
   if(!heatActive()) return { factor:1, accl:1, adjusted:false };
   const m=heatMoment(t), cond=heatCondAtFrac(m.frac);
-  const te=heatTestEffort();
-  const test=heatEval(heatInputs(heatTestCond(), te || m.eff));     // blank test effort: the activity's M, W, v (effort cancels)
+  const te=(ctx||heatCtx()).te;
+  const test=heatEval(heatInputs(heatTestCond(), te));
   const act=heatEval(heatInputs(cond, m.eff));
   if(!test.ok || !act.ok) return { factor:1, accl:1, adjusted:false, testOk:test.ok, actOk:act.ok };
   return { factor: act.S/test.S, accl: heatAccl(heatTestAccl(), heatActAccl()), adjusted:true, testOk:true, actOk:true };
@@ -1187,16 +1200,29 @@ function heatMoments(){
 // time-weighted mean activity sweat rate (L/hr)
 function sweatRateMean(){
   if(!heatActive()) return sweatRateLhr();
-  let sum=0, T=0; heatMoments().forEach(m=>{ const f=heatFactorAt(m.t); sum+=f.factor*f.accl*m.dur; T+=m.dur; });
+  const ctx=heatCtx();
+  let sum=0, T=0; heatMoments().forEach(m=>{ const f=heatFactorAt(m.t, ctx); sum+=f.factor*f.accl*m.dur; T+=m.dur; });
   return T>0 ? sweatRateLhr()*(sum/T) : sweatRateLhr();      // base × time-weighted factor: exactly the base rate when every factor is 1
 }
-// midpoint of hour h (1-based) of the activity, clipped to its end for the last part-hour; past the end, the hour's own midpoint
-function heatHourMid(h){ const end=+S.eventHours||0, s=h-1; return s<end ? (s + Math.min(h, end))/2 : h - 0.5; }
-// what the Result line shows (strings are phase-2 placeholders): off | needHeight | notAdjusted | partial | ok
+// sweat lost (L) from a to b hours (audit P2): each course block or manual segment inside [a, b] contributes its own
+// rate × the time it overlaps; past the end of the activity, the rate at the end (finish conditions, last effort).
+// An hour's rate is therefore the time-weighted mean over the stretches it covers, not one sample.
+function heatSweatL(a, b, ctx){
+  const base=sweatRateLhr();
+  if(!heatActive()) return base*(b - a);
+  ctx=ctx||heatCtx();
+  let L=0, end=0;
+  heatMoments().forEach(m=>{ const t0=m.t - m.dur/2, t1=t0 + m.dur; if(t1>end) end=t1;
+    const o=Math.min(b, t1) - Math.max(a, t0); if(o>0){ const f=heatFactorAt(m.t, ctx); L+=f.factor*f.accl*o; } });
+  if(b>end){ const ct=S._ct, tEnd=(S.activityMode==='course' && ct && ct.hours>end) ? ct.hours : end;
+    const f=heatFactorAt(tEnd, ctx); L+=f.factor*f.accl*(b - Math.max(a, end)); }
+  return base*L;
+}
+// what the Result line shows: off | needHeight | notAdjusted | partial | ok
 function heatStatus(){
   if(!(S.uiMode==='advanced' && S.heatOn===true)) return { status:'off' };
   if(!heightValid()) return { status:'needHeight', text:HEAT_STR.addHeight };
-  const fs=heatMoments().map(m=>heatFactorAt(m.t)), n=fs.filter(f=>f.adjusted).length;
+  const ctx=heatCtx(), fs=heatMoments().map(m=>heatFactorAt(m.t, ctx)), n=fs.filter(f=>f.adjusted).length;
   if(n===0) return { status:'notAdjusted', text:HEAT_STR.notAdjusted };
   return { status: n<fs.length ? 'partial' : 'ok', rate: sweatRateMean() };
 }
@@ -3050,9 +3076,9 @@ function projectionRows(hours=8){
   const C6=sweatRateLhr(), C5=S.bottleOz, C3=S.bodyLbs, C0=S.bodyNaConc,
         TBW0=totalTBW(), ECF0=totalECF(), H6=S.sweatNa, pool0=C0*TBW0, ecfNa0=C0*ECF0;
   const rows=[], heatOn=heatActive();
-  let bottles=0, drinkNaMg=0, heatLost=0;
+  let bottles=0, drinkNaMg=0, heatLost=0; const hctx=heatOn ? heatCtx() : null;
   for(let h=1;h<=hours;h++){
-    if(heatOn) heatLost += sweatRateAt(heatHourMid(h));   // heat: sum of per-hour activity rates (spec 5)
+    if(heatOn) heatLost += heatSweatL(h-1, h, hctx);    // heat: each hour's sweat, integrated over its stretches (spec 5, audit P2)
     const lostL    = heatOn ? heatLost : h*C6;  // sweat lost (L)
     const bH       = planBottlesFor(h,1);         // this hour's bottles: plan override, else Bottles/hr
     bottles       += bH;                          // cumulative bottles consumed
@@ -3312,7 +3338,7 @@ function planSummaryFor(h,dur){
   return out;
 }
 function viewEventPlan(){
-  const ev=eventTotals(), rows=planHours();
+  const ev=eventTotals(), rows=planHours(), planCtx=heatActive() ? heatCtx() : null;
   const fuelOpts=(sel)=>{
     const opt=(id,label,carb,na,gf='')=>`<option value="${id}"${id===sel?' selected':''}>${label} — ${gf}${fmt(carb,0)}g · ${fmt(na,0)}mg Na</option>`;
     const foods=FUEL_PRODUCTS.filter(p=>brandPickKeep(p,p.id,sel)).map(p=>opt(p.id,fuelLabel(p),fuelCarbG(p),p.sodium,gfTag(p))).join('');
@@ -3359,7 +3385,7 @@ function viewEventPlan(){
       </tr>
     </thead>
     <tbody>${rows.map(r=>{
-      const sr=heatActive() ? sweatRateAt(heatHourMid(r.h)) : sweatRateLhr();   // this hour's activity rate when heat is active
+      const sr=(heatActive() && r.dur>0) ? heatSweatL(r.h-1, r.h-1+r.dur, planCtx)/r.dur : sweatRateLhr();   // this hour's mean activity rate when heat is active (audit P2)
       const need=ev.targetRateG*r.dur, dr=drinkCarbFor(r.h,r.dur), food=foodCarbFor(r.h), gap=need-dr-food;
       const items=planItemsFor(r.h), btl=planBottlesFor(r.h,r.dur);
       const drinkNa=btl*naFromSaltsMg(r.h), foodNa=foodNaFor(r.h), naIn=drinkNa+foodNa;
