@@ -259,6 +259,47 @@
   details[open] summary.sub-h::before{content:"▾ "}
   .est{color:var(--warn);font-size:11px}
   a{color:var(--accent2)}
+  /* ---- Layout F (heat screens): boxed sections with a title bar, labels beside inputs in a short fixed column.
+     Reference: the design board's .box/.frow/.fq; colours from the app tokens so light and dark both work. ---- */
+  .box{border:1px solid var(--line);border-radius:8px;margin:14px 0;overflow:hidden;background:var(--panel)}
+  .box>.bt{background:var(--panel2);border-bottom:1px solid var(--line);padding:9px 12px;font:600 15px/1.3 var(--font-display);color:var(--txt)}
+  .box>.bb{padding:6px 12px 10px}
+  .box .box{margin:10px 0}
+  .box .box>.bt{font-size:13.5px;padding:7px 10px}
+  .frow{display:grid;grid-template-columns:150px auto;justify-content:start;align-items:center;column-gap:12px;margin:8px 0}
+  .frow>.lab{font-size:13px;color:var(--txt)}
+  .frow>.ctl{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+  .frow>.ctl input[type=number],.frow>.ctl input[type=text]{width:72px}
+  .frow>.ctl .u{font-size:12px;color:var(--muted)}
+  .frow>.ctl select{width:auto;min-width:140px;max-width:100%}
+  .frow .modeseg button:disabled{opacity:.45;cursor:not-allowed}
+  .fq{margin:8px 0 12px}
+  .fq>.lab{font-size:13.5px;color:var(--txt);margin-bottom:6px}
+  .fq .modeseg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;width:100%}
+  .fq .modeseg button{white-space:normal;line-height:1.25}
+  .chk{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px;color:var(--txt);cursor:pointer}
+  .chk input{margin:0;accent-color:var(--accent)}
+  .more{font-size:13px;margin:8px 0}
+  .more a{color:var(--accent2);cursor:pointer}
+  .tag{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin-left:6px}
+  .state{border-top:1px solid var(--line);padding:6px 0;font-size:13px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .state:first-child{border-top:none}
+  .state .v{font-weight:600}
+  .state.warn .v{color:var(--warn)}
+  .state.bad,.state.bad a{color:var(--bad)}
+  .state.bad a{font-weight:600;cursor:pointer}
+  .heat-tbl td,.heat-tbl th{white-space:normal;text-align:left;vertical-align:top}
+  @media(max-width:560px){
+    .frow{grid-template-columns:110px minmax(0,1fr)}
+    .frow:not(:has(.modeseg))>.ctl{flex-wrap:nowrap;gap:4px}
+    .frow>.ctl input[type=number],.frow>.ctl input[type=text]{width:auto;flex:1 1 0;min-width:0;max-width:72px;padding:5px 6px}
+    .frow>.ctl select{min-width:0;width:100%}
+    .frow:has(.modeseg){grid-template-columns:1fr;row-gap:6px}
+    .frow:has(.modeseg)>.ctl{display:block}
+    .frow .modeseg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;width:100%}
+    .frow .modeseg button{white-space:normal;line-height:1.25;padding:7px 4px}
+    .frow:has(.modeseg) .tag{display:inline-block;margin:6px 0 0}
+  }
   @media(prefers-reduced-motion:reduce){*{transition:none!important}}
   @media(max-width:880px){.cols2,.cols3{grid-template-columns:1fr}.tabs{top:51px}
     /* tab strip: scroll horizontally instead of wrapping into multiple rows */
@@ -1120,7 +1161,7 @@ function heatBlend(start, finish, frac){
    unchanged (T0). */
 const HEAT_EFFORT_SCALES = true;   // spec 15, open for Rob: true = the test effort enters the test evaluation (Settled 1B); false = effort always cancels
 const HEAT_CEIL_CUT = 0;           // ceiling cut at full ramp: ruled 0.10 (Settled R5 4A), waits for one full-text paper beside Jentjens 2002 (Reynolds 2024, Mougin 2025 or Podlogar 2026)
-const HEAT_STR = { notAdjusted:'TODO', addHeight:'TODO', actRate:'TODO' };   // on-screen wording: phase 2 fills these from the approved proposal
+const HEAT_STR = { notAdjusted:'Not adjusted: conditions beyond the model', addHeight:'Add your height to adjust for heat', actRate:'Activity sweat rate' };   // approved wording S35, S36, S34/S38
 function heightValid(){ const h=S.heightCm; return h!=null && h!=='' && Number.isFinite(+h) && +h>=100 && +h<=230; }
 function heatActive(){ return S.uiMode==='advanced' && S.heatOn===true && heightValid(); }
 function heatNeedsHeight(){ return S.uiMode==='advanced' && S.heatOn===true && !heightValid(); }
@@ -2514,7 +2555,7 @@ function athleteSummary(){
     </div></div>`;
 }
 
-/* Sweat & Sodium inputs — sweat rate lives on the In the Bottle tab */
+/* Sweat & Sodium readout — the sweat test itself lives in Athlete Profile (heat spec 2.1) */
 function sweatSodiumPanel(){
   const sr = sweatRateLhr();                      // "Sweat rate used" stays the base rate (spec 5)
   const srAct = heatActive() ? sweatRateMean() : sr;   // activity rate: the Na loss line uses it when heat is active (14.43)
@@ -2524,27 +2565,9 @@ function sweatSodiumPanel(){
         <div class="res"><span>Total ECF (≈20% mass)</span><span class="v">${fmt(totalECF(),1)} L</span></div>
         <div class="res"><span>Body Na⁺ content</span><span class="v">${fmt(bodyNaContentMmol(),0)} mmol · ${fmt(bodyNaContentG(),1)} g</span></div>
         <div class="sub-h">Sweat rate</div>
-        <div class="field"><label style="flex:0 0 auto;margin-right:8px">Method</label>
-          <select id="sweatMethod" style="flex:1;min-width:0">
-            <option value="prepost"${S.sweatMethod==='prepost'?' selected':''}>From pre/post weight</option>
-            <option value="estimate"${S.sweatMethod==='estimate'?' selected':''}>Quick estimate (how sweaty?)</option>
-            <option value="manual"${S.sweatMethod==='manual'?' selected':''}>Enter L/hr directly</option>
-          </select></div>
-        ${S.sweatMethod==='prepost'?`<div class="fgrid">
-          ${numField('Pre weight','pre','lbs')}
-          ${numField('Post weight','post','lbs')}
-          ${numField('Test duration','time','hr',0.1)}
-          ${numField('Drank during test','testDrankOz','oz',1)}
-        </div>`:''}
-        ${S.sweatMethod==='estimate'?`<div class="field"><label style="flex:0 0 auto;margin-right:8px">How sweaty?</label>
-          <select id="sweatGuess" style="flex:1;min-width:0">
-            ${SWEAT_GUESS.map(([v,label])=>`<option value="${v}"${(+S.manualSweat===v)?' selected':''}>${label} — ${v.toFixed(1)} L/hr</option>`).join('')}
-          </select></div>`:''}
-        ${S.sweatMethod==='manual'?numField('Sweat rate','manualSweat','L/hr',0.01):''}
         <div class="res"><span class="muted">Sweat rate used</span><span class="v">${fmt(sr,2)} L/hr</span></div>${heatActive()?`<div class="res"><span class="muted">${HEAT_STR.actRate}</span><span class="v">${fmt(srAct,2)} L/hr</span></div>`:''}
-        <div class="note">Want a precise number? Use the detailed <a href="https://sweatratecalculator.com" target="_blank" rel="noopener" style="color:var(--accent)">sweatratecalculator.com</a>, then enter the result above.</div>
         <div class="res"><span>Sweat Na⁺ loss / hour</span><span class="v">${fmt(S.sweatNa*srAct,0)} mg <span class="muted">@ ${fmt(S.sweatNa,0)} mg/L</span></span></div>
-        <div class="note">Set <b>sweat sodium concentration</b> on the <b>Athlete</b> tab. With heat acclimatization sweat [Na⁺] <b>drops</b> — you lose less sodium per liter.</div>
+        <div class="note">Set <b>sweat sodium concentration</b> on the <b>Athlete</b> tab.</div>
         <div class="sub-h">Targets</div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Accept. loss</label>
           <select id="acceptLossSel" style="flex:1;min-width:0">
@@ -2773,6 +2796,80 @@ function viewBasic(){
 }
 
 /* ---------- TAB: ATHLETE  (shared core profile + activity) ---------- */
+/* ---------- Heat screens (layout F). Every string is from docs/_work/heat-wording - approved.md; S numbers in comments. ---------- */
+const HEAT_BANDS = [['cool','Cool, 59°F (15°C)'],['warm','Warm, 75°F (24°C)'],['hot','Hot, 86°F (30°C)'],['veryhot','Very hot, 95°F (35°C)']];   // S15 (ruled 1B)
+const HEAT_SUNS = [['full','Full sun'],['partly','Partly cloudy'],['overcast','Overcast'],['night','Night or indoors']];                       // S19 (ruled 2A)
+const HEAT_PLACES = [['outdoor','Outdoor'],['indoor','Indoor']];                                                                                 // S20
+const HEAT_FANS = [['none','No fan'],['fan','Fan'],['strong','Strong fan']];                                                                    // S21
+const HEAT_ACCL_LBL = 'Heat-acclimatized (10+ days of training in heat)';                                                                       // S22, S30
+const heatCToF = c => c*9/5 + 32, heatFToC = f => (f - 32)*5/9;
+function hFrow(label, ctl){ return `<div class="frow"><span class="lab">${label}</span><span class="ctl">${ctl}</span></div>`; }
+function hBox(title, inner){ return `<div class="box"><div class="bt">${title}</div><div class="bb">${inner}</div></div>`; }
+function hSeg(opts, cur, call, disabled){
+  return `<span class="modeseg" role="group">${opts.map(([v,l])=>`<button type="button" class="sm${cur===v?'':' ghost'}" aria-pressed="${cur===v}"${disabled?' disabled':''} onclick="${call(v)}">${l}</button>`).join('')}</span>`;
+}
+function hChk(label, on, call){ return `<label class="chk"><input type="checkbox"${on?' checked':''} onchange="${call}"> ${label}</label>`; }
+function hNum(val, hk, call, step, unit){ return `<input type="number" step="${step}" value="${val==null?'':val}" data-hk="${hk}" onchange="${call}">${unit?`<span class="u">${unit}</span>`:''}`; }
+function hNumS(key, unit, step=1){ return `<input type="number" step="${step}"${limAttrs(key)} value="${S[key]??''}" data-k="${key}" data-obj="S"><span class="u">${unit}</span>`; }
+// one conditions box body (test, Start or Finish): band row, More detail link, and the detail fields when open
+function heatCondFields(which, c, open){
+  const q=`'${which}'`, indoor=c.place==='indoor';
+  let h=hFrow('Conditions', hSeg(HEAT_BANDS, heatBandShown(c), v=>`window._heatSet(${q},'band','${v}')`))   // S14, S15
+    + `<div class="more"><a role="button" tabindex="0" onclick="window._heatSet(${q},'more',${!open})">${open?'▾ Less detail':'▸ More detail: temperature, humidity, sun, place, fan'}</a></div>`;   // S16
+  if(!open) return h;
+  const ta=+c.ta;
+  return h
+    + hFrow('Temperature', hNum(Number.isFinite(ta)?Math.round(heatCToF(ta)):'', which+'.taF', `window._heatSet(${q},'taF',this.value)`, 1, '°F')
+                          + hNum(Number.isFinite(ta)?+ta.toFixed(1):'', which+'.ta', `window._heatSet(${q},'ta',this.value)`, 0.1, '°C'))   // S17
+    + hFrow('Humidity', hNum(c.rh, which+'.rh', `window._heatSet(${q},'rh',this.value)`, 1, '%'))                                                // S18
+    + hFrow('Sun', `<select data-hk="${which}.sun" onchange="window._heatSet(${q},'sun',this.value)">${HEAT_SUNS.map(([v,l])=>`<option value="${v}"${c.sun===v?' selected':''}>${l}</option>`).join('')}</select>`)   // S19
+    + hFrow('Place', hSeg(HEAT_PLACES, c.place, v=>`window._heatSet(${q},'place','${v}')`))                                                    // S20
+    + hFrow('Fan', hSeg(HEAT_FANS, c.fan, v=>`window._heatSet(${q},'fan','${v}')`, !indoor));                                                 // S21: active only indoors
+}
+// Height: ft, in and cm on one line (S1); either side converts the other
+function heightRow(){
+  const cm=S.heightCm, has=cm!=null && cm!=='' && Number.isFinite(+cm);
+  let ft='', inch='';
+  if(has){ const tin=+cm/2.54; ft=Math.floor(tin/12); inch=Math.round((tin - ft*12)*10)/10; if(inch>=12){ ft+=1; inch=0; } }
+  return hFrow('Height', hNum(ft, 'height.ft', `window._setHeight('ft',this.value)`, 1, 'ft') + hNum(inch, 'height.in', `window._setHeight('in',this.value)`, 0.5, 'in')
+    + hNum(has?+(+cm).toFixed(1):'', 'height.cm', `window._setHeight('cm',this.value)`, 0.5, 'cm'));
+}
+// Athlete Profile: the sweat test (S2-S25). Advanced only.
+function sweatTestBox(){
+  const a=sweatAnswerEff(), run=isRun(), T=Object.assign({}, HEAT_TEST_DEFAULT, S.heatTest||{});
+  let h=`<div class="fq"><div class="lab">Have you done a sweat test or pre-post weight recently?</div>${hSeg([['full','Full test'],['pre','Pre-post weight'],['none','Nothing']], a, v=>`window._setSweatAnswer('${v}')`)}</div>`;   // S3, S4
+  if(a==='none') return hBox('Sweat test', h + hFrow('How sweaty do you get?', `<select id="sweatGuess">
+      ${SWEAT_GUESS.map(([v,label])=>`<option value="${v}"${(+S.manualSweat===v)?' selected':''}>${label} — ${v.toFixed(1)} L/hr</option>`).join('')}</select>`));   // S5: existing options
+  if(a==='pre') h+=hBox('Weigh-in', hFrow('Pre weight', hNumS('pre','lbs')) + hFrow('Post weight', hNumS('post','lbs')) + hFrow('Test duration', hNumS('time','hr',0.1))
+      + hFrow('Drank during test', hNumS('testDrankOz','oz')) + hFrow('Sweat rate', `<b>${fmt(sweatRateLhr(),2)} L/hr</b>`));   // S6, S7, S8
+  else h+=hBox('Test results', hFrow('Sweat rate', hNumS('manualSweat','L/hr',0.01))
+      + hFrow('Measured sweat sodium', `<input type="number" step="10"${limAttrs('sweatNaTest')} value="${S.sweatNaTest??''}" placeholder="Optional" data-k="sweatNaTest" data-obj="S"><span class="u">mg/L</span>`)
+      + `<div class="note">Want a precise number? Use the detailed <a href="https://sweatratecalculator.com" target="_blank" rel="noopener" style="color:var(--accent)">sweatratecalculator.com</a>, then enter the result above.</div>`);   // S9, S10, S11 (5B), S12; note moved from In the Bottle
+  h+=hBox('Conditions during the test', heatCondFields('heatTest', heatTestCond(), T.more===true) + hChk(HEAT_ACCL_LBL, S.heatAcclTest===true, `window._heatAccl('test',this.checked)`));   // S13, S22
+  h+=hBox('Effort during the test', run   // S23; S24 "Power" (8B), S25 "Average pace" min/mi (3A)
+    ? hFrow('Average pace', `<input type="text" value="${(+T.pace>0)?paceFmt(+T.pace):''}" data-hk="heatTest.pace" onchange="window._heatSet('heatTest','pace',this.value)" style="text-align:center" title="m:ss per mile"><span class="u">min/mi</span>`)
+    : hFrow('Power', hNum(T.power, 'heatTest.power', `window._heatSet('heatTest','power',this.value)`, 1, 'W')));
+  return hBox('Sweat test', h);
+}
+// Activity Information: the activity's conditions and the Result line (S26-S36)
+function heatResultLines(){
+  const st=heatStatus();
+  if(st.status==='needHeight') return `<div class="state bad"><span>${HEAT_STR.addHeight}</span><a role="button" tabindex="0" onclick="window._goHeight()">Athlete Profile</a></div>`;   // S36
+  if(st.status==='notAdjusted') return `<div class="state warn"><span class="v">${HEAT_STR.notAdjusted}</span></div>`;   // S35
+  return `<div class="state"><span>${HEAT_STR.actRate}</span><span class="v">${fmt(st.rate,2)} L/hr (sweat test ${fmt(sweatRateLhr(),2)})</span></div>`;   // S34 (8B)
+}
+function heatActivityBoxes(){
+  const on=S.heatOn===true;
+  let h=hChk('Heat adjustment', on, `window._heatOn(this.checked)`);   // S27 (8B)
+  if(on){
+    h+=hBox('Start', heatCondFields('heatAct', heatActCond(), !!(S.heatAct&&S.heatAct.more)));   // S28
+    h+=hBox('Finish', hChk('Add finish conditions', S.heatFinishOn===true, `window._heatFinish(this.checked)`)   // S28, S29 (8B)
+      + (S.heatFinishOn===true ? heatCondFields('heatFinish', heatFinishCond(), !!(S.heatFinish&&S.heatFinish.more)) : ''));
+    h+=hChk(HEAT_ACCL_LBL, heatActAccl(), `window._heatAccl('act',this.checked)`);   // S30
+    if(!isRun()) h+=hFrow('Lower planned power in the heat', hSeg([['off','Off'],['on','On']], S.heatPowerOn===true?'on':'off', v=>`window._heatPower(${v==='on'})`) + '<span class="tag">Cycling only</span>');   // S31 (8B), S32
+  }
+  return hBox('Activity conditions', h) + (on ? hBox('Result', heatResultLines()) : '');   // S26, S33
+}
 function viewRider(){
   const run=isRun(), ev=eventTotals(), ints=intensities();
   const intLbl = z => run ? paceFmt(z.pace)+'/mi' : Math.round(z.watts)+'W';
@@ -2826,14 +2923,16 @@ function viewRider(){
             ${Object.keys(DUR_LABELS).map(k=>`<option value="${k}"${(S.durability||'typical')===k?' selected':''}>${DUR_LABELS[k]}</option>`).join('')}
           </select></div>
         <div class="note">Critical power and W′ fade as work piles up — hard kilojoules count far more than easy ones — and partly come back while you ride easy. Low / Typical / High = holding FTP for about 35 / 51 / 67 min when fresh. ${srcLink('durability model →')}</div>`}
-        <div class="sub-h">Sweat sodium</div>
+        ${sweatNaTestInForce()?'':`<div class="sub-h">Sweat sodium</div>
         <div class="field"><label style="flex:0 0 auto;margin-right:8px">Concentration</label>
           <select id="sweatNaSel" style="flex:1;min-width:0">
             ${SWEAT_NA_REF.map(([mM,mg,desc])=>`<option value="${mg}"${S.sweatNaMode!=='manual'&&S.sweatNa==mg?' selected':''}>${desc} — ${mg} mg/L · ${mM} mM</option>`).join('')}
             <option value="manual"${S.sweatNaMode==='manual'?' selected':''}>Manual entry…</option>
           </select></div>
         ${S.sweatNaMode==='manual'?`<div class="field"><label class="muted">↳ manual value</label>
-          <input type="number" step="10" value="${S.sweatNa}" data-k="sweatNa" data-obj="S"${limAttrs('sweatNa')}><span class="u">mg/L</span></div>`:''}
+          <input type="number" step="10" value="${S.sweatNa}" data-k="sweatNa" data-obj="S"${limAttrs('sweatNa')}><span class="u">mg/L</span></div>`:''}`}
+        ${heightRow()}
+        ${sweatTestBox()}
         <div class="sub-h">Gut adaptation <span class="muted" style="text-transform:none">(carb ceiling)</span></div>
         <div class="modeseg">
           <button class="sm ${S.gutAdapt==='unadapted'?'':'ghost'}" onclick="window._setGutAdapt('unadapted')">Unadapted (90)</button>
@@ -2848,7 +2947,7 @@ function viewRider(){
           <button class="sm ${S.glyState==='loaded'?'':'ghost'}" onclick="window._setGlyState('loaded')">Carb-loaded</button>
         </div>
         <div class="note">Muscle-glycogen concentration in engaged muscle: <b>Typical training ${GLY_CONC.training}</b> · <b>Tapered &amp; rested ${GLY_CONC.rested}</b> · <b>Carb-loaded ${GLY_CONC.loaded} g/kg</b> — drives predicted glycogen &amp; time-to-bonk on the Caloric Needs tab. ${srcLink('glycogen sizing &amp; sources →')}</div>
-        <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>activity duration${run?' / grade':''}</b> in <b>Activity Information</b> below, and your <b>sweat rate</b> on the <b>In the Bottle</b> tab.</div>
+        <div class="note">Body weight, gender, sport and your ${run?'threshold pace':'FTP'} are shared across every tab. Set <b>activity duration${run?' / grade':''}</b> in <b>Activity Information</b> below.</div>
         <div class="row-actions" style="margin-top:8px;align-items:center">
           <span class="muted" style="font-size:11px">✓ Inputs are saved in this browser and restored next visit.</span>
           <button class="sm ghost" onclick="window._resetAthlete()" style="margin-left:auto">Reset to defaults</button>
@@ -2920,6 +3019,7 @@ function viewRider(){
         ? `${cb.controls}`
         : `${manualInputs}
            <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">${totalsBlock}</div>`}
+      ${heatActivityBoxes()}
     </div>
     ${courseMode && !isRun() && S.course ? `<div class="panel tidy compact" style="margin-top:16px">
       <h2>Cycling Time Model</h2>
@@ -3636,12 +3736,15 @@ function viewSweatLog(){
   return `<div class="panel"><h2>Sweat-Rate Log</h2>
   <div class="note">Each row computes oz/hr, L/hr and % body-mass lost from pre/post weight + fluid consumed. <b>Use</b> pushes that sweat rate into the Calculator. <span class="muted">Loss = (pre−post) lb ÷ 2.2046 × 0.95 (non-sweat mass loss removed) + fluid drunk — same formula as the Calculator.</span></div>
   <div class="scroll" style="margin-top:10px"><table>
-    <thead><tr><th>Date</th><th>Hrs</th><th>Avg °F</th><th>Pre</th><th>Post</th><th>Drank oz</th>
+    <thead><tr><th>Date</th><th>Hrs</th><th>Avg °F</th><th>Band</th><th>RH %</th><th>Sun</th><th>Place</th><th>Fan</th><th>Avg W</th><th>Avg pace</th><th>Pre</th><th>Post</th><th>Drank oz</th>
       <th>Loss oz</th><th>oz/hr</th><th>L/hr</th><th>% lost</th><th>Na mg/oz</th><th></th></tr></thead>
     <tbody>${SWEATLOG.map((r,i)=>{const c=swCalc(r);
       const f=(k,w=58)=>`<input type="number" step="0.1" value="${r[k]}" data-sw="${i}" data-swk="${k}" style="width:${w}px">`;
+      const sel=(k,opts)=>`<select data-sw="${i}" data-swk="${k}" style="width:auto"><option value=""${r[k]?'':' selected'}></option>${opts.map(([v,l])=>`<option value="${v}"${r[k]===v?' selected':''}>${l}</option>`).join('')}</select>`;   // S39 columns; option text S15, S19, S20, S21
       return `<tr><td><input type="text" value="${r.date}" data-sw="${i}" data-swk="date" style="width:96px"></td>
-        <td>${f('hrs',46)}</td><td>${f('temp',46)}</td><td>${f('pre')}</td><td>${f('post')}</td><td>${f('oz')}</td>
+        <td>${f('hrs',46)}</td><td>${f('temp',46)}</td><td>${sel('band',HEAT_BANDS)}</td><td>${f('rh',46)}</td><td>${sel('sun',HEAT_SUNS)}</td><td>${sel('place',HEAT_PLACES)}</td><td>${sel('fan',HEAT_FANS)}</td>
+        <td>${f('power',52)}</td><td><input type="text" value="${(+r.pace>0)?paceFmt(+r.pace):''}" data-sw="${i}" data-swk="pace" style="width:58px;text-align:center" title="m:ss per mile"></td>
+        <td>${f('pre')}</td><td>${f('post')}</td><td>${f('oz')}</td>
         <td>${fmt(c.lossOz,1)}</td><td>${fmt(c.ozHr,1)}</td><td>${fmt(c.lHr,2)}</td>
         <td>${fmt(c.pctLost,1)}%</td><td>${f('na',46)}</td>
         <td><button class="sm" onclick="window._useSweat(${i})">Use</button></td></tr>`;}).join('')}
@@ -3773,6 +3876,7 @@ function viewSources(){
     + ref('Baker LB','2017','Sweating rate and sweat sodium concentration in athletes: a review of methodology and intra/interindividual variability.','Sports Medicine, 47(Suppl 1), 111–128.')
     + ref('Edelman IS, Leibman J','1959','Anatomy of body water and electrolytes.','The American Journal of Medicine, 27(2), 256–277. — body-fluid compartment sizing behind the ECF and sodium-content estimates.')
     + ref('Edelman IS, Leibman J, O’Meara MP, Birkenfeld LW','1958','Interrelations between serum sodium concentration, serum osmolarity and total exchangeable sodium, total exchangeable potassium and total body water.','Journal of Clinical Investigation, 37(9), 1236–1256. — plasma [Na⁺] ∝ (Na⁺ₑ + K⁺ₑ) ÷ TBW, the basis of the projection.'))}
+
 
   ${sec('Drink osmolality &amp; gastric emptying',
     'Bottle osmolality = Σ(grams ÷ molar mass × particles) ÷ volume, and its effect on gastric emptying. Particle (dissociation) factors used: sugars = 1, NaCl = 2, sodium citrate = 4, maltodextrin ≈ 1 per (18016/DE) g — so a higher DE means more, smaller particles and higher osmolality; maltodextrin osmolality is estimated from its dextrose equivalent (number-average MW ≈ 18016 ÷ DE).',
@@ -4067,7 +4171,7 @@ let active='rider';
 function elSig(el){
   if(!el || el.tagName!=='INPUT' && el.tagName!=='SELECT') return null;
   if(el.id) return '#'+el.id;
-  const attrs=['data-k','data-obj','data-comp','data-lvol','data-kgmass','data-id','data-f','data-sub','data-xc','data-xl','data-xf','data-sw','data-swk','data-pl','data-plk','data-seg','data-fid','data-ff'];
+  const attrs=['data-k','data-hk','data-obj','data-comp','data-lvol','data-kgmass','data-id','data-f','data-sub','data-xc','data-xl','data-xf','data-sw','data-swk','data-pl','data-plk','data-seg','data-fid','data-ff'];
   let sel=el.tagName.toLowerCase(), has=false;
   attrs.forEach(a=>{ if(el.hasAttribute(a)){ sel+=`[${a}="${el.getAttribute(a)}"]`; has=true; } });
   return has?sel:null;
@@ -4308,6 +4412,31 @@ window._setActivity=(a)=>{ if(S.activity===a) return; S.activity=a; S.eventIntPc
 window._setGlyState=(v)=>{ if(S.glyState===v||!GLY_CONC[v]) return; S.glyState=v; render(); };
 window._setGutAdapt=(level)=>{ if(S.gutAdapt===level) return; S.gutAdapt=level; render(); };
 /* --- Basic / Advanced mode --- */
+// heat screens (layout F)
+window._setSweatAnswer=(a)=>{ setSweatAnswer(a); render(); };
+window._heatOn=(on)=>{ S.heatOn=!!on; render(); };
+window._heatFinish=(on)=>{ heatSetFinishOn(on); render(); };
+window._heatPower=(on)=>{ S.heatPowerOn=!!on; render(); };
+window._heatAccl=(w,on)=>{ if(w==='test') S.heatAcclTest=!!on; else heatSetAcclAct(on); render(); };
+window._heatSet=(which,key,val)=>{
+  if(key==='taF'){ if(val!==''&&val!=null&&isFinite(+val)) heatSetField(which,'ta',+heatFToC(+val).toFixed(1)); }   // °F typed → °C to 0.1
+  else if(key==='more') heatSetField(which,'more',val===true||val==='true');
+  else if(key==='pace') heatSetField(which,'pace',(val===''||val==null)?'':parsePace(val));                        // m:ss per mile → s/mi
+  else heatSetField(which,key,['band','sun','place','fan'].includes(key)?val:(val===''?'':+val));
+  render();
+};
+window._setHeight=(part,val)=>{
+  const blank=val===''||val==null||!isFinite(+val);
+  if(part==='cm') S.heightCm = blank ? null : +val;                                                                 // not clamped (14.50)
+  else {
+    const cm=S.heightCm, has=cm!=null&&cm!==''&&Number.isFinite(+cm), tin=has?+cm/2.54:0;
+    let ft=has?Math.floor(tin/12):0, inch=has?Math.round((tin-ft*12)*10)/10:0;
+    if(part==='ft') ft=blank?0:+val; else inch=blank?0:+val;
+    S.heightCm = (blank && !has) ? null : +((ft*12 + inch)*2.54).toFixed(1);
+  }
+  render();
+};
+window._goHeight=()=>{ const e=document.querySelector('[data-hk="height.ft"]'); if(e){ try{ e.scrollIntoView({block:'center'}); }catch(x){} e.focus(); } };
 window._setMode=(m)=>{ if(S.uiMode===m||(m!=='basic'&&m!=='advanced')) return; S.uiMode=m; if(m==='advanced'){ active='rider'; recomputeSweatNa(); } render(); window.scrollTo(0,0); };   // back in Advanced: sodium recompute (14.35)
 window._setFitnessMode=(m)=>{ if(S.fitnessMode===m) return; S.fitnessMode=m; if(m==='estimate') applyFitnessEstimate(); render(); };
 /* --- Basic: per-hour fuel loadout --- */
