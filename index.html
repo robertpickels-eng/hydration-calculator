@@ -523,7 +523,8 @@ const S = {
   heatTest:{ band:'warm', ta:23.9, rh:55, sun:'partly', place:'outdoor', fan:'none', more:false, power:null, pace:null },  // test conditions (°C) + effort (W · s/mi)
   heatAct:{ band:'warm', ta:23.9, rh:55, sun:'partly', place:'outdoor', fan:'none', more:false },   // activity start; a live copy of the test until heatActEdited
   heatActEdited:false,
-  heatFinishOn:false, heatFinish:null,         // finish conditions (snapshot of Start when switched on)
+  heatFinishOn:false, heatFinish:null,         // finish conditions (snapshot of Start when first switched on)
+  heatFinishEdited:false,                      // a finish field was changed: off → on keeps the finish
   heatAcclTest:false, heatAcclAct:false,       // heat-acclimatized (10+ days of training in heat)
   heatPowerOn:false                            // lower power in heat (cycling only)
 };
@@ -594,14 +595,16 @@ const HEAT_COND_DEFAULT = { band:'warm', ta:23.9, rh:55, sun:'partly', place:'ou
 const HEAT_NONE_TEST = { band:'warm', ta:23.9, rh:55, sun:'partly', place:'outdoor', fan:'none' };   // answer Nothing: fixed Warm test (14.40)
 const SWEATLOG_HEAT_KEYS = ['band','rh','sun','place','fan','power','pace'];
 // old saves / fresh sessions: derive the answer from sweatMethod once (prepost→pre, manual→full, estimate→none)
+// an unknown method (corrupt or hand-edited save) is a typed rate, as 76598b1's sweatRateLhr reads it (audit P5)
+function sweatAnswerOf(m){ m=m||'prepost'; return SWEAT_ANSWER_OF[m] || 'full'; }
 function sweatAnswerDerive(){
   if(S.sweatAnswer==='pre'||S.sweatAnswer==='full'||S.sweatAnswer==='none') return;
-  const a=SWEAT_ANSWER_OF[S.sweatMethod||'prepost']||'pre';
+  const a=sweatAnswerOf(S.sweatMethod);
   S.sweatAnswer=a;
   if(a==='full') S.sweatFull=S.manualSweat;
   if(a==='none') S.sweatGuess=S.manualSweat;
 }
-function sweatAnswerEff(){ return (S.sweatAnswer==='pre'||S.sweatAnswer==='full'||S.sweatAnswer==='none') ? S.sweatAnswer : (SWEAT_ANSWER_OF[S.sweatMethod||'prepost']||'pre'); }
+function sweatAnswerEff(){ return (S.sweatAnswer==='pre'||S.sweatAnswer==='full'||S.sweatAnswer==='none') ? S.sweatAnswer : sweatAnswerOf(S.sweatMethod); }
 // map the answer onto sweatMethod/manualSweat — on every change of answer and every Advanced render (14.36)
 function applySweatAnswer(){
   sweatAnswerDerive();
@@ -609,7 +612,8 @@ function applySweatAnswer(){
   if(a==='pre'){ S.sweatMethod='prepost'; return; }
   if(a==='full'){
     if(S.sweatFull==null||S.sweatFull===''){   // no Full test rate yet: take the previous rate, then store it
-      S.sweatFull = S.sweatMethod==='manual' ? S.manualSweat : +(sweatRateLhr()||1.0).toFixed(2); }
+      const typed = S.sweatMethod && S.sweatMethod!=='prepost' && S.sweatMethod!=='estimate';   // 'manual' or unknown: keep the typed value as is
+      S.sweatFull = typed ? S.manualSweat : +(sweatRateLhr()||1.0).toFixed(2); }
     S.sweatMethod='manual'; S.manualSweat=S.sweatFull; return;
   }
   S.sweatMethod='estimate'; S.manualSweat=S.sweatGuess;
@@ -652,6 +656,7 @@ function heatSetField(which, key, val){
   if(which!=='heatTest' && which!=='heatAct' && which!=='heatFinish') return;
   if(which==='heatAct' && key!=='more') heatActMaterialize();
   if(which==='heatFinish' && !S.heatFinish) S.heatFinish=Object.assign({}, heatActCond(), {more:false});
+  if(which==='heatFinish' && key!=='more') S.heatFinishEdited=true;
   const o=S[which]||(S[which]=Object.assign({}, which==='heatTest'?HEAT_TEST_DEFAULT:HEAT_COND_DEFAULT));
   const lim=NUM_LIMITS[key];
   if(key==='band'){ o.band=val; const f=HEAT_BAND_FILL[val]; if(f){ o.ta=f.ta; o.rh=f.rh; } return; }
@@ -661,27 +666,37 @@ function heatSetField(which, key, val){
   o[key]=val;
 }
 function heatSetAcclAct(on){ heatActMaterialize(); S.heatAcclAct=!!on; }
-function heatSetFinishOn(on){ on=!!on; if(on && !S.heatFinishOn) S.heatFinish=Object.assign({}, heatActCond(), {more:false}); S.heatFinishOn=on; }
+// the finish is a snapshot of Start the first time it is turned on, and again only while it was never edited, so
+// turning it off and on keeps earlier finish edits
+function heatSetFinishOn(on){ on=!!on; if(on && !S.heatFinishOn && (!S.heatFinish || !S.heatFinishEdited)) S.heatFinish=Object.assign({}, heatActCond(), {more:false}); S.heatFinishOn=on; }
 // band shown highlighted only while the values still match its fill (14.45)
 function heatBandShown(c){ const f=c&&HEAT_BAND_FILL[c.band]; return (f && Math.abs(+c.ta-f.ta)<0.3 && Math.abs(+c.rh-f.rh)<1) ? c.band : null; }
 // fill defaults for every new key, including inside nested objects (14.49); s = the raw saved S (before merge)
+// a saved number that is missing, not finite or out of range takes the default; power and pace become blank,
+// and 0 is blank (audit P4, P5). Only a corrupt or hand-edited save can need this.
+function heatCleanBox(o, def){
+  const ok=(v,k)=>{ const l=NUM_LIMITS[k]; return v!=null && v!=='' && typeof v!=='boolean' && isFinite(+v) && +v>=l[0] && +v<=l[1]; };
+  ['ta','rh'].forEach(k=>{ o[k] = ok(o[k],k) ? +o[k] : def[k]; });
+  ['power','pace'].forEach(k=>{ if(k in o) o[k] = (ok(o[k],k) && +o[k]>0) ? +o[k] : null; });
+  return o;
+}
 function heatLoadDefaults(s){
   s=s||{};
-  S.heatTest=Object.assign({}, HEAT_TEST_DEFAULT, (s.heatTest&&typeof s.heatTest==='object')?s.heatTest:{});
-  S.heatAct=Object.assign({}, HEAT_COND_DEFAULT, (s.heatAct&&typeof s.heatAct==='object')?s.heatAct:{});
-  S.heatFinish=(s.heatFinish&&typeof s.heatFinish==='object') ? Object.assign({}, HEAT_COND_DEFAULT, s.heatFinish) : null;
+  S.heatTest=heatCleanBox(Object.assign({}, HEAT_TEST_DEFAULT, (s.heatTest&&typeof s.heatTest==='object')?s.heatTest:{}), HEAT_TEST_DEFAULT);
+  S.heatAct=heatCleanBox(Object.assign({}, HEAT_COND_DEFAULT, (s.heatAct&&typeof s.heatAct==='object')?s.heatAct:{}), HEAT_COND_DEFAULT);
+  S.heatFinish=(s.heatFinish&&typeof s.heatFinish==='object') ? heatCleanBox(Object.assign({}, HEAT_COND_DEFAULT, s.heatFinish), HEAT_COND_DEFAULT) : null;
   if(s.sweatNaPresetMode===undefined) S.sweatNaPresetMode=S.sweatNaMode;
   if(s.sweatNaPresetVal===undefined) S.sweatNaPresetVal=S.sweatNa;
   if(s.sweatAnswer===undefined){ S.sweatAnswer=null; sweatAnswerDerive(); }
 }
-// Sweat Log "Use" (14.37, 14.38): the answer becomes Pre-post weight; blanks keep the current values
+// Sweat Log "Use" (14.37, 14.38): the answer becomes Pre-post weight; every blank keeps the current value
 function heatUseSweatEntry(r){
   const has=v=>v!=null && v!=='' && isFinite(+v);
   const clamp=(k,v)=>{ const l=NUM_LIMITS[k]; return l?Math.min(l[1],Math.max(l[0],+v)):+v; };
   if(has(r.pre)) S.pre=clamp('pre',r.pre);
   if(has(r.post)) S.post=clamp('post',r.post);
   if(has(r.hrs) && +r.hrs>0) S.time=clamp('time',r.hrs);
-  S.testDrankOz = has(r.oz) ? clamp('testDrankOz',r.oz) : 0;
+  if(has(r.oz)) S.testDrankOz=clamp('testDrankOz',r.oz);                  // a blank keeps the current value, drank included (audit P10)
   const T=S.heatTest=Object.assign({}, HEAT_TEST_DEFAULT, S.heatTest||{});
   if(r.band && HEAT_BAND_FILL[r.band]) T.band=r.band;
   if(has(r.temp)) T.ta=clamp('ta', +(((+r.temp)-32)*5/9).toFixed(1));     // log temp is °F; stored °C to 0.1
