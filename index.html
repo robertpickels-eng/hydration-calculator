@@ -1039,6 +1039,174 @@ function clampIntensityIdx(){ const n=intensities().length;
   S.eventZone=Math.max(0,Math.min(S.eventZone,n-1));
   S.segZones=S.segZones.map(z=>Math.max(0,Math.min(z,n-1))); }
 
+// HEAT MODEL START
+/* ---- Heat model (heat spec v3.1, sections 4, 6-9). Pure functions: no app state, every constant defined here. ----
+   Required sweat rate from a heat balance on bare skin: Ereq = M − W − (R + C) − (Cres + Eres) + Solar,
+   Emax = A_D·(Ps(Tsk) − Pa)·LR·hc, w = Ereq/Emax, η = 1 − w²/2, S = Ereq·3600/λ/η (L/h). */
+const HEAT_C = {
+  DUBOIS:0.007184,        // A_D = 0.007184·kg^0.425·cm^0.725 m² (Du Bois 1916 p.870)
+  LAMBDA:2426,            // J/g, latent heat of sweat evaporation
+  EPS:0.95, SIGMA:5.67e-8,// skin emissivity · Stefan-Boltzmann (W/m²/K⁴)
+  ICL:0.056,              // m²·K/W clothing insulation (Lotens 1989)
+  LR:16.5,                // K/kPa Lewis relation
+  SOLAR_K:0.192,          // Solar = 0.192·gSL·A_D (Gonzalez 2012 text p.1305: 0.835 × 0.23)
+  GLY_SHIFT:0.25,         // +25% glycogen draw at full ramp (Jentjens 2002; Febbraio 1994)
+  ACCL:1.14,              // +14% sweat rate when acclimatized (Cheung 1998; Nielsen 1993)
+};
+const HEAT_GSL = { full:800, partly:500, overcast:250, night:0 };   // W/m² (Otani 2016 p.771); indoors 0
+const HEAT_FAN_V = { none:0.2, fan:4.0, strong:5.6 };                // m/s indoors (Saunders 2005; Ravanelli 2015; Tatterson 2000)
+const HEAT_AR = { cycling:0.70, running:0.72 };                      // Ar/A_D
+function heatAD(kg, cm){ return HEAT_C.DUBOIS*Math.pow(kg,0.425)*Math.pow(cm,0.725); }
+function heatPs(T){ return Math.exp(18.6686 - 4030.183/(T + 235))/7.50062; }   // kPa (Gonzalez 2009 Eq 13)
+// {M, W (watts), kg, cm, ta (°C), rh (%), gSL (W/m²), v (m/s), ar} → {Ereq, Emax, w, eta, S (L/h), ok}
+function heatEval(p){
+  const C=HEAT_C, AD=heatAD(p.kg, p.cm), ta=p.ta;
+  const Pa=p.rh/100*heatPs(ta);                                   // kPa
+  const Tsk=0.215*ta + 26.6;                                      // °C
+  const hc=8.3*Math.pow(Math.max(0,p.v),0.6);
+  const hr=4*C.EPS*C.SIGMA*p.ar*Math.pow((Tsk + ta)/2 + 273.15, 3);
+  const RC=AD*(Tsk - ta)/(C.ICL + 1/(hc + hr));                   // R + C (W)
+  const Cres=1.52e-3*p.M*(28.6 + 0.641*Pa - 0.885*ta), Eres=1.27e-3*p.M*(59.3 + 0.53*ta - 11.63*Pa);
+  const Solar=C.SOLAR_K*p.gSL*AD;
+  const Ereq=p.M - p.W - RC - (Cres + Eres) + Solar;
+  const Emax=AD*(heatPs(Tsk) - Pa)*C.LR*hc;
+  const w=Ereq/Emax;
+  const ok=Number.isFinite(Ereq) && Number.isFinite(Emax) && Ereq>0 && Emax>0 && w<=1;
+  const eta=ok ? 1 - w*w/2 : null;
+  return { Ereq, Emax, w, eta, S: ok ? Ereq*3600/C.LAMBDA/eta/1000 : null, ok };
+}
+function heatRamp(T){ return T<=20 ? 0 : T>=32 ? 1 : (T - 20)/12; }            // fuel-mix ramp, 20 → 32 °C (judgment)
+const HEAT_LOSS_PTS = [[25,0],[32,0.065],[35,0.065],[40,0.17]];               // power loss vs air °C, linear between (judgment)
+function heatLoss(T){
+  const P=HEAT_LOSS_PTS; if(T<=P[0][0]) return P[0][1]; if(T>=P[P.length-1][0]) return P[P.length-1][1];
+  for(let i=1;i<P.length;i++){ if(T<=P[i][0]){ const a=P[i-1], b=P[i]; return a[1] + (b[1] - a[1])*(T - a[0])/(b[0] - a[0]); } }
+  return P[P.length-1][1];
+}
+function heatAccl(test, act){ return (act && !test) ? HEAT_C.ACCL : (test && !act) ? 1/HEAT_C.ACCL : 1; }
+// one course step's aerobic carbohydrate after the heat shift (section 7): endogenous draw +25%·r, exogenous at the heat ceiling
+function heatStepShift(o){
+  const endoCool=Math.max(0, o.aeroCho - o.exoCool);
+  return { endoCool, aeroCho: Math.min((1 + HEAT_C.GLY_SHIFT*o.r)*endoCool + o.exoHeat, o.aeroKcal) };
+}
+function heatCeil(EXO_OX_MAX, cut, r){ return EXO_OX_MAX*(1 - cut*r); }      // section 8
+// conditions at a fraction of the activity: ta, rh linear start → finish; sun, place, fan switch at 0.5 (judgment)
+function heatBlend(start, finish, frac){
+  if(!finish) return Object.assign({}, start);
+  const f=Math.max(0, Math.min(1, +frac||0)), late=f>=0.5;
+  return { band: late?finish.band:start.band, ta: +start.ta + (+finish.ta - +start.ta)*f, rh: +start.rh + (+finish.rh - +start.rh)*f,
+    sun: late?finish.sun:start.sun, place: late?finish.place:start.place, fan: late?finish.fan:start.fan };
+}
+// HEAT MODEL END
+
+/* ---- Heat adjustment: the app side (gating, inputs to the model, sweat rate over the activity) ----
+   Heat is ACTIVE only in Advanced, with "Adjust for heat" on and a height of 100-230 cm (spec 1). When it is not
+   active every function here returns the unadjusted value through the original expression, so every number is
+   unchanged (T0). */
+const HEAT_EFFORT_SCALES = true;   // spec 15, open for Rob: true = the test effort enters the test evaluation (Settled 1B); false = effort always cancels
+const HEAT_CEIL_CUT = 0;           // ceiling cut at full ramp: ruled 0.10 (Settled R5 4A), waits for one full-text paper beside Jentjens 2002 (Reynolds 2024, Mougin 2025 or Podlogar 2026)
+const HEAT_STR = { notAdjusted:'TODO', addHeight:'TODO', actRate:'TODO' };   // on-screen wording: phase 2 fills these from the approved proposal
+function heightValid(){ const h=S.heightCm; return h!=null && h!=='' && Number.isFinite(+h) && +h>=100 && +h<=230; }
+function heatActive(){ return S.uiMode==='advanced' && S.heatOn===true && heightValid(); }
+function heatNeedsHeight(){ return S.uiMode==='advanced' && S.heatOn===true && !heightValid(); }
+function heatPowerActive(){ return heatActive() && S.heatPowerOn===true && !isRun(); }
+// conditions at a fraction (0 start → 1 finish) of the activity
+function heatCondAtFrac(f){ return heatBlend(heatActCond(), S.heatFinishOn===true ? heatFinishCond() : null, f); }
+// air temperature as a function of the fraction — the same blend, built once for the hot loops
+function heatTaFn(){
+  const a=+heatActCond().ta, fin=S.heatFinishOn===true ? +heatFinishCond().ta : a;
+  return f=>{ f=Math.max(0, Math.min(1, +f||0)); return a + (fin - a)*f; };
+}
+// model inputs for one evaluation: conditions + effort {M (W), W (W), vOut (m/s, the effort's outdoor air speed)}
+function heatInputs(cond, eff){
+  const indoor=cond.place==='indoor';
+  return { M:eff.M, W:eff.W, kg:bodyKg(), cm:+S.heightCm, ta:+cond.ta, rh:+cond.rh,
+    gSL: indoor ? 0 : (HEAT_GSL[cond.sun] ?? HEAT_GSL.partly),
+    v: indoor ? (HEAT_FAN_V[cond.fan] ?? HEAT_FAN_V.none) : eff.vOut, ar: HEAT_AR[isRun()?'running':'cycling'] };
+}
+// effort from an intensity item ({watts} cycling, {speed m/min} running): M from the app's own energy model
+function heatEffortOf(item, grade, vOut){
+  const M=imetrics(item, grade).kcalHr*4184/3600;
+  if(isRun()) return { M, W:0, vOut: vOut!=null ? vOut : (item.speed||0)/60 };
+  return { M, W:item.watts||0, vOut: vOut!=null ? vOut : cycSpeedMS(item.watts||0, 0) };
+}
+// the test's own effort (power cycling, pace running), or null when blank / not scaling (then effort cancels: spec 3)
+function heatTestEffort(){
+  if(!HEAT_EFFORT_SCALES || sweatAnswerEff()==='none') return null;
+  const T=S.heatTest||{};
+  if(isRun()){ const p=T.pace; if(p==null||p===''||!(+p>0)) return null; const sp=paceToSpeed(+p); return heatEffortOf({speed:sp}, 0, sp/60); }
+  const w=T.power; if(w==null||w===''||!(+w>0)) return null; return heatEffortOf({watts:+w}, 0);
+}
+// manual mode: the 30-min segment at time t (h); past the end, the last one. Watts reduced at its midpoint when power loss is on.
+function heatManualItem(s, hrs, taFn){
+  const it=intItem(s.zi);
+  if(!heatPowerActive()) return it;
+  const L=heatLoss(taFn((s.idx*SEG_LEN + s.dur/2)/hrs));
+  return Object.assign({}, it, { watts:(it.watts||0)*(1 - L) });
+}
+// the activity at time t (h): {frac, eff}. Course mode samples per 30-min block (spec 14.46), manual per segment.
+function heatMoment(t){
+  t=Math.max(0, +t||0);
+  const ct=S._ct;
+  if(S.activityMode==='course' && ct && ct.blocks && ct.blocks.length){
+    const B=ct.blocks, b=Math.min(B.length-1, Math.floor(t/SEG_LEN)), blk=B[b], bd=ct.bounds||[];
+    const pr=S.course.profile, totalD=pr[pr.length-1][0]||1;
+    const d0=b>0 ? (bd[b-1]!=null ? bd[b-1] : 0) : 0, d1=b<bd.length ? bd[b] : (ct.distM||totalD);
+    const past=t>=ct.hours, frac=past ? 1 : ((d0 + d1)/2)/totalD;    // block midpoint distance ÷ course distance
+    const vOut=blk.dur>0 ? (d1 - d0)/(blk.dur*3600) : 0;              // block ground speed (judgment: block mean into v^0.6)
+    const item=isRun() ? {speed:blk.iv} : {watts:blk.iv};            // walk's block intensity (already the reduced power when on)
+    return { frac, eff: heatEffortOf(item, 0, vOut) };
+  }
+  const hrs=Math.max(0.001,+S.eventHours||0), segs=segments(), s=segs[Math.min(segs.length-1, Math.floor(t/SEG_LEN))];
+  const item=heatManualItem(s, hrs, heatTaFn());
+  return { frac: Math.min(1, t/hrs), eff: heatEffortOf(item, s.grade) };
+}
+// sweat factor and acclimatization at time t (spec 5). Out of range (test or this moment): 1 and 1.
+function heatFactorAt(t){
+  if(!heatActive()) return { factor:1, accl:1, adjusted:false };
+  const m=heatMoment(t), cond=heatCondAtFrac(m.frac);
+  const te=heatTestEffort();
+  const test=heatEval(heatInputs(heatTestCond(), te || m.eff));     // blank test effort: the activity's M, W, v (effort cancels)
+  const act=heatEval(heatInputs(cond, m.eff));
+  if(!test.ok || !act.ok) return { factor:1, accl:1, adjusted:false, testOk:test.ok, actOk:act.ok };
+  return { factor: act.S/test.S, accl: heatAccl(heatTestAccl(), heatActAccl()), adjusted:true, testOk:true, actOk:true };
+}
+// activity sweat rate (L/hr) at time t (h): base × factor × accl
+function sweatRateAt(t){
+  const base=sweatRateLhr();
+  if(!heatActive()) return base;
+  const f=heatFactorAt(t); return base*f.factor*f.accl;
+}
+// the moments the activity is evaluated at: course blocks or manual segments, each {t (midpoint, h), dur (h)}
+function heatMoments(){
+  const ct=S._ct;
+  if(S.activityMode==='course' && ct && ct.blocks && ct.blocks.length){
+    let t0=0; return ct.blocks.map(b=>{ const m={ t:t0 + b.dur/2, dur:b.dur }; t0+=b.dur; return m; });
+  }
+  return segments().map(s=>({ t:s.idx*SEG_LEN + s.dur/2, dur:s.dur }));
+}
+// time-weighted mean activity sweat rate (L/hr)
+function sweatRateMean(){
+  if(!heatActive()) return sweatRateLhr();
+  let sum=0, T=0; heatMoments().forEach(m=>{ sum+=sweatRateAt(m.t)*m.dur; T+=m.dur; });
+  return T>0 ? sum/T : sweatRateLhr();
+}
+// midpoint of hour h (1-based) of the activity, clipped to its end for the last part-hour; past the end, the hour's own midpoint
+function heatHourMid(h){ const end=+S.eventHours||0, s=h-1; return s<end ? (s + Math.min(h, end))/2 : h - 0.5; }
+// what the Result line shows (strings are phase-2 placeholders): off | needHeight | notAdjusted | partial | ok
+function heatStatus(){
+  if(!(S.uiMode==='advanced' && S.heatOn===true)) return { status:'off' };
+  if(!heightValid()) return { status:'needHeight', text:HEAT_STR.addHeight };
+  const fs=heatMoments().map(m=>heatFactorAt(m.t)), n=fs.filter(f=>f.adjusted).length;
+  if(n===0) return { status:'notAdjusted', text:HEAT_STR.notAdjusted };
+  return { status: n<fs.length ? 'partial' : 'ok', rate: sweatRateMean() };
+}
+// reference tables at activity-start temperature (spec 7): aerobic CHO +25%·r, capped at kcal; Fat = Cal − CHO
+function heatRefMetrics(m){
+  if(!heatActive()) return m;
+  const r=heatRamp(+heatCondAtFrac(0).ta), cho=Math.min(m.choKcalHr*(1 + HEAT_C.GLY_SHIFT*r), m.kcalHr);
+  return Object.assign({}, m, { choKcalHr:cho, fatKcalHr:m.kcalHr - cho });
+}
+
 /* ---- 30-minute ride segments ---- */
 const SEG_LEN = 0.5;                                    // hours per segment
 function segCount(){ return Math.max(1, Math.ceil((+S.eventHours||0)/SEG_LEN)); }
