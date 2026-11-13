@@ -1033,7 +1033,7 @@ function eventBaseIt(){
   return {...it, watts:(it.watts||0)*f};
 }
 // hours at an intensity (level) before stored glycogen is exhausted with NO fuel
-function bonkHours(i){ const m=intMetricsByIdx(i,0); return m.choKcalHr>0 ? glycogenKcal()/m.choKcalHr : 99; }
+function bonkHours(i){ const m=heatRefMetrics(intMetricsByIdx(i,0)); return m.choKcalHr>0 ? glycogenKcal()/m.choKcalHr : 99; }
 // keep the chosen intensity indices valid when the list length changes (mode/row edits)
 function clampIntensityIdx(){ const n=intensities().length;
   S.eventZone=Math.max(0,Math.min(S.eventZone,n-1));
@@ -1247,10 +1247,14 @@ function eventTotalsFor(ctIn, hoursIn, heat){
     // cycling: walk the plan through the durability model in 1-min steps so the efficiency drift (kcal per watt
     // rising with fatigue, GE_DRIFT_K) applies here too; running has no drift term
     const R = isRun()? null : makeReserve(0);
+    const heatTa = heat ? heatTaFn() : null;              // heat (spec 7): air temperature at each segment's midpoint
     segs.forEach(s=>{ const m=intMetricsByIdx(s.zi, s.grade);
       let geSum=0, n=Math.max(1,Math.round(s.dur*60));
       if(R){ const w=intItem(s.zi).watts||0; for(let k=0;k<n;k++){ geSum+=1+GE_DRIFT_K*R.fat(); R.advance(w,s.dur*3600/n); } }
       const geM = R? geSum/n : 1;
+      if(heat){                                            // aerobic shift only: CHO × (1 + 0.25·r), capped at kcal; fat = the rest
+        const r=heatRamp(heatTa((s.idx*SEG_LEN + s.dur/2)/hrs)), sk=m.kcalHr*geM*s.dur, sc=Math.min(m.choKcalHr*geM*s.dur*(1 + HEAT_C.GLY_SHIFT*r), sk);
+        kcal+=sk; choKcal+=sc; fatKcal+=sk-sc; return; }
       kcal+=m.kcalHr*geM*s.dur; choKcal+=m.choKcalHr*geM*s.dur; fatKcal+=m.fatKcalHr*geM*s.dur; });
   }
   const gly=glycogenKcal(), usableGly=gly*(1-S.reservePct/100);
@@ -1695,6 +1699,9 @@ function courseTime(opts){
   // glycogen fraction below which effort is held at top-of-Z2 until it rebuilds back above the floor (hysteresis,
   // mirroring the W′ recovery cap) — a real athlete who runs the tank low must soft-pedal to recover.
   const choOxKcalHr = Math.min(+opts.choGperHr||0, carbCap(), EXO_OX_MAX)*CHO_KCAL_G_BURN;   // ingested ≠ oxidised above ~90 g/hr sustained
+  // HEAT (spec 7, 8, 14.46): per walk step at the step's midpoint air temperature — glycogen draw +25%·ramp, ceiling cut·ramp.
+  // opts.noHeat = the unadjusted pass (Debrief). Off unless heat is active, so every other number is unchanged.
+  const heat = !opts.noHeat && heatActive(), heatTa = heat ? heatTaFn() : null;
   const glyFloor = +opts.glyCapFrac||0;
   const durFuelG = opts.durFuelG!=null ? +opts.durFuelG : (+opts.choGperHr||0);   // carbs eaten per hour — protects CP from fading
   // W′ RECOVERY MODE (blow-up → recover, not grind at CP): once the reserve empties, cap effort at top-of-Z2
@@ -1761,9 +1768,18 @@ function courseTime(opts){
           const hvyK = (iv>Z2cap && iv<=CPn) ? SC_HEAVY*em.kcalHr*geM*hrStep : 0;   // heavy domain: levels off, split by RQ
           slowK = sevK+hvyK; slowCho = sevK + (em.kcalHr>0 ? hvyK*em.choKcalHr/em.kcalHr : 0);
         }
-        const stepKcal=em.kcalHr*geM*hrStep+anaerK+slowK, stepCho=em.choKcalHr*geM*hrStep+anaerK+slowCho, stepFat=stepKcal-stepCho;
+        let stepKcal=em.kcalHr*geM*hrStep+anaerK+slowK, stepCho=em.choKcalHr*geM*hrStep+anaerK+slowCho, stepFat=stepKcal-stepCho;
+        let oxStep=null;                                     // heat: exogenous oxidation this step at the heat ceiling
+        if(heat){
+          const r=heatRamp(heatTa(((pr[i-1][0]+pr[i][0])/2)/totalD));   // airC at the step's midpoint distance
+          const aeroKcal=em.kcalHr*geM*hrStep, aeroCho=em.choKcalHr*geM*hrStep;
+          const choOxHeat=Math.min(+opts.choGperHr||0, carbCap(), heatCeil(EXO_OX_MAX, HEAT_CEIL_CUT, r))*CHO_KCAL_G_BURN;
+          const sh=heatStepShift({ aeroCho, aeroKcal, exoCool:Math.min(choOxKcalHr*hrStep, aeroCho), exoHeat:Math.min(choOxHeat*hrStep, aeroCho), r });
+          stepCho=sh.aeroCho+anaerK+slowCho; stepFat=stepKcal-stepCho;   // anaerobic + slow-component CHO not shifted (judgment)
+          oxStep=choOxHeat*hrStep;
+        }
         cumCho+=stepCho;
-        cumOx=Math.min(cumOx+choOxKcalHr*hrStep, cumCho);  // exogenous CHO oxidised this step (kcal), capped at what's burned
+        cumOx=Math.min(cumOx+(oxStep!=null?oxStep:choOxKcalHr*hrStep), cumCho);  // exogenous CHO oxidised this step (kcal), capped at what's burned
         if(glyBlown) glyCapSec+=dt;
         if(glyCapHit) glyCapEffSec+=dt;
         const glyRem=Math.max(0,gly0-cumCho+cumOx);        // endogenous glycogen spared 1:1 by exogenous CHO
@@ -3133,7 +3149,7 @@ function viewCaloric(){
     ? `<div class="scroll" style="margin-top:8px"><table class="tc">
         <thead><tr><th>${run?'Pace':'Watts'}</th><th>${pctLbl}</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
           <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th><th></th></tr></thead>
-        <tbody>${ints.map((it,i)=>{const m=imetrics(it,0), b=bonkHours(i);
+        <tbody>${ints.map((it,i)=>{const m=heatRefMetrics(imetrics(it,0)), b=bonkHours(i);
           const pctV = run ? (vThreshold()>0?it.speed/vThreshold()*100:0) : (S.ftp>0?it.watts/S.ftp*100:0);
           const inCell = run
             ? `<td><input type="text" value="${paceFmt(it.pace)}" style="width:66px;text-align:center" onchange="window._setPace(${i},this.value)" title="mm:ss per mile"> <span class="muted" style="font-size:10px">/mi</span></td>`
@@ -3149,7 +3165,7 @@ function viewCaloric(){
     : `<div class="scroll" style="margin-top:8px"><table class="tc">
         <thead><tr><th>Zone</th><th>${pctLbl}</th><th>${run?'Pace':'Watts'}</th><th>VO₂ (L/min)</th><th>Cal/hr</th>
           <th>CHO (kcal/hr)</th><th>CHO (g/hr)</th><th>Fat (kcal/hr)</th><th>Bonk (hr)</th></tr></thead>
-        <tbody>${ints.map((z,i)=>{const m=imetrics(z,0), b=bonkHours(i);return `<tr>
+        <tbody>${ints.map((z,i)=>{const m=heatRefMetrics(imetrics(z,0)), b=bonkHours(i);return `<tr>
           <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.label}</span></td>
           <td>${z.lo!=null?`${z.lo}–${z.hi}%`:(z.rng||z.pct+'%')}</td>
           <td>${run?(z.paceLo!=null?`${paceFmt(z.paceLo)}–${paceFmt(z.paceHi)}`:paceFmt(z.pace)):(z.wLo!=null?(z.rng&&z.rng[0]==='>'?`${Math.round(z.wLo)}+ W`:z.rng&&z.rng[0]==='≤'?`≤${Math.round(z.wHi)}W`:`${Math.round(z.wLo)}–${Math.round(z.wHi)}W`):Math.round(z.watts)+'W')}</td>
@@ -3235,7 +3251,7 @@ function viewCaloric(){
       <div class="scroll" style="margin-top:8px"><table class="tc zxt">
         <thead><tr><th style="text-align:left">${wl?(run?'Pace':'Workload'):'Zone'}</th><th>CHO burn (g/hr)</th>
           ${DURS.map(d=>`<th>${d} hr</th>`).join('')}</tr></thead>
-        <tbody>${ints.map((z,i)=>{const m=imetrics(z,0); const burnG=m.choKcalHr/CHO_KCAL_G_BURN; return `<tr>
+        <tbody>${ints.map((z,i)=>{const m=heatRefMetrics(imetrics(z,0)); const burnG=m.choKcalHr/CHO_KCAL_G_BURN; return `<tr>
           <td style="text-align:left"><span class="zn-label ${z.cls}" style="font-weight:800;padding:2px 8px;border-radius:4px">${z.pct!=null?z.label:((run?'P':'WL')+' '+(i+1))}</span> <span class="muted" style="font-size:10px">${intLbl(z)}</span></td>
           <td style="text-align:center">${fmt(burnG,0)}</td>
           ${DURS.map(d=>{const g=suppG(m.choKcalHr,d);return `<td class="sc ${cls(g)}">${cell(g)}</td>`;}).join('')}
